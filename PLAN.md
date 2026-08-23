@@ -292,3 +292,66 @@ test where the seam was testable.
 - Code reloading is disabled: Phoenix 1.8's CodeReloader cannot survive a
   config change or a mid-edit compile error, and a poisoned VM is worse than an
   explicit restart. 95 tests.
+
+## 22. Conclusion — where the two reinforce, and where they collide
+
+The PoC set out to answer one question (§1): when the paper's precise model —
+revertible effect + reactive coeffect — is implemented on OTP's coarse but
+strong process isolation/supervision, where do the two **reinforce** and where
+do they **collide**? After milestones 1–11, the answer is concrete.
+
+### Where they reinforce
+
+1. **Commutativity for free.** Recovery exactness presupposes that effects are
+   pairwise-independent so inverses can run in LIFO order. OTP process isolation
+   *is* that independence: separate processes share no state, so the premise the
+   paper has to *assume* is *given* by the substrate. The accumulator stays a
+   list of closures; nothing in it has to prove non-interference.
+2. **Supervision as the coarse safety net over the fine-grained accumulator.**
+   The paper's recoverable-effect machinery and OTP's restart machinery are not
+   the same layer and do not fight: the fiber's inverse list is the *semantic*
+   rollback (exact, per-fiber), while `DynamicSupervisor` + backoff re-injection
+   is the *availability* safety net (coarse, best-effort). A crash unwinds
+   through the guard, then a fresh fiber is re-injected — the two overlap rather
+   than collide.
+3. **The guard maps cleanly to monitors.** The L-Unload guard ("a provider
+   withdraws only after every consumer is deactivated") is a dependency order
+   that OTP's monitor/`DOWN` primitive expresses directly; the pending-unload
+   machine rides `Process.monitor` and needs no extra bookkeeping.
+
+### Where they collide
+
+1. **The unit of composition does not match the unit of isolation.** The paper
+   tracks effects *inside* a fiber (an internal accumulator), but OTP's atomic
+   unit is the *process*; a fiber's in-process accumulator is torn down by a
+   kill before it can run its inverses, so "recovery exactness on the crash
+   path" is only as good as the ordering that survives. The PoC had to add the
+   committed view + ordered shutdown (milestone 2-②) precisely to bridge this —
+   evidence of the collision, resolved by more machinery.
+2. **Synchronous `call` reentrancy vs the async ack protocol.** The paper's
+   activation/deactivation is asynchronous with acks; OTP's `GenServer.call` is
+   synchronous. The unload path's `:gen_statem.call` into a consumer can
+   re-enter the context and deadlock (REVIEW H1). The substrate works around it
+   by making withdrawal message-driven — the collision is a recurring trap, not
+   a one-off.
+3. **Fine-grained coeffect reactivity has no native substrate.** The paper
+   notifies dependents of *arbitrary context keys* changing; OTP gives process
+   exit signals but not key-level change notifications, so the reactive-coeffect
+   layer is hand-built (subscription streams, `activate`/`deactivate` messages)
+   on top of the substrate — a genuinely new mechanism, not a reuse of OTP.
+4. **The HMR/reload boundary.** The paper's transactional reload presumes a
+   runtime that can swap code atomically; the BEAM can (code server), but the
+   *web* layer around it (Phoenix's code reloader) cannot survive a config
+   change or a mid-edit error — milestone 11 disabled it for stability. The
+   boundary between "BEAM-native reload" and "framework reload" is where the
+   two paradigms stop cooperating.
+
+### Bottom line
+
+The two reinforce at the **effect/rollback** layer (isolation gives the
+independence the paper needs) and collide at the **lifecycle/notification**
+layer (the fiber is a finer unit than a process; synchronous calls and
+key-level reactivity have to be hand-built). The PoC's contribution is making
+that boundary explicit: revertible effects port cleanly onto OTP, reactive
+coeffects and the guard do not — they are the parts that had to be invented
+afresh.

@@ -5,7 +5,8 @@ Paradigm for Spatiotemporal Composability) on Elixir/OTP: revertible effects,
 reactive coeffects, and the L-Unload guard.
 
 Design and test list: [PLAN.md](PLAN.md). Review history and fix plan:
-[REVIEW.md](REVIEW.md).
+[REVIEW.md](REVIEW.md). The answer to the PoC's core question (where revertible
+effects and OTP isolation reinforce vs collide): [PLAN.md §22](PLAN.md#22-conclusion--where-the-two-reinforce-and-where-they-collide).
 
 ## Running
 
