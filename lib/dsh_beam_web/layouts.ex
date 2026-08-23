@@ -142,6 +142,60 @@ defmodule DshBeamWeb.Layouts do
           .composer input { flex: 1; }
           .composer-status { margin: 4px 0 0; font-size: 12px; }
 
+          /* Conversation entries (reference ui-conversation chat + ui-tool). */
+          .chat-flow { display: flex; flex-direction: column; gap: 10px; }
+          .msg-user { display: flex; justify-content: flex-end; }
+          .bubble {
+            max-width: min(525px, 82%);
+            background: var(--dsw-specific-bubble);
+            border-radius: 22px; padding: 10px 16px;
+            font-size: 16px; line-height: 24px; color: var(--dsw-alias-label-primary);
+            white-space: pre-wrap; overflow-wrap: anywhere;
+          }
+          .msg-assistant { color: var(--dsw-alias-label-primary); font-size: 15px; line-height: 24px; }
+          .markdown > :first-child { margin-top: 0; }
+          .markdown > :last-child { margin-bottom: 0; }
+          .markdown h1, .markdown h2, .markdown h3 { font-size: 15px; margin: 12px 0 4px; color: var(--dsw-alias-label-primary); }
+          .markdown p { margin: 6px 0; }
+          .markdown ul, .markdown ol { margin: 6px 0; padding-left: 20px; }
+          .markdown li { margin: 2px 0; }
+          .markdown code {
+            background: var(--dsw-static-neutral-bluish-900, #0c0f14);
+            padding: 1px 5px; border-radius: 4px;
+          }
+          .markdown pre {
+            background: var(--dsw-static-neutral-bluish-900, #0c0f14);
+            border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px;
+            padding: 10px; overflow-x: auto;
+          }
+          .markdown pre code { background: transparent; padding: 0; }
+          .markdown blockquote {
+            margin: 6px 0; padding: 2px 12px;
+            border-left: 3px solid var(--dsw-alias-border-l3); color: var(--dsw-alias-label-secondary);
+          }
+          .tool-card {
+            border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px;
+            padding: 8px 12px; background: var(--dsw-alias-bg-layer-1, #1a1f27);
+          }
+          .tool-label {
+            display: block; margin-bottom: 4px;
+            color: var(--dsw-alias-label-secondary); font-size: 11px; font-weight: 600;
+            letter-spacing: .03em; text-transform: uppercase;
+          }
+          .tool-command { font-family: var(--ds-font-family-code); font-size: 13px; word-break: break-all; }
+          .tool-result {
+            border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px;
+            background: var(--dsw-static-neutral-bluish-900, #0c0f14); overflow: hidden;
+          }
+          .tool-result pre {
+            margin: 0; padding: 8px 12px; overflow-x: auto;
+            font-family: var(--ds-font-family-code); font-size: 12px;
+            color: var(--dsw-alias-label-primary); white-space: pre-wrap; word-break: break-all;
+          }
+          .msg-error, .msg-event, .msg-busy { color: var(--dsw-static-red-400); font-size: 13px; }
+          .msg-busy { color: var(--dsw-alias-label-secondary); }
+          .trajectory-turn { border-top: 1px solid var(--dsw-alias-border-l2); padding: 8px 0; }
+
           /* Settings modal overlay. */
           .settings-overlay {
             position: fixed; inset: 0; z-index: 100;

@@ -744,17 +744,33 @@ defmodule DshBeamWeb.ConsoleLive do
     end
   end
 
-  defp chat_entry(%{"role" => "user", "content" => content}), do: {"user", content}
-  defp chat_entry(%{"role" => "assistant", "content" => content}), do: {"assistant", content}
+  defp chat_entry(%{"role" => "user", "content" => content}),
+    do: %{kind: :user, content: content}
+
+  defp chat_entry(%{"role" => "assistant", "content" => content}),
+    do: %{kind: :assistant, content: content}
 
   defp chat_entry(%{"role" => "tool_call", "name" => name, "arguments" => args}),
-    do: {"tool_call", "#{name} #{inspect(args)}"}
+    do: %{kind: :tool_call, name: name, command: tool_command(name, args)}
 
   defp chat_entry(%{"role" => "tool_result", "name" => name, "content" => content}),
-    do: {"tool_result", "#{name} -> #{content}"}
+    do: %{kind: :tool_result, name: name, content: content}
 
-  defp chat_entry(%{"role" => "error", "content" => content}), do: {"error", content}
-  defp chat_entry(other), do: {"event", inspect(other)}
+  defp chat_entry(%{"role" => "error", "content" => content}),
+    do: %{kind: :error, content: content}
+
+  defp chat_entry(other), do: %{kind: :event, content: inspect(other)}
+
+  # The readable invocation of a tool call: the bash command verbatim, and any
+  # other tool's arguments as a compact term (instead of the raw map inspect).
+  defp tool_command(_name, args) when is_map(args) do
+    case Map.get(args, "command") do
+      command when is_binary(command) -> command
+      _ -> inspect(args)
+    end
+  end
+
+  defp tool_command(_name, args), do: inspect(args)
 
   # The trajectory is the same session log grouped by turn: a "user" event opens
   # a turn; the tool calls, results, and the answer that follow belong to it.

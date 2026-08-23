@@ -28,13 +28,13 @@ defmodule DshBeam.Ui.Panel.Trajectory do
           <p class="muted">no turns yet — the chat pane appends them</p>
         <% end %>
         <%= for {turn, index} <- Enum.with_index(@trajectory) do %>
-          <div style="border-top:1px solid #20262f; padding:6px 0">
+          <div class="trajectory-turn">
             <strong class="muted">turn <%= index + 1 %></strong>
-            <ul>
-              <%= for {role, content} <- turn do %>
-                <li><strong><%= role %></strong>: <code><%= content %></code></li>
+            <div class="chat-flow">
+              <%= for entry <- turn do %>
+                <DshBeam.Ui.ChatEntry.render entry={entry} />
               <% end %>
-            </ul>
+            </div>
           </div>
         <% end %>
       </div>

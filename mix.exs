@@ -34,6 +34,9 @@ defmodule DshBeam.MixProject do
       {:phoenix_live_view, "~> 1.0"},
       {:phoenix_html, "~> 4.1"},
       {:plug_cowboy, "~> 2.7"},
+      # Markdown → HTML for assistant chat messages (the reference renders
+      # assistant output as markdown too).
+      {:earmark, "~> 1.4"},
       # LiveViewTest's DOM backend (LiveView 1.2). Pinned to 0.1.11: 0.1.12
       # ships no precompiled NIF for aarch64-apple-darwin and this machine
       # has no cmake for a source build.

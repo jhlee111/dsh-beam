@@ -104,17 +104,17 @@ defmodule DshBeam.Ui.Panel do
     def panel(assigns) do
       ~H"""
       <div class="chat-view">
-        <ul>
-          <%= for {role, content} <- @chat_log do %>
-            <li><strong><%= role %></strong>: <code><%= content %></code></li>
+        <div class="chat-flow">
+          <%= for entry <- @chat_log do %>
+            <DshBeam.Ui.ChatEntry.render entry={entry} />
           <% end %>
           <%= if @chat_error do %>
-            <li><strong>error</strong>: <code><%= @chat_error %></code></li>
+            <div class="msg-error"><code><%= @chat_error %></code></div>
           <% end %>
           <%= if @chat_busy do %>
-            <li><strong>…</strong>: <code>thinking (model round-trip)</code></li>
+            <div class="msg-busy muted">thinking (model round-trip)…</div>
           <% end %>
-        </ul>
+        </div>
       </div>
       """
     end

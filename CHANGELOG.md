@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Conversation rendering
+
+- Chat and Trajectory now render the reference's conversation shape (borrowed
+  as LiveView components, not web components): a right-aligned user bubble,
+  assistant markdown (Earmark), and terminal-style tool cards showing the
+  `bash` command verbatim instead of the raw arguments map, with the tool
+  output in a terminal block. Shared via `DshBeam.Ui.ChatEntry`.
+
 ### Fixes
 
 - The Settings modal no longer closes when clicking inside the panel (e.g. the
