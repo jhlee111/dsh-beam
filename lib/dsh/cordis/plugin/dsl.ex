@@ -35,6 +35,21 @@ defmodule DshBeam.Plugin.Dsl do
     ]
   end
 
+  defmodule Slot do
+    @moduledoc false
+    defstruct [
+      :name,
+      :kind,
+      :scope,
+      :component,
+      :order,
+      :key,
+      :select,
+      :__identifier__,
+      :__spark_metadata__
+    ]
+  end
+
   use Spark.Dsl.Extension,
     sections: [
       Section.new(:need,
@@ -112,6 +127,41 @@ defmodule DshBeam.Plugin.Dsl do
               Field.new(:timeout_ms, {:or, [:integer, nil]},
                 default: nil,
                 doc: "cooperative per-call budget; the tool call is aborted after this many ms"
+              )
+            ],
+            identifier: :name
+          )
+          |> Entity.build!()
+        ]
+      )
+      |> Section.build!(),
+      Section.new(:ui_slot,
+        describe: "A UI slot this plugin renders into (a UI panel is a plugin)",
+        top_level?: true,
+        entities: [
+          Entity.new(:ui_slot, Slot,
+            describe: "one UI slot registration",
+            args: [:name],
+            schema: [
+              Field.new(:name, :atom, required: true, doc: "the slot key"),
+              Field.new(:kind, :atom,
+                required: true,
+                doc: ":single | :list | :keyed | :chain"
+              ),
+              Field.new(:scope, :atom,
+                default: :root,
+                doc: ":root | :session"
+              ),
+              Field.new(:component, {:mfa_or_fun, 1},
+                doc: "a function component {M, :fun, []} or fun(assigns) rendering the slot"
+              ),
+              Field.new(:order, :integer,
+                default: 0,
+                doc: "display order within a :list slot (ascending)"
+              ),
+              Field.new(:key, :any, doc: "the dispatch key for a :keyed slot"),
+              Field.new(:select, :any,
+                doc: "an {M, f, args} / fun(assigns) deciding a :chain slot match"
               )
             ],
             identifier: :name

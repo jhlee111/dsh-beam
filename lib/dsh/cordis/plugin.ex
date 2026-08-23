@@ -99,6 +99,34 @@ defmodule DshBeam.Plugin do
   end
 
   @doc """
+  The module's declared UI slots (name/kind/scope/component/order),
+  introspected from the Spark DSL — a UI panel is a plugin, and this is its
+  slot-registration schema (the harness's ui-slots SlotMap).
+  """
+  def slots(mod) when is_atom(mod) do
+    if Code.ensure_loaded?(mod) do
+      try do
+        Spark.Dsl.Extension.get_entities(mod, [:ui_slot])
+        |> Enum.map(fn slot ->
+          %{
+            name: slot.name,
+            kind: slot.kind,
+            scope: slot.scope,
+            component: slot.component,
+            order: slot.order,
+            key: slot.key,
+            select: slot.select
+          }
+        end)
+      rescue
+        _ -> []
+      end
+    else
+      []
+    end
+  end
+
+  @doc """
   The module's declared typed settings (name/type/default/doc), introspected
   from the Spark DSL — the schema a plugin-inventory/settings UI renders.
   """
