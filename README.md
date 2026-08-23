@@ -21,6 +21,8 @@ Elixir 1.20.2 / OTP 28 (pinned via .tool-versions for asdf).
 - lib/dsh/loader.ex · runtime.ex — declarative composition + incremental reconfiguration
 - lib/dsh/session.ex + session/* — the first plugin: an append-only session log
 - lib/dsh/creator.ex — creator mode: runtime code loading + transactional hot replacement
+- lib/dsh/sandbox.ex + sandbox/plugin.ex — the §6.3 execution boundary: untrusted source runs in a child OS process
+- priv/sandbox_runner.exs — the child runtime (compiles and executes sandboxed plugins in their own BEAM)
 - test/dsh/* — the TDD suite (one test per paper guarantee)
 - reference/deepseek-harness — the TS harness as a git submodule: the read-source for
   porting its modules and UI (when modifying it, work on a branch of that repository)

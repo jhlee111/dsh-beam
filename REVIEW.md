@@ -205,6 +205,13 @@ or timeout). The dependent survives, becomes :inactive, and can be reactivated.
 
 - Runtime's crash re-injection (P3) fails with :already_provided for "bindings mid-withdrawal" —
   re-injection needs backoff/retry. (Does not distinguish intentional kill from crash)
+  [resolved: re-injection is asynchronous with exponential backoff (10/20/40ms); a start failing
+  with :already_provided retries with a bounded exponential backoff (25..800ms) instead of consuming
+  the restart budget; the exit reason distinguishes intentional stops — :normal/:shutdown/:killed are
+  recorded and left for a later reconcile, which now re-asserts every desired non-running entry
+  (the H2 convergence promise made true). Creator.define became transactional so a failed mount is
+  never re-asserted. Regression tests: slow-draining dependent re-injection (red before the fix),
+  kill-vs-crash distinction.]
 
 ### 2-④ Spark DSL front end (complete)
 
@@ -225,3 +232,12 @@ or timeout). The dependent survives, becomes :inactive, and can be reactivated.
   Syntax errors raise instead of returning diagnostics -> rescue SyntaxError/TokenMissingError. :code.load_binary
   returns {:module, mod}.
 - Known limitations: creator sources are trusted (atom creation + in-process execution). §6.3 execution boundary (sandbox) is future work.
+  [resolved: DshBeam.Sandbox runs untrusted source in a child OS process — its own BEAM —
+  spawned as a Port (priv/sandbox_runner.exs compiles and executes there; every atom, module, and
+  effect stays in the child). The host adapter DshBeam.Sandbox.Plugin forwards the lifecycle over a
+  line-JSON protocol: activate/withdraw cross the boundary, child death maps to a crash that the
+  runtime re-injects while the monitor safety net withdraws after dependents drained. Boundary rules:
+  entry ids are source hashes (no atoms from the source), only host-known nominal keys
+  (String.to_existing_atom) may be referenced, only inert JSON-safe data crosses — capabilities never do.
+  5 tests: boundary execution, crash+guard+re-injection (fresh OS pid), dependency activation,
+  loud failure, atom containment.]

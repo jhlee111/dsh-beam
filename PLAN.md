@@ -167,13 +167,20 @@ implementation) rather than writing the whole red suite at once.
 - [x] Milestone 2-③: confluence concurrency verification — 27 passed (path-independent quiescent state · concurrent
   reconcile · concurrent use during swap)
 - [x] Milestone 2-④: Spark DSL front — 30 passed (need/provide declarations, composition DSL, 27-test regression net maintained)
+- [x] Known-limitations backlog: crash re-injection gained backoff + withdrawal-race retries and a kill/crash
+  distinction, and reconcile now re-asserts every desired non-running entry (convergence) — 35 passed
+- [x] Known-limitations backlog: §6.3 execution boundary implemented (DshBeam.Sandbox) — untrusted source compiles
+  and runs in a child OS process with its own BEAM; crash → guard → re-injection crosses the boundary — 40 passed
 
 ## 13. Milestone 3 — creator mode (complete)
 
 DshBeam.Creator: load a source string via Code.compile_string -> the BEAM :code server -> mount as a fiber.
 redefine is the transactional HMR of paper §5.2.2 (compile first -> withdraw through the guard -> swap the code ->
-roll back on failure).
+roll back on failure). define is transactional too: a failed mount rolls the composition back.
 3 tests (define/redefine/undefine stories, mount-crash isolation, syntax-error no-change) — 33 passed.
+
+The §6.3 execution boundary for untrusted source lives in DshBeam.Sandbox (child OS process + line-JSON
+protocol + DshBeam.Sandbox.Plugin guardian fiber); see REVIEW.md for the boundary rules.
 
 ## 12. Milestone 2 (candidate)
 
