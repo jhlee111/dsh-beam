@@ -55,14 +55,37 @@ defmodule DshBeam.Plugin do
             ) ::
               {:ok, DshBeam.Plugin.State.t()} | {:stop, term(), DshBeam.Plugin.State.t()}
 
+  @callback handle_dsh_tool_call(name :: atom(), args :: map(), state :: DshBeam.Plugin.State.t()) ::
+              {:ok, term()} | {:error, term()}
+
   @optional_callbacks handle_dsh_withdraw: 2,
                       handle_dsh_activate: 2,
                       handle_dsh_ready: 1,
                       handle_dsh_info: 2,
-                      handle_dsh_exit: 3
+                      handle_dsh_exit: 3,
+                      handle_dsh_tool_call: 3
 
   @doc "The fiber's own lifecycle state (its :gen_statem state)."
   def fiber_state(pid), do: :gen_statem.call(pid, :__dsh_fiber_state__)
+
+  @doc """
+  The module's declared tools (name/description/parameters), introspected
+  from the Spark DSL — a tool is a plugin, and this is its model-facing schema.
+  """
+  def tools(mod) when is_atom(mod) do
+    if Code.ensure_loaded?(mod) do
+      try do
+        Spark.Dsl.Extension.get_entities(mod, [:tool])
+        |> Enum.map(fn tool ->
+          %{name: tool.name, description: tool.description, parameters: tool.parameters}
+        end)
+      rescue
+        _ -> []
+      end
+    else
+      []
+    end
+  end
 
   @doc """
   The module's declared typed settings (name/type/default/doc), introspected
@@ -205,6 +228,20 @@ defmodule DshBeam.Plugin do
         {:keep_state_and_data, [{:reply, from, data.fiber_state}]}
       end
 
+      def handle_event({:call, from}, {:tool_call, name, args}, _state, data) do
+        # a plugin may override handle_dsh_tool_call with only its own
+        # clauses; a partial implementation is a FunctionClauseError, which
+        # is the "tool not implemented" case, not a fiber crash
+        result =
+          try do
+            handle_dsh_tool_call(name, args, data)
+          rescue
+            FunctionClauseError -> {:error, :not_implemented}
+          end
+
+        {:keep_state_and_data, [{:reply, from, result}]}
+      end
+
       def handle_event(:info, {:EXIT, from, reason}, _state, data) do
         # a linked resource (or the parent) exited: by default stop and let
         # the context's monitor safety net withdraw our contributions
@@ -239,9 +276,10 @@ defmodule DshBeam.Plugin do
         :ok
       end
 
-      # Default mount: compile the need/provide declarations into the
+      # Default mount: compile the need/provide/tool declarations into the
       # mount/3 contract. Plugins with runtime work (starting resources)
-      # override mount directly (the override carries @impl).
+      # override mount directly (the override carries @impl). A tool is a
+      # capability: each declared tool name is provided as this fiber.
       def mount(_ctx, _config) do
         needs = Spark.Dsl.Extension.get_entities(__MODULE__, [:need]) |> Enum.map(& &1.key)
 
@@ -267,12 +305,17 @@ defmodule DshBeam.Plugin do
           end)
           |> Map.new()
 
-        {:ok, needs, provides, %{}}
+        tool_provides =
+          Spark.Dsl.Extension.get_entities(__MODULE__, [:tool])
+          |> Map.new(&{&1.name, self()})
+
+        {:ok, needs, Map.merge(provides, tool_provides), %{}}
       end
 
       def handle_dsh_withdraw(_keys, state), do: {:ok, state}
       def handle_dsh_activate(_view, state), do: {:ok, state}
       def handle_dsh_ready(state), do: {:ok, state}
+      def handle_dsh_tool_call(_name, _args, _state), do: {:error, :not_implemented}
 
       # The specs widen the default returns to the callback's full union so
       # the type checker accepts the {:ok, _} / {:stop, _, _} case clauses
@@ -291,6 +334,7 @@ defmodule DshBeam.Plugin do
                      handle_dsh_ready: 1,
                      handle_dsh_info: 2,
                      handle_dsh_exit: 3,
+                     handle_dsh_tool_call: 3,
                      terminate: 3
     end
   end

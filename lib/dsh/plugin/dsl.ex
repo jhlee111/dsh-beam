@@ -23,6 +23,11 @@ defmodule DshBeam.Plugin.Dsl do
     defstruct [:name, :type, :default, :doc, :__identifier__, :__spark_metadata__]
   end
 
+  defmodule Tool do
+    @moduledoc false
+    defstruct [:name, :description, :parameters, :__identifier__, :__spark_metadata__]
+  end
+
   use Spark.Dsl.Extension,
     sections: [
       Section.new(:need,
@@ -74,6 +79,24 @@ defmodule DshBeam.Plugin.Dsl do
               ),
               Field.new(:default, :any, required: true, doc: "the default value"),
               Field.new(:doc, :string, default: "", doc: "human description")
+            ],
+            identifier: :name
+          )
+          |> Entity.build!()
+        ]
+      )
+      |> Section.build!(),
+      Section.new(:tool,
+        describe: "A model-callable tool this plugin provides (a tool is a plugin)",
+        top_level?: true,
+        entities: [
+          Entity.new(:tool, Tool,
+            describe: "one tool declaration",
+            args: [:name],
+            schema: [
+              Field.new(:name, :atom, required: true, doc: "the tool name"),
+              Field.new(:description, :string, required: true, doc: "what the tool does"),
+              Field.new(:parameters, :any, default: %{}, doc: "JSON Schema of the arguments")
             ],
             identifier: :name
           )
