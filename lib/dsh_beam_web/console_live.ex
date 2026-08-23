@@ -631,23 +631,26 @@ defmodule DshBeamWeb.ConsoleLive do
                   <button type="button" class="to-bottom" aria-label="scroll to bottom">▾</button>
                 </div>
                 <form class="composer" phx-submit="ask">
-                  <input
-                    type="text"
+                  <textarea
                     name="text"
-                    value={@chat_text}
+                    id="composer-textarea"
+                    phx-hook="AutoGrow"
+                    rows="1"
                     placeholder="run a task (drives the agent loop)"
                     disabled={@chat_busy}
-                  />
-                  <%= if @chat_busy do %>
-                    <button type="button" phx-click="stop_chat">stop</button>
-                  <% else %>
-                    <button type="submit">send</button>
-                  <% end %>
+                  ><%= @chat_text %></textarea>
+                  <div class="composer-actions">
+                    <%= if @chat_busy do %>
+                      <button type="button" class="composer-send" phx-click="stop_chat">stop</button>
+                    <% else %>
+                      <button type="submit" class="composer-send">send</button>
+                    <% end %>
+                  </div>
                 </form>
               <% else %>
                 <div class="composer composer-inert">
-                  <input type="text" disabled placeholder="open a workspace to start" />
-                  <button type="button" disabled>send</button>
+                  <textarea disabled placeholder="open a workspace to start"></textarea>
+                  <button type="button" disabled class="composer-send">send</button>
                 </div>
               <% end %>
             </div>

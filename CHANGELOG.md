@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Conversation composer
+
+- The composer is now a larger card with an auto-growing textarea (44px min,
+  220px max, then scrolls) instead of a single-line input, and the send/stop
+  control sits inside the card's bottom-right corner.
+
 ### Conversation rendering
 
 - Added the reference's back-to-bottom control: a circular chevron floats just

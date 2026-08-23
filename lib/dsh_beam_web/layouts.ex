@@ -152,8 +152,30 @@ defmodule DshBeamWeb.Layouts do
             padding: 8px 20px; box-sizing: border-box;
             background: linear-gradient(180deg, color-mix(in srgb, var(--dsw-alias-bg-base) 0%, transparent) 0px, var(--dsw-alias-bg-base) 36px);
           }
-          .composer { display: flex; gap: 6px; align-items: center; }
-          .composer input { flex: 1; }
+          .composer {
+            position: relative; display: flex; flex-direction: column;
+            border: 1px solid var(--dsw-alias-border-l2); border-radius: 14px;
+            padding: 10px 12px 40px; background: var(--dsw-alias-bg-layer-1, #1a1f27);
+          }
+          .composer textarea {
+            width: 100%; resize: none; border: none; background: transparent;
+            min-height: 44px; max-height: 220px; overflow-y: auto;
+            font: inherit; font-size: 15px; line-height: 22px;
+            color: var(--dsw-alias-label-primary); box-sizing: border-box;
+            padding: 0; outline: none; display: block;
+          }
+          .composer textarea::placeholder { color: var(--dsw-alias-label-caption); }
+          .composer-actions {
+            position: absolute; right: 10px; bottom: 10px;
+            display: flex; gap: 6px;
+          }
+          .composer-send {
+            border-radius: 8px; padding: 6px 14px; font-weight: 500;
+            border: 1px solid var(--dsw-alias-border-l2);
+            background: var(--dsw-alias-button-elevated-fill, #1c222b);
+            color: var(--dsw-alias-label-primary); cursor: pointer;
+          }
+          .composer-send:hover { background: var(--dsw-alias-button-floating-hover); }
           .composer-status { margin: 4px 0 0; font-size: 12px; }
           /* Back-to-bottom: a circular chevron floating just above the composer,
              revealed only while the reader is scrolled away from the newest
@@ -456,6 +478,21 @@ defmodule DshBeamWeb.Layouts do
         <script src="/assets/phoenix.js"></script>
         <script src="/assets/phoenix_live_view.js"></script>
         <script>
+          // Auto-grows the composer textarea to fit its content (capped by CSS
+          // max-height, after which it scrolls).
+          let AutoGrow = {
+            mounted() {
+              this.grow = () => {
+                this.el.style.height = 'auto';
+                this.el.style.height = this.el.scrollHeight + 'px';
+              };
+              this.el.addEventListener('input', this.grow);
+              this.grow();
+            },
+            updated() { this.grow(); },
+            destroyed() { this.el.removeEventListener('input', this.grow); }
+          };
+
           // "Deep diving" elapsed-time clock: ticks client-side without a
           // server round-trip, revealing the elapsed time after 15s (the
           // reference's turn status).
@@ -538,7 +575,7 @@ defmodule DshBeamWeb.Layouts do
           let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
           let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
             params: { _csrf_token: csrfToken },
-            hooks: { ElapsedClock, ScrollFollow }
+            hooks: { ElapsedClock, ScrollFollow, AutoGrow }
           });
           liveSocket.connect();
           window.addEventListener("phx:page-loading-stop", () => liveSocket.enableDebug());
