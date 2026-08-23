@@ -18,19 +18,21 @@ defmodule DshBeam.Ui.Panel.Trajectory do
     ~H"""
     <section>
       <h2>trajectory</h2>
-      <%= if @trajectory == [] do %>
-        <p class="muted">no turns yet — the chat pane appends them</p>
-      <% end %>
-      <%= for {turn, index} <- Enum.with_index(@trajectory) do %>
-        <div style="border-top:1px solid #20262f; padding:6px 0">
-          <strong class="muted">turn <%= index + 1 %></strong>
-          <ul>
-            <%= for {role, content} <- turn do %>
-              <li><strong><%= role %></strong>: <code><%= content %></code></li>
-            <% end %>
-          </ul>
-        </div>
-      <% end %>
+      <div class="scroll">
+        <%= if @trajectory == [] do %>
+          <p class="muted">no turns yet — the chat pane appends them</p>
+        <% end %>
+        <%= for {turn, index} <- Enum.with_index(@trajectory) do %>
+          <div style="border-top:1px solid #20262f; padding:6px 0">
+            <strong class="muted">turn <%= index + 1 %></strong>
+            <ul>
+              <%= for {role, content} <- turn do %>
+                <li><strong><%= role %></strong>: <code><%= content %></code></li>
+              <% end %>
+            </ul>
+          </div>
+        <% end %>
+      </div>
     </section>
     """
   end

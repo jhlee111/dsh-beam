@@ -20,33 +20,35 @@ defmodule DshBeam.Ui.Panel do
         <form class="row" phx-submit="seed">
           <button type="submit">seed demo (session + llm + chat)</button>
         </form>
-        <table>
-          <thead>
-            <tr>
-              <th>id</th><th>plugin</th><th>fiber</th><th>pid</th><th>restarts</th><th>error</th><th>os_pid</th><th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <%= for row <- @rows do %>
+        <div class="scroll">
+          <table>
+            <thead>
               <tr>
-                <td><code><%= inspect(row.id) %></code></td>
-                <td class="muted"><%= row.plugin %></td>
-                <td><span class={"pill state-#{row.state}"}><%= row.state %></span></td>
-                <td class="muted"><%= inspect(row.pid) %></td>
-                <td><%= row.restarts %></td>
-                <td class="muted"><%= inspect(row.error) %></td>
-                <td class="muted"><%= inspect(row.os_pid) %></td>
-                <td>
-                  <button phx-click="kill" phx-value-id={row.id_key}>kill</button>
-                  <%= if row.sandboxed do %>
-                    <button phx-click="crash_child" phx-value-id={row.id_key}>crash child</button>
-                  <% end %>
-                  <button phx-click="remove" phx-value-id={row.id_key}>remove</button>
-                </td>
+                <th>id</th><th>plugin</th><th>fiber</th><th>pid</th><th>restarts</th><th>error</th><th>os_pid</th><th></th>
               </tr>
-            <% end %>
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              <%= for row <- @rows do %>
+                <tr>
+                  <td><code><%= inspect(row.id) %></code></td>
+                  <td class="muted"><%= row.plugin %></td>
+                  <td><span class={"pill state-#{row.state}"}><%= row.state %></span></td>
+                  <td class="muted"><%= inspect(row.pid) %></td>
+                  <td><%= row.restarts %></td>
+                  <td class="muted"><%= inspect(row.error) %></td>
+                  <td class="muted"><%= inspect(row.os_pid) %></td>
+                  <td>
+                    <button phx-click="kill" phx-value-id={row.id_key}>kill</button>
+                    <%= if row.sandboxed do %>
+                      <button phx-click="crash_child" phx-value-id={row.id_key}>crash child</button>
+                    <% end %>
+                    <button phx-click="remove" phx-value-id={row.id_key}>remove</button>
+                  </td>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+        </div>
         <p class="muted">kill = external kill (recorded, not re-injected). crash child = sandbox SIGKILL (guard + re-injection).</p>
       </section>
       """
@@ -245,24 +247,26 @@ defmodule DshBeam.Ui.Panel do
       ~H"""
       <section>
         <h2>plugins</h2>
-        <%= for plugin <- @inventory do %>
-          <div style="border-top:1px solid #20262f; padding:6px 0">
-            <strong><%= plugin.name %></strong>
-            <span class={"pill state-#{if plugin.enabled, do: "active", else: "gone"}"}>
-              <%= if plugin.enabled, do: "enabled", else: "disabled" %>
-            </span>
-            <%= if plugin.settings != [] do %>
-              <form phx-submit="settings_save" class="row">
-                <input type="hidden" name="plugin" value={to_string(plugin.plugin)} />
-                <%= for setting <- plugin.settings do %>
-                  <label class="muted" title={setting.doc}><%= setting.name %></label>
-                  <input type="text" name={"settings[#{setting.name}]"} value={setting.display} />
-                <% end %>
-                <button type="submit">save</button>
-              </form>
-            <% end %>
-          </div>
-        <% end %>
+        <div class="scroll">
+          <%= for plugin <- @inventory do %>
+            <div style="border-top:1px solid #20262f; padding:6px 0">
+              <strong><%= plugin.name %></strong>
+              <span class={"pill state-#{if plugin.enabled, do: "active", else: "gone"}"}>
+                <%= if plugin.enabled, do: "enabled", else: "disabled" %>
+              </span>
+              <%= if plugin.settings != [] do %>
+                <form phx-submit="settings_save" class="row">
+                  <input type="hidden" name="plugin" value={to_string(plugin.plugin)} />
+                  <%= for setting <- plugin.settings do %>
+                    <label class="muted" title={setting.doc}><%= setting.name %></label>
+                    <input type="text" name={"settings[#{setting.name}]"} value={setting.display} />
+                  <% end %>
+                  <button type="submit">save</button>
+                </form>
+              <% end %>
+            </div>
+          <% end %>
+        </div>
       </section>
       """
     end

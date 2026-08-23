@@ -23,7 +23,13 @@ defmodule DshBeamWeb.Layouts do
             background: var(--dsw-static-neutral-bluish-950, #0f1115);
             color: var(--dsw-static-neutral-bluish-50, #d7dae0);
           }
-          main { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; }
+          main {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+            gap: 12px;
+            padding: 12px;
+            align-items: start;
+          }
           section {
             background: var(--dsw-static-neutral-bluish-850, #161a21);
             border: 1px solid var(--dsw-alias-border-l1, #232a36);
@@ -57,8 +63,12 @@ defmodule DshBeamWeb.Layouts do
           ul { margin: 0; padding-left: 16px; }
           li { margin: 2px 0; }
           .pill { display: inline-block; padding: 1px 6px; border-radius: 8px; border: 1px solid var(--dsw-alias-border-l3, #2b3442); }
-          .events { max-height: 180px; overflow-y: auto; }
-          .chat { max-height: 220px; overflow-y: auto; }
+          /* Tall content scrolls inside its panel instead of stretching the
+             whole page past the fold — the composition table, plugin list, and
+             trajectory are the offenders. */
+          .scroll { max-height: 400px; overflow-y: auto; }
+          .events { max-height: 200px; overflow-y: auto; }
+          .chat { max-height: 260px; overflow-y: auto; }
         </style>
       </head>
       <body>
