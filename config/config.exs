@@ -16,3 +16,6 @@ config :dsh_beam, DshBeamWeb.Endpoint,
   code_reloader: config_env() == :dev
 
 config :phoenix, :json_library, Jason
+
+# Never log credential/key parameters: mask them in the request log.
+config :phoenix, :filter_parameters, ["credential_value", "password", "api_key"]
