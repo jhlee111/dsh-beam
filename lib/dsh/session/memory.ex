@@ -41,6 +41,12 @@ defmodule DshBeam.Session.Memory do
   end
 
   @impl true
+  def handle_call(:clear, _from, state) do
+    :ets.delete_all_objects(state.tid)
+    {:reply, :ok, %{state | seq: 0}}
+  end
+
+  @impl true
   def terminate(_reason, state) do
     :ets.delete(state.tid)
     :ok

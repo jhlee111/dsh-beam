@@ -91,6 +91,44 @@ defmodule DshBeam.ConsoleTest do
     assert html =~ "final answer"
   end
 
+  test "the chat pane renders from the session log and clears on demand",
+       %{session: session, runtime: runtime, ctx: ctx} do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+
+    entries = [
+      %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
+      %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [adapter: ConsoleLoopLlm], disabled: false},
+      %{id: :tool, plugin: ConsoleEchoTool, config: [], disabled: false},
+      %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false}
+    ]
+
+    :ok = DshBeam.Runtime.reconcile(runtime, entries)
+
+    render_submit(view, "ask", %{"text" => "run"})
+    wait_until(fn -> render(view) =~ "final answer" end)
+
+    # the conversation lives in the session (the single source of truth), so a
+    # page refresh re-reads it: the chat pane is derived, not accumulated
+    {:ok, session_pid} = DshBeam.Context.get(ctx, :session)
+
+    assert [
+             %{"role" => "user"},
+             %{"role" => "tool_call"},
+             %{"role" => "tool_result"},
+             %{"role" => "assistant"}
+           ] =
+             DshBeam.Session.all(session_pid)
+
+    # the rendered pane mirrors the session (tool call + result + answer)
+    assert render(view) =~ "tool_call"
+    assert render(view) =~ "final answer"
+
+    # clear_chat truncates the session log and empties the pane
+    render_click(view, "clear_chat", %{})
+    assert DshBeam.Session.count(session_pid) == 0
+    refute render(view) =~ "final answer"
+  end
+
   test "the creator form defines a plugin in-process", %{session: session, ctx: ctx} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
 

@@ -46,6 +46,7 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:chat_text, "")
       |> assign(:chat_log, [])
       |> assign(:chat_busy, false)
+      |> assign(:chat_error, nil)
       |> assign(:events, [])
       |> assign(:rows, [])
       |> assign(:bindings, %{})
@@ -130,12 +131,18 @@ defmodule DshBeamWeb.ConsoleLive do
       :not_found ->
         {:noreply,
          socket
-         |> assign(
-           chat_log: socket.assigns.chat_log ++ [{"user", text}, {"error", ":no_loop_plugin"}],
-           chat_text: ""
-         )
+         |> assign(chat_text: "", chat_error: ":no_loop_plugin")
          |> refresh()}
     end
+  end
+
+  def handle_event("clear_chat", _params, socket) do
+    case DshBeam.Context.get(socket.assigns.ctx, :session) do
+      {:ok, session} when is_pid(session) -> DshBeam.Session.clear(session)
+      _ -> :ok
+    end
+
+    {:noreply, socket |> assign(chat_error: nil) |> refresh()}
   end
 
   def handle_event("llm_apply", params, socket) do
@@ -228,20 +235,17 @@ defmodule DshBeamWeb.ConsoleLive do
   defp parse_setting(_setting, _raw), do: :invalid
 
   @impl true
-  def handle_info({:chat_result, text, result}, socket) do
-    turn =
+  def handle_info({:chat_result, _text, result}, socket) do
+    # The loop already wrote every step (user → tool_call → tool_result →
+    # assistant, or error) to the session, so re-reading it renders the turn.
+    # Only a hard failure (the loop fiber died mid-call) surfaces here.
+    socket =
       case result do
-        {:ok, answer, trace} ->
-          [{"user", text} | Enum.map(trace, &trace_entry/1)] ++ [{"assistant", answer}]
-
-        {:error, reason} ->
-          [{"user", text}, {"error", inspect(reason)}]
+        {:ok, _answer, _trace} -> assign(socket, chat_busy: false)
+        {:error, reason} -> assign(socket, chat_busy: false, chat_error: inspect(reason))
       end
 
-    {:noreply,
-     socket
-     |> assign(chat_log: socket.assigns.chat_log ++ turn, chat_busy: false)
-     |> refresh()}
+    {:noreply, refresh(socket)}
   end
 
   def handle_info({:dsh_event, event}, socket) do
@@ -311,6 +315,9 @@ defmodule DshBeamWeb.ConsoleLive do
             <%= for {role, content} <- @chat_log do %>
               <li><strong><%= role %></strong>: <code><%= content %></code></li>
             <% end %>
+            <%= if @chat_error do %>
+              <li><strong>error</strong>: <code><%= @chat_error %></code></li>
+            <% end %>
             <%= if @chat_busy do %>
               <li><strong>…</strong>: <code>thinking (model round-trip)</code></li>
             <% end %>
@@ -319,6 +326,7 @@ defmodule DshBeamWeb.ConsoleLive do
         <form class="row" phx-submit="ask">
           <input type="text" name="text" value={@chat_text} placeholder="run a task (drives the agent loop)" style="flex:1" disabled={@chat_busy} />
           <button type="submit" disabled={@chat_busy}>ask</button>
+          <button type="button" phx-click="clear_chat">new conversation</button>
         </form>
       </section>
 
@@ -411,9 +419,6 @@ defmodule DshBeamWeb.ConsoleLive do
     end
   end
 
-  defp trace_entry({:tool_call, name, args}), do: {"tool_call", "#{name} #{inspect(args)}"}
-  defp trace_entry({:tool_result, name, result}), do: {"tool_result", "#{name} -> #{result}"}
-
   defp refs(session) do
     case session do
       %{"runtime" => runtime, "ctx" => ctx} ->
@@ -468,9 +473,36 @@ defmodule DshBeamWeb.ConsoleLive do
       llm_config: llm_config,
       credential_mode: credential_mode,
       credential_env: credential_env,
+      chat_log: chat_log(socket.assigns.ctx),
       inventory: build_inventory(runtime, entries)
     )
   end
+
+  # The chat pane renders the session log (the single source of truth), so the
+  # conversation survives a page refresh and tool calls appear chronologically.
+  defp chat_log(ctx) do
+    case DshBeam.Context.get(ctx, :session) do
+      {:ok, session} when is_pid(session) ->
+        session
+        |> DshBeam.Session.all()
+        |> Enum.map(&chat_entry/1)
+
+      _ ->
+        []
+    end
+  end
+
+  defp chat_entry(%{"role" => "user", "content" => content}), do: {"user", content}
+  defp chat_entry(%{"role" => "assistant", "content" => content}), do: {"assistant", content}
+
+  defp chat_entry(%{"role" => "tool_call", "name" => name, "arguments" => args}),
+    do: {"tool_call", "#{name} #{inspect(args)}"}
+
+  defp chat_entry(%{"role" => "tool_result", "name" => name, "content" => content}),
+    do: {"tool_result", "#{name} -> #{content}"}
+
+  defp chat_entry(%{"role" => "error", "content" => content}), do: {"error", content}
+  defp chat_entry(other), do: {"event", inspect(other)}
 
   defp build_inventory(runtime, entries) do
     store = DshBeam.Runtime.settings(runtime)

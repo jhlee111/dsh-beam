@@ -37,9 +37,19 @@ defmodule DshBeam.AgentTest do
     assert Enum.any?(second_messages, &(&1["role"] == "tool"))
     assert Enum.any?(second_messages, &(&1["role"] == "assistant" and &1["tool_calls"] != nil))
 
-    # the turn was logged to the session (the single source of truth)
+    # the turn was logged to the session (the single source of truth), with
+    # the tool call and result recorded chronologically: user, tool_call,
+    # tool_result, assistant.
     {:ok, session} = DshBeam.Context.get(ctx, :session)
-    assert DshBeam.Session.count(session) == 2
+    assert DshBeam.Session.count(session) == 4
+
+    assert [
+             %{"role" => "user"},
+             %{"role" => "tool_call"},
+             %{"role" => "tool_result"},
+             %{"role" => "assistant"}
+           ] =
+             DshBeam.Session.all(session)
   end
 
   test "run_trace/2 returns the loop's step trace" do
@@ -74,13 +84,19 @@ defmodule DshBeam.AgentTest do
     assert_receive {:loop_call, first_messages, _opts}, 1000
 
     assert Enum.any?(first_messages, &(&1["role"] == "user" and &1["content"] == "first task"))
-    assert Enum.any?(first_messages, &(&1["role"] == "assistant" and &1["content"] == "final answer"))
+
+    assert Enum.any?(
+             first_messages,
+             &(&1["role"] == "assistant" and &1["content"] == "final answer")
+           )
+
     assert Enum.any?(first_messages, &(&1["role"] == "user" and &1["content"] == "second task"))
 
-    # the session log accumulated both turns (2 user + 2 assistant = 4)
+    # the session log accumulated both turns, each with user + tool_call +
+    # tool_result + assistant (8 events total)
     ctx = DshBeam.Runtime.context(runtime)
     {:ok, session} = DshBeam.Context.get(ctx, :session)
-    assert DshBeam.Session.count(session) == 4
+    assert DshBeam.Session.count(session) == 8
   end
 end
 

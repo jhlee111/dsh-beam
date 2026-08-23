@@ -55,10 +55,13 @@ defmodule DshBeam.Agent.Loop do
           "content" => "You are a helpful agent. Use tools when needed."
         }
 
-        # Multi-turn: the session log is the single source of truth, so prior
-        # user/assistant turns are replayed as model context — the loop is a
-        # conversation, not a stateless one-shot.
-        messages = [system | history_messages(view.session)] ++ [%{"role" => "user", "content" => task}]
+        # Multi-turn: the session log is the single source of truth. Read the
+        # prior user/assistant turns FIRST, then record the new user turn, so
+        # the replay and the record stay consistent.
+        history = history_messages(view.session)
+        _ = DshBeam.Session.append(view.session, %{"role" => "user", "content" => task})
+
+        messages = [system | history] ++ [%{"role" => "user", "content" => task}]
         loop(data.ctx, view.llm, view.session, messages, 0, max_steps, [])
 
       _ ->
@@ -66,7 +69,8 @@ defmodule DshBeam.Agent.Loop do
     end
   end
 
-  defp loop(_ctx, _llm, _session, _messages, step, max_steps, _trace) when step >= max_steps do
+  defp loop(_ctx, _llm, session, _messages, step, max_steps, _trace) when step >= max_steps do
+    _ = DshBeam.Session.append(session, %{"role" => "error", "content" => "max_steps"})
     {:error, :max_steps}
   end
 
@@ -76,6 +80,10 @@ defmodule DshBeam.Agent.Loop do
     case DshBeam.Llm.chat(llm, messages, tools: tools) do
       {:ok, %{finish_reason: :tool_calls, tool_calls: [_ | _] = calls}} ->
         {assistant, tool_messages, steps} = dispatch(ctx, calls)
+
+        # record the tool call and its result into the session (chronological),
+        # so the chat pane shows tool execution and survives a refresh
+        append_steps(session, steps)
 
         loop(
           ctx,
@@ -88,22 +96,12 @@ defmodule DshBeam.Agent.Loop do
         )
 
       {:ok, %{content: content}} ->
-        append_answer(session, task_of(messages), content)
+        _ = DshBeam.Session.append(session, %{"role" => "assistant", "content" => content})
         {:ok, content, Enum.reverse(trace)}
 
       {:error, reason} ->
+        _ = DshBeam.Session.append(session, %{"role" => "error", "content" => inspect(reason)})
         {:error, reason}
-    end
-  end
-
-  # the task is the last user message (multi-turn: earlier turns are history)
-  defp task_of(messages) do
-    messages
-    |> Enum.filter(&(&1["role"] == "user"))
-    |> List.last()
-    |> case do
-      nil -> nil
-      message -> message["content"]
     end
   end
 
@@ -118,10 +116,23 @@ defmodule DshBeam.Agent.Loop do
     end
   end
 
-  defp append_answer(session, task, content) do
-    # log the turn to the session (the single source of truth)
-    _ = DshBeam.Session.append(session, %{"role" => "user", "content" => task})
-    _ = DshBeam.Session.append(session, %{"role" => "assistant", "content" => content})
+  defp append_steps(session, steps) do
+    Enum.each(steps, fn
+      {:tool_call, name, args} ->
+        DshBeam.Session.append(session, %{
+          "role" => "tool_call",
+          "name" => name,
+          "arguments" => args
+        })
+
+      {:tool_result, name, result} ->
+        DshBeam.Session.append(session, %{
+          "role" => "tool_result",
+          "name" => name,
+          "content" => result
+        })
+    end)
+
     :ok
   end
 

@@ -50,6 +50,12 @@ defmodule DshBeam.Session.File do
     {:reply, state.path |> File.stream!() |> Enum.count(), state}
   end
 
+  @impl true
+  def handle_call(:clear, _from, state) do
+    File.write!(state.path, "")
+    {:reply, :ok, %{state | seq: 0}}
+  end
+
   defp decode_line(line) do
     line |> String.trim() |> JSON.decode!()
   end

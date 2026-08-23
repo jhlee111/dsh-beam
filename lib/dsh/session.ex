@@ -22,4 +22,7 @@ defmodule DshBeam.Session do
 
   @doc "The number of appended events."
   def count(session), do: GenServer.call(session, :count)
+
+  @doc "Truncate the log, dropping every event (a fresh conversation)."
+  def clear(session), do: GenServer.call(session, :clear)
 end
