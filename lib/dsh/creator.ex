@@ -18,8 +18,11 @@ defmodule DshBeam.Creator do
   """
 
   @doc """
-  Compile source, load it, and mount it as one plugin entry. Returns
-  {:ok, module} or {:error, {:compile, _}} | {:error, {:mount, _}}.
+  Compile source, load it, and mount it as one plugin entry. Transactional:
+  a failed mount rolls the composition back to its pre-define state, so a
+  broken plugin never lingers in the desired configuration.
+
+  Returns {:ok, module} or {:error, {:compile, _}} | {:error, {:mount, _}}.
   """
   def define(runtime, source, opts \\ []) do
     with {:ok, mod, binary} <- compile(source),
@@ -104,8 +107,14 @@ defmodule DshBeam.Creator do
     desired = Enum.reject(entries, &(&1.id == mod)) ++ [new_entry]
 
     case DshBeam.Runtime.reconcile(runtime, desired) do
-      :ok -> {:ok, mod}
-      {:error, errors} -> {:error, {:mount, errors}}
+      :ok ->
+        {:ok, mod}
+
+      {:error, errors} ->
+        # transactional define: a failed mount leaves the composition
+        # unchanged, so later reconciles never re-assert a broken plugin
+        DshBeam.Runtime.reconcile(runtime, entries)
+        {:error, {:mount, errors}}
     end
   end
 
