@@ -14,7 +14,9 @@ defmodule DshBeam.DistTest do
         setup_peer(context)
 
       true ->
-        {:skip, "distributed Erlang unavailable (needs epmd + ~/.erlang.cookie)"}
+        # ExUnit skips a test whose context carries a :skip key; a setup
+        # callback may not return {:skip, ...} (that shape is rejected).
+        Map.put(context, :skip, "distributed Erlang unavailable (needs epmd + ~/.erlang.cookie)")
     end
   end
 
@@ -29,7 +31,7 @@ defmodule DshBeam.DistTest do
         Map.put(context, :peer_node, peer_node)
 
       {:error, reason} ->
-        {:skip, "peer node unavailable: #{inspect(reason)}"}
+        Map.put(context, :skip, "peer node unavailable: #{inspect(reason)}")
     end
   end
 
