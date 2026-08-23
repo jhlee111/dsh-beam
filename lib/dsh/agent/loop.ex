@@ -55,7 +55,10 @@ defmodule DshBeam.Agent.Loop do
           "content" => "You are a helpful agent. Use tools when needed."
         }
 
-        messages = [system, %{"role" => "user", "content" => task}]
+        # Multi-turn: the session log is the single source of truth, so prior
+        # user/assistant turns are replayed as model context — the loop is a
+        # conversation, not a stateless one-shot.
+        messages = [system | history_messages(view.session)] ++ [%{"role" => "user", "content" => task}]
         loop(data.ctx, view.llm, view.session, messages, 0, max_steps, [])
 
       _ ->
@@ -93,9 +96,26 @@ defmodule DshBeam.Agent.Loop do
     end
   end
 
-  # the task is the first user message after the system prompt
+  # the task is the last user message (multi-turn: earlier turns are history)
   defp task_of(messages) do
-    Enum.find_value(messages, fn m -> if m["role"] == "user", do: m["content"] end)
+    messages
+    |> Enum.filter(&(&1["role"] == "user"))
+    |> List.last()
+    |> case do
+      nil -> nil
+      message -> message["content"]
+    end
+  end
+
+  # prior user/assistant turns, replayed from the session log in append order
+  defp history_messages(session) do
+    case DshBeam.Session.all(session) do
+      events when is_list(events) ->
+        Enum.filter(events, &(&1["role"] in ["user", "assistant"]))
+
+      _ ->
+        []
+    end
   end
 
   defp append_answer(session, task, content) do

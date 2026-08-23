@@ -55,6 +55,33 @@ defmodule DshBeam.AgentTest do
              {:tool_result, "loop_echo", "echo:from-loop"}
            ]
   end
+
+  test "the loop is multi-turn: prior turns replay into the model context" do
+    {:ok, runtime} =
+      DshBeam.Runtime.start_link([session_entry(), llm_entry(), tool_entry(), loop_entry()], [])
+
+    %{loop: %{pid: loop}} = DshBeam.Runtime.entries(runtime)
+
+    assert {:ok, "final answer"} = DshBeam.Agent.Loop.run(loop, "first task")
+
+    # drain the two scripted calls for the first turn (tool + answer)
+    assert_receive {:loop_call, _m, _opts}, 1000
+    assert_receive {:loop_call, _m, _opts}, 1000
+
+    assert {:ok, "final answer"} = DshBeam.Agent.Loop.run(loop, "second task")
+
+    # the second turn's FIRST model call must carry the first turn's history
+    assert_receive {:loop_call, first_messages, _opts}, 1000
+
+    assert Enum.any?(first_messages, &(&1["role"] == "user" and &1["content"] == "first task"))
+    assert Enum.any?(first_messages, &(&1["role"] == "assistant" and &1["content"] == "final answer"))
+    assert Enum.any?(first_messages, &(&1["role"] == "user" and &1["content"] == "second task"))
+
+    # the session log accumulated both turns (2 user + 2 assistant = 4)
+    ctx = DshBeam.Runtime.context(runtime)
+    {:ok, session} = DshBeam.Context.get(ctx, :session)
+    assert DshBeam.Session.count(session) == 4
+  end
 end
 
 defmodule LoopEchoTool do
