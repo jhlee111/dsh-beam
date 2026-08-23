@@ -59,7 +59,7 @@ defmodule DshBeamWeb.Layouts do
           .brand {
             flex: 1; min-width: 0; display: inline-flex; align-items: center;
             overflow: hidden; padding: 0; border: none; background: transparent;
-            color: inherit; cursor: pointer; font-size: 17px; font-weight: 600;
+            color: inherit; font-size: 17px; font-weight: 600;
             letter-spacing: .02em; white-space: nowrap;
           }
           .toggle {
@@ -68,6 +68,13 @@ defmodule DshBeamWeb.Layouts do
             background: transparent; cursor: pointer; color: var(--dsw-alias-label-secondary);
           }
           .toggle:hover { background: var(--dsw-alias-interactive-bg-hover); }
+          /* Collapsed rail (reference sidebar 56px rail): brand/region/foot unmount,
+             only the expand toggle remains centered. */
+          .sidebar-root.collapsed { padding: 18px 10px 6px; align-items: center; }
+          .sidebar-root.collapsed .logo-row {
+            justify-content: center; height: 36px; padding: 0; margin-bottom: 12px;
+          }
+          .sidebar-root.collapsed .toggle { width: 36px; height: 36px; color: var(--dsw-alias-label-primary); }
           .region {
             flex: 1; min-height: 0; display: flex; flex-direction: column;
             margin-left: -4px; margin-right: -12px; padding-left: 4px; overflow: hidden;
@@ -202,6 +209,27 @@ defmodule DshBeamWeb.Layouts do
           .msg-error, .msg-event, .msg-busy { color: var(--dsw-static-red-400); font-size: 13px; }
           .msg-busy { color: var(--dsw-alias-label-secondary); }
           .trajectory-turn { border-top: 1px solid var(--dsw-alias-border-l2); padding: 8px 0; }
+
+          /* Workspace sidebar: an explicit create form + session list. */
+          .workspace-form { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+          .workspace-form label { color: var(--dsw-alias-label-secondary); font-size: 12px; }
+          .workspace-form input { width: 100%; box-sizing: border-box; }
+          .new-session-btn {
+            margin-top: 6px; border: 1px solid var(--dsw-alias-border-l2);
+            background: var(--dsw-alias-button-elevated-fill, #1c222b); color: var(--dsw-alias-label-primary);
+            border-radius: 10px; padding: 7px 12px; font-weight: 500; cursor: pointer;
+          }
+          .new-session-btn:hover { background: var(--dsw-alias-button-floating-hover); }
+          .workspace-feedback { font-size: 12px; margin: 4px 0; }
+          .empty-hint { font-size: 12px; line-height: 18px; }
+          .workspace-list { display: flex; flex-direction: column; gap: 6px; }
+          .workspace-row {
+            display: flex; align-items: center; gap: 6px;
+            border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; padding: 6px 8px;
+          }
+          .workspace-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+          .workspace-meta .muted { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .workspace-actions { display: flex; gap: 4px; }
 
           /* Settings modal overlay. */
           .settings-overlay {

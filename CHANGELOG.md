@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Sidebar toggle
+
+- The sidebar "panel" control is now the collapse/expand toggle (280px ↔ 56px
+  rail), not a second settings opener. The brand is a static label, and
+  Settings opens from the sidebar foot only.
+
 ### Conversation composer
 
 - The composer is now a single send/stop toggle (the reference's shape) instead

@@ -107,6 +107,7 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:plugins_result, nil)
       |> assign(:custom_presets, [])
       |> assign(:presets_result, nil)
+      |> assign(:sidebar_collapsed, false)
       |> refresh()
 
     {:ok, socket}
@@ -370,6 +371,11 @@ defmodule DshBeamWeb.ConsoleLive do
     {:noreply, assign(socket, settings_open: false) |> refresh()}
   end
 
+  def handle_event("toggle_sidebar", _params, socket) do
+    {:noreply,
+     assign(socket, sidebar_collapsed: not socket.assigns.sidebar_collapsed) |> refresh()}
+  end
+
   def handle_event("view_tab", %{"tab" => tab}, socket) do
     view_tab = if tab == "trajectory", do: :trajectory, else: :chat
     {:noreply, assign(socket, view_tab: view_tab) |> refresh()}
@@ -522,20 +528,26 @@ defmodule DshBeamWeb.ConsoleLive do
     ~H"""
     <div
       class="frame"
-      style="grid-template-columns: 280px minmax(0, 1fr) 280px"
+      style={"grid-template-columns: " <> (if @sidebar_collapsed, do: "56px", else: "280px") <> " minmax(0, 1fr) 280px"}
     >
       <div class="frame-sidebar">
-        <div class="sidebar-root">
+        <div class={"sidebar-root #{if @sidebar_collapsed, do: "collapsed"}"}>
           <div class="logo-row">
-            <button class="brand" phx-click="open_settings">dsh-beam</button>
-            <button class="toggle" phx-click="open_settings">panel</button>
+            <%= if @sidebar_collapsed do %>
+              <button class="toggle" phx-click="toggle_sidebar" aria-label="expand sidebar">☰</button>
+            <% else %>
+              <span class="brand">dsh-beam</span>
+              <button class="toggle" phx-click="toggle_sidebar" aria-label="collapse sidebar">☰</button>
+            <% end %>
           </div>
-          <div class="region">
-            <%= DshBeam.Ui.render_slot(:sidebar, assigns) %>
-          </div>
-          <div class="foot">
-            <button class="settings-trigger" phx-click="open_settings">settings</button>
-          </div>
+          <%= unless @sidebar_collapsed do %>
+            <div class="region">
+              <%= DshBeam.Ui.render_slot(:sidebar, assigns) %>
+            </div>
+            <div class="foot">
+              <button class="settings-trigger" phx-click="open_settings">settings</button>
+            </div>
+          <% end %>
         </div>
       </div>
 

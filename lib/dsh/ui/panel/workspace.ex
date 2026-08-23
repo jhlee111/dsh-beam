@@ -16,36 +16,53 @@ defmodule DshBeam.Ui.Panel.Workspace do
     <section>
       <h2>workspace</h2>
 
-      <form class="row" phx-submit="workspace_create">
-        <input type="text" name="repo" value={@workspace_repo} placeholder="repository path" style="flex:1" />
-        <input type="text" name="title" placeholder="title (optional)" />
-        <button type="submit">new session</button>
+      <form class="workspace-form" phx-submit="workspace_create">
+        <label class="muted" for="ws-repo">repository path (a git repo)</label>
+        <input
+          type="text"
+          name="repo"
+          id="ws-repo"
+          value={@workspace_repo}
+          placeholder="/path/to/git/repo"
+        />
+        <label class="muted" for="ws-title">session title (optional)</label>
+        <input type="text" name="title" id="ws-title" placeholder="e.g. my task" />
+        <button type="submit" class="new-session-btn">+ new session</button>
       </form>
-      <p class="muted">result: <code><%= inspect(@workspace_result) %></code></p>
 
-      <ul>
+      <%= if @workspace_result do %>
+        <p class="workspace-feedback muted"><%= result_label(@workspace_result) %></p>
+      <% end %>
+
+      <div class="workspace-list">
         <%= if @workspace_sessions == [] do %>
-          <li class="muted">no sessions — open one over a git repository</li>
+          <p class="muted empty-hint">
+            no sessions yet — enter a git repository path above and press “+ new session”
+          </p>
         <% end %>
         <%= for s <- @workspace_sessions do %>
-          <li style="display:flex; gap:6px; align-items:center; justify-content:space-between">
-            <span>
-              <span class={"pill state-#{if s.current, do: "active", else: "gone"}"}>
-                <%= if s.current, do: "current", else: "idle" %>
-              </span>
-              <code><%= s.title %></code>
-              <span class="muted">· <%= s.cwd %></span>
+          <div class="workspace-row">
+            <span class={"pill state-#{if s.current, do: "active", else: "gone"}"}>
+              <%= if s.current, do: "current", else: "idle" %>
             </span>
-            <span>
+            <div class="workspace-meta">
+              <code><%= s.title %></code>
+              <span class="muted"><%= s.cwd %></span>
+            </div>
+            <div class="workspace-actions">
               <%= unless s.current do %>
                 <button phx-click="workspace_switch" phx-value-session={s.session_key}>switch</button>
               <% end %>
               <button phx-click="workspace_close" phx-value-session={s.session_key}>close</button>
-            </span>
-          </li>
+            </div>
+          </div>
         <% end %>
-      </ul>
+      </div>
     </section>
     """
   end
+
+  defp result_label({:ok, _session}), do: "session created"
+  defp result_label({:error, reason}), do: "error: " <> inspect(reason)
+  defp result_label(other), do: inspect(other)
 end
