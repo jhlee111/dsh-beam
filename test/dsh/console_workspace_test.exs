@@ -196,7 +196,10 @@ defmodule DshBeam.ConsoleWorkspaceTest do
   end
 
   defp run_git(dir, args) do
-    {_out, 0} = System.cmd("git", args, stderr_to_stdout: true, cd: dir)
+    # CI runners have no git identity; supply one for every command (commit
+    # needs it, and it is harmless for init/add/config).
+    git = ["-c", "user.name=CI", "-c", "user.email=ci@example.com" | args]
+    {_out, 0} = System.cmd("git", git, stderr_to_stdout: true, cd: dir)
     :ok
   end
 end
