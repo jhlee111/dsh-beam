@@ -21,7 +21,11 @@ defmodule DshBeam.MixProject do
   defp deps do
     [
       # DSL sections/entities with compile-time validation and introspection.
-      {:spark, "~> 2.6"}
+      {:spark, "~> 2.6"},
+      # HTTP client for the LLM provider adapter (OpenAI-compatible APIs).
+      {:req, "~> 0.5"},
+      # Req.Test.json mocking (and Phoenix later) build on Plug.Conn.
+      {:plug, "~> 1.0"}
     ]
   end
 end
