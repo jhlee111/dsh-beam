@@ -50,6 +50,10 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:events, [])
       |> assign(:rows, [])
       |> assign(:bindings, %{})
+      |> assign(:llm_config, nil)
+      |> assign(:llm_result, nil)
+      |> assign(:credential_mode, "env")
+      |> assign(:credential_env, "DEEPSEEK_API_KEY")
       |> refresh()
 
     {:ok, socket}
@@ -126,6 +130,29 @@ defmodule DshBeamWeb.ConsoleLive do
      socket
      |> assign(chat_log: [assistant, entry | socket.assigns.chat_log], chat_text: "")
      |> refresh()}
+  end
+
+  def handle_event("llm_apply", params, socket) do
+    result =
+      case DshBeam.Context.get(socket.assigns.ctx, :llm) do
+        {:ok, llm} ->
+          credential =
+            case params["credential_mode"] do
+              "literal" -> {:literal, params["credential_value"]}
+              _ -> {:env, params["credential_value"]}
+            end
+
+          DshBeam.Llm.configure(llm,
+            base_url: params["base_url"],
+            model: params["model"],
+            credential: credential
+          )
+
+        :not_found ->
+          {:error, :no_llm_plugin}
+      end
+
+    {:noreply, socket |> assign(llm_result: inspect(result)) |> refresh()}
   end
 
   @impl true
@@ -205,6 +232,32 @@ defmodule DshBeamWeb.ConsoleLive do
       </section>
 
       <section>
+        <h2>llm settings</h2>
+        <%= if @llm_config do %>
+          <form phx-submit="llm_apply">
+            <label class="muted">base_url</label>
+            <input type="text" name="base_url" value={@llm_config.base_url} />
+            <label class="muted">model</label>
+            <input type="text" name="model" value={@llm_config.model} />
+            <select name="credential_mode">
+              <option value="env" selected={@credential_mode == "env"}>env</option>
+              <option value="literal" selected={@credential_mode == "literal"}>literal</option>
+            </select>
+            <input
+              type="text"
+              name="credential_value"
+              value={@credential_env}
+              placeholder={if @credential_mode == "env", do: "env name", else: "literal key (not echoed)"}
+            />
+            <button type="submit">apply (configure, no re-mount)</button>
+          </form>
+          <p class="muted">result: <code><%= inspect(@llm_result) %></code></p>
+        <% else %>
+          <p class="muted">no :llm provider (seed the demo composition)</p>
+        <% end %>
+      </section>
+
+      <section>
         <h2>creator / sandbox</h2>
         <form phx-submit="define">
           <select name="mode">
@@ -268,7 +321,26 @@ defmodule DshBeamWeb.ConsoleLive do
         }
       end)
 
-    assign(socket, rows: rows, bindings: bindings)
+    llm_config =
+      case DshBeam.Context.get(socket.assigns.ctx, :llm) do
+        {:ok, llm} when is_pid(llm) -> DshBeam.Llm.config(llm)
+        _ -> nil
+      end
+
+    {credential_mode, credential_env} =
+      case llm_config && llm_config.credential do
+        {:literal, _} -> {"literal", ""}
+        {:env, name} -> {"env", name}
+        _ -> {"env", "DEEPSEEK_API_KEY"}
+      end
+
+    assign(socket,
+      rows: rows,
+      bindings: bindings,
+      llm_config: llm_config,
+      credential_mode: credential_mode,
+      credential_env: credential_env
+    )
   end
 
   defp os_pid_for(%{plugin: DshBeam.Sandbox.Plugin, pid: pid}) when is_pid(pid) do

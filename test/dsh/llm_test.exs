@@ -90,15 +90,18 @@ defmodule DshBeam.LlmTest do
     assert {:error, :capabilities_unavailable} = DshBeam.Llm.Chat.ask(chat, "hello?")
   end
 
-  test "the Req adapter posts to the configured endpoint and parses the completion" do
+  test "the Req adapter resolves the credential and parses the completion" do
     # the transport itself is the mock boundary: a plug replaces the network
+    test = self()
+
     plug = fn conn ->
+      send(test, {:auth, conn.req_headers})
       Req.Test.json(conn, %{"choices" => [%{"message" => %{"content" => "from-plug"}}]})
     end
 
     config = [
       base_url: "https://api.deepseek.com",
-      api_key: "test-key",
+      credential: {:literal, "test-key"},
       model: "deepseek-chat",
       adapter_config: %{plug: plug}
     ]
@@ -108,6 +111,51 @@ defmodule DshBeam.LlmTest do
 
     {:ok, llm} = DshBeam.Context.get(ctx, :llm)
     assert {:ok, "from-plug"} = DshBeam.Llm.chat(llm, [%{"role" => "user", "content" => "hi"}])
+
+    # the credential reference was resolved into a bearer header per request
+    assert_receive {:auth, headers}, 1000
+    assert {"authorization", "Bearer test-key"} in headers
+  end
+
+  test "configure/2 changes connection facts for the next request without re-mounting" do
+    config = [adapter: StubLlmAdapter, model: "stub-model", adapter_config: %{parent: self()}]
+    {:ok, runtime} = DshBeam.Runtime.start_link([llm_entry(config)], [])
+    ctx = DshBeam.Runtime.context(runtime)
+
+    {:ok, llm} = DshBeam.Context.get(ctx, :llm)
+    %{llm: %{pid: pid_before}} = DshBeam.Runtime.entries(runtime)
+
+    assert :ok = DshBeam.Llm.configure(llm, model: "new-model")
+
+    # the fiber was not re-mounted — only its connection facts changed
+    assert %{llm: %{pid: ^pid_before}} = DshBeam.Runtime.entries(runtime)
+
+    assert {:ok, _} = DshBeam.Llm.chat(llm, [%{"role" => "user", "content" => "hi"}])
+    assert_receive {:complete, "new-model", _}, 1000
+
+    assert %{model: "new-model"} = DshBeam.Llm.config(llm)
+  end
+
+  test "a missing credential fails the completion before any request" do
+    plug = fn conn ->
+      send(self(), :request_made)
+      Req.Test.json(conn, %{})
+    end
+
+    config = [
+      credential: {:env, "DSH_LLM_DEFINITELY_MISSING"},
+      adapter_config: %{plug: plug}
+    ]
+
+    {:ok, runtime} = DshBeam.Runtime.start_link([llm_entry(config)], [])
+    ctx = DshBeam.Runtime.context(runtime)
+
+    {:ok, llm} = DshBeam.Context.get(ctx, :llm)
+
+    assert {:error, {:missing_env, "DSH_LLM_DEFINITELY_MISSING"}} =
+             DshBeam.Llm.chat(llm, [%{"role" => "user", "content" => "hi"}])
+
+    refute_received :request_made
   end
 
   defp wait_until(fun), do: wait_until(fun, 200)

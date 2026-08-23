@@ -71,6 +71,29 @@ defmodule DshBeam.ConsoleTest do
     wait_until(fn -> DshBeam.Context.get(ctx, :form_made) == {:ok, 7} end)
   end
 
+  test "the llm settings panel reconfigures the provider without re-mounting",
+       %{session: session, ctx: ctx, runtime: runtime} do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    render_submit(view, "seed", %{})
+
+    {:ok, llm} = DshBeam.Context.get(ctx, :llm)
+    %{llm: %{pid: pid_before}} = DshBeam.Runtime.entries(runtime)
+
+    html =
+      render_submit(view, "llm_apply", %{
+        "base_url" => "https://example.com",
+        "model" => "deepseek-reasoner",
+        "credential_mode" => "env",
+        "credential_value" => "MY_KEY"
+      })
+
+    assert html =~ "deepseek-reasoner"
+
+    # dynamic reconfiguration: the fiber is untouched, the facts changed
+    assert %{llm: %{pid: ^pid_before}} = DshBeam.Runtime.entries(runtime)
+    assert %{model: "deepseek-reasoner", credential: {:env, "MY_KEY"}} = DshBeam.Llm.config(llm)
+  end
+
   test "the sandbox form defines a plugin outside the host BEAM", %{session: session, ctx: ctx} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
 
