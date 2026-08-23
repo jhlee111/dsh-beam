@@ -54,6 +54,7 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:llm_result, nil)
       |> assign(:credential_mode, "env")
       |> assign(:credential_env, "DEEPSEEK_API_KEY")
+      |> assign(:inventory, [])
       |> refresh()
 
     {:ok, socket}
@@ -154,6 +155,71 @@ defmodule DshBeamWeb.ConsoleLive do
 
     {:noreply, socket |> assign(llm_result: inspect(result)) |> refresh()}
   end
+
+  def handle_event("settings_save", params, socket) do
+    plugin = String.to_existing_atom(params["plugin"])
+    store = DshBeam.Runtime.settings(socket.assigns.runtime)
+    values = params["settings"] || %{}
+
+    DshBeam.Plugin.settings(plugin)
+    |> Enum.each(fn setting ->
+      raw = values[to_string(setting.name)]
+
+      if raw != nil do
+        case parse_setting(setting, raw) do
+          {:ok, value} -> DshBeam.Settings.put(store, plugin, setting.name, value)
+          :skip -> :ok
+          :invalid -> :ok
+        end
+      end
+    end)
+
+    {:noreply, refresh(socket)}
+  end
+
+  defp parse_setting(%{type: :integer}, raw) do
+    case Integer.parse(raw) do
+      {value, ""} -> {:ok, value}
+      _ -> :invalid
+    end
+  end
+
+  defp parse_setting(%{type: :float}, raw) do
+    case Float.parse(raw) do
+      {value, ""} -> {:ok, value}
+      _ -> :invalid
+    end
+  end
+
+  defp parse_setting(%{type: :boolean}, raw) do
+    case raw do
+      "true" -> {:ok, true}
+      "false" -> {:ok, false}
+      _ -> :invalid
+    end
+  end
+
+  defp parse_setting(%{type: :string}, raw), do: {:ok, raw}
+
+  defp parse_setting(%{type: :atom}, raw) do
+    try do
+      {:ok, String.to_existing_atom(raw)}
+    rescue
+      _ -> :invalid
+    end
+  end
+
+  defp parse_setting(%{type: :credential}, ""), do: :skip
+
+  defp parse_setting(%{type: :credential}, raw) do
+    case String.split(raw, ":", parts: 2) do
+      ["env", name] -> {:ok, {:env, name}}
+      ["literal", key] -> {:ok, {:literal, key}}
+      _ -> :invalid
+    end
+  end
+
+  defp parse_setting(_setting, _raw), do: :invalid
 
   @impl true
   def handle_info({:dsh_event, event}, socket) do
@@ -280,6 +346,28 @@ defmodule DshBeamWeb.ConsoleLive do
           </ul>
         </div>
       </section>
+
+      <section>
+        <h2>plugins</h2>
+        <%= for plugin <- @inventory do %>
+          <div style="border-top:1px solid #20262f; padding:6px 0">
+            <strong><%= plugin.name %></strong>
+            <span class={"pill state-#{if plugin.enabled, do: "active", else: "gone"}"}>
+              <%= if plugin.enabled, do: "enabled", else: "disabled" %>
+            </span>
+            <%= if plugin.settings != [] do %>
+              <form phx-submit="settings_save" class="row">
+                <input type="hidden" name="plugin" value={to_string(plugin.plugin)} />
+                <%= for setting <- plugin.settings do %>
+                  <label class="muted" title={setting.doc}><%= setting.name %></label>
+                  <input type="text" name={"settings[#{setting.name}]"} value={setting.display} />
+                <% end %>
+                <button type="submit">save</button>
+              </form>
+            <% end %>
+          </div>
+        <% end %>
+      </section>
     </main>
     """
   end
@@ -339,9 +427,45 @@ defmodule DshBeamWeb.ConsoleLive do
       bindings: bindings,
       llm_config: llm_config,
       credential_mode: credential_mode,
-      credential_env: credential_env
+      credential_env: credential_env,
+      inventory: build_inventory(runtime, entries)
     )
   end
+
+  defp build_inventory(runtime, entries) do
+    store = DshBeam.Runtime.settings(runtime)
+    mounted = MapSet.new(entries, fn {_id, rec} -> rec.spec.plugin end)
+
+    DshBeam.Plugin.Inventory.installed()
+    |> Enum.map(fn entry ->
+      %{
+        plugin: entry.plugin,
+        name: entry.plugin |> inspect() |> String.replace("Elixir.", ""),
+        enabled: MapSet.member?(mounted, entry.plugin),
+        settings: Enum.map(entry.settings, &setting_view(store, entry.plugin, &1))
+      }
+    end)
+  end
+
+  defp setting_view(store, plugin, setting) do
+    value =
+      case DshBeam.Settings.get(store, plugin, setting.name) do
+        {:ok, value} -> value
+        _ -> setting.default
+      end
+
+    %{
+      name: setting.name,
+      type: setting.type,
+      doc: setting.doc,
+      value: value,
+      display: setting_display(setting.type, value)
+    }
+  end
+
+  defp setting_display(:credential, {:env, name}), do: "env:" <> name
+  defp setting_display(:credential, {:literal, _key}), do: "literal:"
+  defp setting_display(_type, value), do: to_string(value)
 
   defp os_pid_for(%{plugin: DshBeam.Sandbox.Plugin, pid: pid}) when is_pid(pid) do
     # the adapter may be mid-crash when the event refresh runs: never let a

@@ -40,6 +40,8 @@ defmodule DshBeam.Runtime do
 
   def entries(runtime), do: GenServer.call(runtime, :entries)
 
+  def settings(runtime), do: GenServer.call(runtime, :settings)
+
   def reconcile(runtime, entries) do
     GenServer.call(runtime, {:reconcile, entries})
   end
@@ -56,7 +58,8 @@ defmodule DshBeam.Runtime do
   def init(entries) do
     {:ok, ctx} = DshBeam.Context.start_link([])
     {:ok, sup} = DynamicSupervisor.start_link(strategy: :one_for_one)
-    state = %{ctx: ctx, sup: sup, entries: %{}, subscribers: %{}}
+    {:ok, settings} = DshBeam.Settings.start_link()
+    state = %{ctx: ctx, sup: sup, settings: settings, entries: %{}, subscribers: %{}}
     {:ok, state, {:continue, {:apply, entries}}}
   end
 
@@ -75,6 +78,8 @@ defmodule DshBeam.Runtime do
   def handle_call(:context, _from, state), do: {:reply, state.ctx, state}
 
   def handle_call(:entries, _from, state), do: {:reply, state.entries, state}
+
+  def handle_call(:settings, _from, state), do: {:reply, state.settings, state}
 
   def handle_call(:subscribe, {owner, _tag}, state) do
     case state.subscribers do

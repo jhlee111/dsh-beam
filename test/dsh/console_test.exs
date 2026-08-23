@@ -94,6 +94,25 @@ defmodule DshBeam.ConsoleTest do
     assert %{model: "deepseek-reasoner", credential: {:env, "MY_KEY"}} = DshBeam.Llm.config(llm)
   end
 
+  test "the plugins panel lists the inventory and saves a setting override",
+       %{session: session, runtime: runtime} do
+    {:ok, view, html} = live(build_conn(), "/", session: session)
+
+    assert html =~ "ConsoleSettingsPlugin"
+    assert html =~ "enabled"
+
+    html =
+      render_submit(view, "settings_save", %{
+        "plugin" => to_string(ConsoleSettingsPlugin),
+        "settings" => %{"answer_limit" => "9"}
+      })
+
+    # the override persisted and re-rendered
+    store = DshBeam.Runtime.settings(runtime)
+    assert {:ok, 9} = DshBeam.Settings.get(store, ConsoleSettingsPlugin, :answer_limit)
+    assert html =~ "9"
+  end
+
   test "the sandbox form defines a plugin outside the host BEAM", %{session: session, ctx: ctx} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
 
@@ -191,4 +210,11 @@ defmodule DshBeam.ConsoleTest do
         wait_until(fun, tries - 1)
     end
   end
+end
+
+defmodule ConsoleSettingsPlugin do
+  @moduledoc false
+  use DshBeam.Plugin
+
+  setting(:answer_limit, type: :integer, default: 3, doc: "max answers per request")
 end
