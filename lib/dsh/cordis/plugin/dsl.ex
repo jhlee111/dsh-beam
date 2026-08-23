@@ -25,7 +25,14 @@ defmodule DshBeam.Plugin.Dsl do
 
   defmodule Tool do
     @moduledoc false
-    defstruct [:name, :description, :parameters, :__identifier__, :__spark_metadata__]
+    defstruct [
+      :name,
+      :description,
+      :parameters,
+      :timeout_ms,
+      :__identifier__,
+      :__spark_metadata__
+    ]
   end
 
   use Spark.Dsl.Extension,
@@ -101,7 +108,11 @@ defmodule DshBeam.Plugin.Dsl do
             schema: [
               Field.new(:name, :atom, required: true, doc: "the tool name"),
               Field.new(:description, :string, required: true, doc: "what the tool does"),
-              Field.new(:parameters, :any, default: %{}, doc: "JSON Schema of the arguments")
+              Field.new(:parameters, :any, default: %{}, doc: "JSON Schema of the arguments"),
+              Field.new(:timeout_ms, {:or, [:integer, nil]},
+                default: nil,
+                doc: "cooperative per-call budget; the tool call is aborted after this many ms"
+              )
             ],
             identifier: :name
           )

@@ -6,7 +6,13 @@ defmodule DshBeam.Tool.Registry do
   """
 
   @typedoc "A registry entry: the tool spec plus its owning plugin."
-  @type entry :: %{name: atom(), description: String.t(), parameters: map(), plugin: module()}
+  @type entry :: %{
+          name: atom(),
+          description: String.t(),
+          parameters: map(),
+          timeout_ms: integer() | nil,
+          plugin: module()
+        }
 
   @doc "Every installed tool, sorted by name."
   @spec installed() :: [entry()]
@@ -18,9 +24,21 @@ defmodule DshBeam.Tool.Registry do
             name: tool.name,
             description: tool.description,
             parameters: tool.parameters,
+            timeout_ms: tool.timeout_ms,
             plugin: inventory_entry.plugin
           }
 
     Enum.sort_by(entries, & &1.name)
+  end
+
+  @doc "The declared timeout (ms) for a tool name, or nil when undeclared."
+  @spec timeout(atom()) :: integer() | nil
+  def timeout(name) do
+    installed()
+    |> Enum.find(&(&1.name == name))
+    |> case do
+      nil -> nil
+      entry -> entry.timeout_ms
+    end
   end
 end

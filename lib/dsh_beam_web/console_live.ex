@@ -73,6 +73,24 @@ defmodule DshBeamWeb.ConsoleLive do
     {:noreply, socket |> assign(source: source, result: inspect(result)) |> refresh()}
   end
 
+  def handle_event("export_plugin", _params, socket) do
+    # Export the live composition (including any creator-defined plugin source
+    # in the editor) as a deployable .exs plugin file under the workspace.
+    dir = Path.join(File.cwd!(), "plugins")
+    File.mkdir_p!(dir)
+    path = Path.join(dir, "composition.exs")
+
+    sources =
+      case module_name(socket.assigns.source) do
+        {:ok, _mod} -> %{source: socket.assigns.source}
+        _ -> %{}
+      end
+
+    result = DshBeam.Creator.export_plugin(socket.assigns.runtime, path, sources)
+
+    {:noreply, socket |> assign(result: inspect(result)) |> refresh()}
+  end
+
   def handle_event("remove", %{"id" => id_key}, socket) do
     id = decode_id!(socket.assigns.runtime, id_key)
 
@@ -404,6 +422,7 @@ defmodule DshBeamWeb.ConsoleLive do
           </select>
           <textarea name="source"><%= @source %></textarea>
           <button type="submit">define</button>
+          <button type="button" phx-click="export_plugin">export plugin (.exs)</button>
         </form>
         <p class="muted">result: <code><%= inspect(@result) %></code></p>
       </section>
@@ -566,6 +585,13 @@ defmodule DshBeamWeb.ConsoleLive do
   defp todo_status_class("completed"), do: "active"
   defp todo_status_class("in_progress"), do: "reloading"
   defp todo_status_class(_), do: "gone"
+
+  defp module_name(source) do
+    case Regex.run(~r/^\s*defmodule\s+([A-Z]\w*)/, source) do
+      [_, name] -> {:ok, name}
+      _ -> :none
+    end
+  end
 
   defp build_inventory(runtime, entries) do
     store = DshBeam.Runtime.settings(runtime)

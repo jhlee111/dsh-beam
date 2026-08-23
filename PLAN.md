@@ -384,3 +384,27 @@ keeping the "everything is a plugin" substrate intact:
 - An end-to-end console test drives a scripted model that writes a todo plan and
   runs a tool in one turn, asserting the chat pane, the todo panel, and the
   session all reflect it. 105 tests.
+
+## 24. Milestone 13 — safety guards + plugin export (complete)
+
+Two safety guards ported from the reference harness's `guard/*` family, plus
+creator-defined plugin sources made deployable — all as plugins, not loop
+hacks.
+
+- **`DshBeam.Guard.TimeoutPolicy`** — the reference `guard/timeout-policy`. A
+  tool declares `timeout_ms` in its DSL; the loop bounds each call to that
+  budget (cooperative, `Task.yield`, not a hard kill) and returns a
+  `TOOL_TIMEOUT` result when the deadline wins. Zero-config: the budget lives
+  on the tool's own declaration (`DshBeam.Tool.Registry.timeout/1`).
+- **`DshBeam.Guard.RepeatToolReminder`** — the reference
+  `guard/repeat-tool-reminder`. Tracks runs of consecutive identical
+  (canonicalized) tool calls and injects an advisory nudge at thresholds
+  `[3,5,8]` — advisory only, no veto; the decision stays with the model.
+- **Plugin export/import** — `DshBeam.Creator.export_plugin/3` writes the live
+  composition + creator-defined source as a deployable `.exs` script
+  (recompiled from source, not a binary), and `import_plugin/1` boots a fresh
+  runtime from it. The console's creator panel gains an "export plugin (.exs)"
+  button. An edited plugin now survives a restart and can be shared — the
+  "asset" the user asked for, named in the harness's own domain vocabulary
+  ("plugin"), not "asset".
+- 114 tests.

@@ -9,7 +9,8 @@ defmodule DshBeam.ToolTest do
                parameters: %{
                  "type" => "object",
                  "properties" => %{"text" => %{"type" => "string"}}
-               }
+               },
+               timeout_ms: nil
              }
            ]
   end

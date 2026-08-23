@@ -62,19 +62,30 @@ defmodule DshBeam.Agent.Loop do
         _ = DshBeam.Session.append(view.session, %{"role" => "user", "content" => task})
 
         messages = [system | history] ++ [%{"role" => "user", "content" => task}]
-        loop(data.ctx, view.llm, view.session, messages, 0, max_steps, [])
+
+        loop(
+          data.ctx,
+          view.llm,
+          view.session,
+          messages,
+          0,
+          max_steps,
+          [],
+          DshBeam.Guard.RepeatToolReminder.new()
+        )
 
       _ ->
         {:error, :capabilities_unavailable}
     end
   end
 
-  defp loop(_ctx, _llm, session, _messages, step, max_steps, _trace) when step >= max_steps do
+  defp loop(_ctx, _llm, session, _messages, step, max_steps, _trace, _repeat)
+       when step >= max_steps do
     _ = DshBeam.Session.append(session, %{"role" => "error", "content" => "max_steps"})
     {:error, :max_steps}
   end
 
-  defp loop(ctx, llm, session, messages, step, max_steps, trace) do
+  defp loop(ctx, llm, session, messages, step, max_steps, trace, repeat) do
     tools = available_tools(ctx)
 
     case DshBeam.Llm.chat(llm, messages, tools: tools) do
@@ -85,14 +96,20 @@ defmodule DshBeam.Agent.Loop do
         # so the chat pane shows tool execution and survives a refresh
         append_steps(session, steps)
 
+        # the harness's guard/repeat-tool-reminder: count consecutive identical
+        # tool calls and inject an advisory nudge when a threshold is hit
+        {repeat, reminder} = track_repeats(repeat, calls)
+        messages = maybe_remind(messages ++ [assistant | tool_messages], reminder)
+
         loop(
           ctx,
           llm,
           session,
-          messages ++ [assistant | tool_messages],
+          messages,
           step + 1,
           max_steps,
-          Enum.reverse(steps) ++ trace
+          Enum.reverse(steps) ++ trace,
+          repeat
         )
 
       {:ok, %{content: content}} ->
@@ -103,6 +120,20 @@ defmodule DshBeam.Agent.Loop do
         _ = DshBeam.Session.append(session, %{"role" => "error", "content" => inspect(reason)})
         {:error, reason}
     end
+  end
+
+  defp track_repeats(repeat, calls) do
+    Enum.reduce(calls, {repeat, nil}, fn call, {rep, _rem} ->
+      args = decode_arguments(call.arguments)
+      {new_rep, reminder} = DshBeam.Guard.RepeatToolReminder.track(rep, call.name, args)
+      {new_rep, reminder}
+    end)
+  end
+
+  defp maybe_remind(messages, nil), do: messages
+
+  defp maybe_remind(messages, reminder) do
+    messages ++ [%{"role" => "user", "content" => reminder}]
   end
 
   # prior user/assistant turns, replayed from the session log in append order
@@ -186,10 +217,11 @@ defmodule DshBeam.Agent.Loop do
         tool_name ->
           case DshBeam.Context.get(ctx, tool_name) do
             {:ok, provider} ->
-              case DshBeam.Tool.call(provider, tool_name, args) do
-                {:ok, value} -> to_string(value)
-                {:error, reason} -> "error: " <> inspect(reason)
-              end
+              # the harness's guard/timeout-policy: read the tool's declared
+              # cooperative budget and bound the call so a hung tool cannot
+              # stall the loop
+              DshBeam.Guard.TimeoutPolicy.invoke(provider, tool_name, args, timeout(tool_name))
+              |> result_string()
 
             :not_found ->
               "error: tool #{name} not available"
@@ -208,6 +240,11 @@ defmodule DshBeam.Agent.Loop do
       ArgumentError -> nil
     end
   end
+
+  defp timeout(name), do: DshBeam.Tool.Registry.timeout(name)
+
+  defp result_string({:ok, value}), do: to_string(value)
+  defp result_string({:error, reason}), do: "error: " <> inspect(reason)
 
   defp decode_arguments(arguments) do
     case JSON.decode(arguments) do

@@ -83,7 +83,12 @@ defmodule DshBeam.Plugin do
       try do
         Spark.Dsl.Extension.get_entities(mod, [:tool])
         |> Enum.map(fn tool ->
-          %{name: tool.name, description: tool.description, parameters: tool.parameters}
+          %{
+            name: tool.name,
+            description: tool.description,
+            parameters: tool.parameters,
+            timeout_ms: tool.timeout_ms
+          }
         end)
       rescue
         _ -> []
