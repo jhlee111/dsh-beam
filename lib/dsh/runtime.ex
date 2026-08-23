@@ -44,11 +44,19 @@ defmodule DshBeam.Runtime do
     GenServer.call(runtime, {:reconcile, entries})
   end
 
+  @doc """
+  Subscribe the calling process to entry changes. Every change to the entry
+  map (start, stop, crash, re-injection, crash loop) is fanned out as
+  {:dsh_runtime_event, {id, record_or_removed}}. The subscription is removed
+  when the subscriber dies.
+  """
+  def subscribe(runtime), do: GenServer.call(runtime, :subscribe)
+
   @impl true
   def init(entries) do
     {:ok, ctx} = DshBeam.Context.start_link([])
     {:ok, sup} = DynamicSupervisor.start_link(strategy: :one_for_one)
-    state = %{ctx: ctx, sup: sup, entries: %{}}
+    state = %{ctx: ctx, sup: sup, entries: %{}, subscribers: %{}}
     {:ok, state, {:continue, {:apply, entries}}}
   end
 
@@ -68,6 +76,17 @@ defmodule DshBeam.Runtime do
 
   def handle_call(:entries, _from, state), do: {:reply, state.entries, state}
 
+  def handle_call(:subscribe, {owner, _tag}, state) do
+    case state.subscribers do
+      %{^owner => _ref} ->
+        {:reply, :ok, state}
+
+      _ ->
+        ref = Process.monitor(owner)
+        {:reply, :ok, %{state | subscribers: Map.put(state.subscribers, owner, ref)}}
+    end
+  end
+
   def handle_call({:reconcile, entries}, _from, state) do
     {state, errors} = apply_entries(state, entries)
 
@@ -77,6 +96,8 @@ defmodule DshBeam.Runtime do
 
   @impl true
   def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
+    state = %{state | subscribers: Map.delete(state.subscribers, pid)}
+
     case Enum.find(state.entries, fn {_id, %{pid: p}} -> p == pid end) do
       nil ->
         {:noreply, state}
@@ -283,7 +304,9 @@ defmodule DshBeam.Runtime do
           end
         end
 
-        %{state | entries: Map.delete(state.entries, id)}
+        state
+        |> Map.update!(:entries, &Map.delete(&1, id))
+        |> notify({id, :removed})
     end
   end
 
@@ -298,7 +321,9 @@ defmodule DshBeam.Runtime do
   end
 
   defp put_record(state, id, rec) do
-    %{state | entries: Map.put(state.entries, id, rec)}
+    state
+    |> Map.update!(:entries, &Map.put(&1, id, rec))
+    |> notify({id, rec})
   end
 
   defp update_record(state, id, fun) do
@@ -306,5 +331,13 @@ defmodule DshBeam.Runtime do
       nil -> state
       rec -> put_record(state, id, fun.(rec))
     end
+  end
+
+  defp notify(state, event) do
+    Enum.each(state.subscribers, fn {pid, _ref} ->
+      send(pid, {:dsh_runtime_event, event})
+    end)
+
+    state
   end
 end
