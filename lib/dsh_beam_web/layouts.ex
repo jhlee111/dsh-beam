@@ -172,7 +172,43 @@ defmodule DshBeamWeb.Layouts do
             font-size: 16px; line-height: 24px; color: var(--dsw-alias-label-primary);
             white-space: pre-wrap; overflow-wrap: anywhere;
           }
-          .msg-assistant { color: var(--dsw-alias-label-primary); font-size: 15px; line-height: 24px; }
+          .msg-assistant {
+            color: var(--dsw-alias-label-primary); font-size: 15px; line-height: 24px;
+            display: flex; gap: 8px; align-items: flex-start;
+          }
+          .role-icon {
+            flex: none; display: inline-flex; align-items: center; justify-content: center;
+            width: 20px; height: 24px; font-size: 13px; line-height: 1;
+          }
+          .role-assistant { color: var(--dsw-static-deepseek-400, #679efe); }
+          .role-tool { color: var(--dsw-static-green-500, #34d399); }
+          .role-error { color: var(--dsw-static-red-400, #fb7185); }
+          .turn-status {
+            align-self: flex-start; flex: none; display: inline-flex; align-items: center;
+            height: 26px; font-size: 14px; font-weight: 500; white-space: nowrap;
+            background: linear-gradient(
+              90deg,
+              var(--dsw-static-deepseek-500) 0%,
+              var(--dsw-static-deepseek-500) 40%,
+              var(--dsw-static-deepseek-200) 50%,
+              var(--dsw-static-deepseek-500) 60%,
+              var(--dsw-static-deepseek-500) 100%
+            );
+            background-position: 100% 0;
+            background-size: 250% 100%;
+            background-clip: text; color: transparent;
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            animation: dsh-turn-status-shimmer 1.8s linear infinite;
+          }
+          .turn-status-clock {
+            margin-left: 8px; font-size: 13px; font-weight: 400;
+            font-variant-numeric: tabular-nums;
+            color: var(--dsw-alias-label-caption);
+            -webkit-text-fill-color: var(--dsw-alias-label-caption);
+          }
+          @keyframes dsh-turn-status-shimmer {
+            to { background-position: 0 0; }
+          }
           .markdown > :first-child { margin-top: 0; }
           .markdown > :last-child { margin-bottom: 0; }
           .markdown h1, .markdown h2, .markdown h3 { font-size: 15px; margin: 12px 0 4px; color: var(--dsw-alias-label-primary); }
@@ -402,9 +438,32 @@ defmodule DshBeamWeb.Layouts do
         <script src="/assets/phoenix.js"></script>
         <script src="/assets/phoenix_live_view.js"></script>
         <script>
+          // "Deep diving" elapsed-time clock: ticks client-side without a
+          // server round-trip, revealing the elapsed time after 15s (the
+          // reference's turn status).
+          let ElapsedClock = {
+            mounted() {
+              this.startAt = parseInt(this.el.dataset.startAt, 10) * 1000;
+              this.tick = () => {
+                const elapsed = Math.max(0, Date.now() - this.startAt);
+                const show = elapsed >= 15000;
+                this.el.hidden = !show;
+                if (show) {
+                  const s = Math.floor(elapsed / 1000);
+                  const m = Math.floor(s / 60);
+                  this.el.textContent = m > 0 ? `${m}m ${String(s % 60).padStart(2, "0")}s` : `${s}s`;
+                }
+              };
+              this.tick();
+              this.timer = setInterval(this.tick, 1000);
+            },
+            destroyed() { clearInterval(this.timer); }
+          };
+
           let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
           let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
-            params: { _csrf_token: csrfToken }
+            params: { _csrf_token: csrfToken },
+            hooks: { ElapsedClock }
           });
           liveSocket.connect();
           window.addEventListener("phx:page-loading-stop", () => liveSocket.enableDebug());

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Conversation rendering
+
+- Ported the reference chat's role chrome: assistant/tool/error entries carry
+  small colored role icons (✦ brand-blue assistant, ❯/⏎ green tool, ⚠ red
+  error), and a running turn renders the "Deep diving…" shimmer with an
+  elapsed-time clock (a client-side hook that reveals elapsed after 15s).
+
 ### Conversation gated on a workspace session
 
 - The chat/trajectory conversation and its composer only render while a

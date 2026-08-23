@@ -16,19 +16,31 @@ defmodule DshBeam.Ui.ChatEntry do
       <% :user -> %>
         <div class="msg-user"><div class="bubble"><%= @entry.content %></div></div>
       <% :assistant -> %>
-        <div class="msg-assistant"><div class="markdown"><%= markdown(@entry.content) %></div></div>
+        <div class="msg-assistant">
+          <span class="role-icon role-assistant" aria-hidden="true">✦</span>
+          <div class="markdown"><%= markdown(@entry.content) %></div>
+        </div>
       <% :tool_call -> %>
         <div class="tool-card">
-          <span class="tool-label">tool_call · <%= @entry.name %></span>
+          <span class="tool-label">
+            <span class="role-icon role-tool" aria-hidden="true">❯</span>
+            tool_call · <%= @entry.name %>
+          </span>
           <code class="tool-command">$ <%= @entry.command %></code>
         </div>
       <% :tool_result -> %>
         <div class="tool-result">
-          <span class="tool-label">tool_result · <%= @entry.name %></span>
+          <span class="tool-label">
+            <span class="role-icon role-tool" aria-hidden="true">⏎</span>
+            tool_result · <%= @entry.name %>
+          </span>
           <pre><%= @entry.content %></pre>
         </div>
       <% :error -> %>
-        <div class="msg-error"><code><%= @entry.content %></code></div>
+        <div class="msg-error">
+          <span class="role-icon role-error" aria-hidden="true">⚠</span>
+          <code><%= @entry.content %></code>
+        </div>
       <% _ -> %>
         <div class="msg-event"><code><%= @entry.content %></code></div>
     <% end %>

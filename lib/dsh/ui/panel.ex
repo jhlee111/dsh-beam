@@ -112,7 +112,17 @@ defmodule DshBeam.Ui.Panel do
             <div class="msg-error"><code><%= @chat_error %></code></div>
           <% end %>
           <%= if @chat_busy do %>
-            <div class="msg-busy muted">thinking (model round-trip)…</div>
+            <div class="turn-status" role="status" aria-live="polite">
+              Deep diving…
+              <span
+                class="turn-status-clock"
+                id="turn-status-clock"
+                phx-hook="ElapsedClock"
+                data-start-at={@chat_started_at}
+                hidden
+              >
+              </span>
+            </div>
           <% end %>
         </div>
       </div>

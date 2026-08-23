@@ -85,6 +85,7 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:chat_log, [])
       |> assign(:chat_busy, false)
       |> assign(:chat_task, nil)
+      |> assign(:chat_started_at, nil)
       |> assign(:chat_error, nil)
       |> assign(:todos, [])
       |> assign(:events, [])
@@ -223,7 +224,15 @@ defmodule DshBeamWeb.ConsoleLive do
             send(from, {:chat_result, text, result})
           end)
 
-        {:noreply, socket |> assign(chat_text: "", chat_busy: true, chat_task: task) |> refresh()}
+        {:noreply,
+         socket
+         |> assign(
+           chat_text: "",
+           chat_busy: true,
+           chat_task: task,
+           chat_started_at: System.system_time(:second)
+         )
+         |> refresh()}
 
       :not_found ->
         {:noreply,
@@ -247,7 +256,8 @@ defmodule DshBeamWeb.ConsoleLive do
         :ok
     end
 
-    {:noreply, socket |> assign(chat_busy: false, chat_task: nil) |> refresh()}
+    {:noreply,
+     socket |> assign(chat_busy: false, chat_task: nil, chat_started_at: nil) |> refresh()}
   end
 
   def handle_event("clear_chat", _params, socket) do
@@ -528,10 +538,15 @@ defmodule DshBeamWeb.ConsoleLive do
     socket =
       case result do
         {:ok, _answer, _trace} ->
-          assign(socket, chat_busy: false, chat_task: nil)
+          assign(socket, chat_busy: false, chat_task: nil, chat_started_at: nil)
 
         {:error, reason} ->
-          assign(socket, chat_busy: false, chat_task: nil, chat_error: inspect(reason))
+          assign(socket,
+            chat_busy: false,
+            chat_task: nil,
+            chat_started_at: nil,
+            chat_error: inspect(reason)
+          )
       end
 
     {:noreply, refresh(socket)}
@@ -626,9 +641,6 @@ defmodule DshBeamWeb.ConsoleLive do
                     <button type="submit">send</button>
                   <% end %>
                 </form>
-                <%= if @chat_busy do %>
-                  <div class="composer-status muted">thinking (model round-trip)…</div>
-                <% end %>
               <% else %>
                 <div class="composer composer-inert">
                   <input type="text" disabled placeholder="open a workspace to start" />
