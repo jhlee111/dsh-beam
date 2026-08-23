@@ -23,19 +23,51 @@ defmodule DshBeamWeb.Layouts do
             background: var(--dsw-static-neutral-bluish-950, #0f1115);
             color: var(--dsw-static-neutral-bluish-50, #d7dae0);
           }
-          main {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
-            gap: 12px;
-            padding: 12px;
-            align-items: start;
+          /* Two-pane app: persistent sidebar (workspace) + main (chat). */
+          .app { display: flex; height: 100vh; }
+          aside.sidebar {
+            width: 280px; flex-shrink: 0; padding: 10px;
+            border-right: 1px solid var(--dsw-alias-border-l1, #232a36);
+            overflow-y: auto;
           }
+          aside.sidebar .brand {
+            font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+            margin: 0 0 10px; color: var(--dsw-static-blue-300, #8fa3bf);
+          }
+          main.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+          .topbar {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 8px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1, #232a36);
+          }
+          .content { flex: 1; padding: 12px; overflow-y: auto; }
+
+          /* Settings modal overlay. */
+          .settings-overlay {
+            position: fixed; inset: 0; z-index: 100;
+            background: rgba(0, 0, 0, .6);
+            display: flex; align-items: center; justify-content: center;
+          }
+          .settings-panel {
+            display: flex; width: min(760px, 92vw); max-height: 84vh;
+            background: var(--dsw-static-neutral-bluish-850, #161a21);
+            border: 1px solid var(--dsw-alias-border-l1, #232a36);
+            border-radius: 8px; overflow: hidden;
+          }
+          nav.settings-nav { width: 170px; border-right: 1px solid var(--dsw-alias-border-l1, #232a36); padding: 10px; }
+          .settings-nav-item {
+            display: block; width: 100%; text-align: left; margin: 2px 0;
+            background: transparent; border-color: transparent;
+          }
+          .settings-nav-item.active { border-color: var(--dsw-static-blue-500, #4b5b75); background: var(--dsw-static-neutral-bluish-900, #0c0f14); }
+          .settings-content { flex: 1; padding: 12px; overflow-y: auto; }
+
           section {
             background: var(--dsw-static-neutral-bluish-850, #161a21);
             border: 1px solid var(--dsw-alias-border-l1, #232a36);
             border-radius: 6px;
             padding: 10px;
           }
+          main.main section { margin-bottom: 12px; }
           h2 {
             font-size: 13px; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .06em;
             color: var(--dsw-static-blue-300, #8fa3bf);

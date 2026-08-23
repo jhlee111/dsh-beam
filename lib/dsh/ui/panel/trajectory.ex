@@ -12,7 +12,7 @@ defmodule DshBeam.Ui.Panel.Trajectory do
   use DshBeam.Plugin
   import Phoenix.Component
 
-  ui_slot(:panels, kind: :list, order: 35, component: {__MODULE__, :panel, []})
+  ui_slot(:main, kind: :list, order: 30, component: {__MODULE__, :panel, []})
 
   def panel(assigns) do
     ~H"""

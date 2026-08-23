@@ -73,6 +73,8 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:workspace_repo, ".")
       |> assign(:workspace_result, nil)
       |> assign(:trajectory, [])
+      |> assign(:settings_open, false)
+      |> assign(:settings_section, :models)
       |> refresh()
 
     {:ok, socket}
@@ -306,6 +308,19 @@ defmodule DshBeamWeb.ConsoleLive do
     {:noreply, refresh(socket)}
   end
 
+  def handle_event("open_settings", _params, socket) do
+    {:noreply, socket |> assign(settings_open: true, settings_section: :models) |> refresh()}
+  end
+
+  def handle_event("close_settings", _params, socket) do
+    {:noreply, assign(socket, settings_open: false) |> refresh()}
+  end
+
+  def handle_event("settings_tab", %{"section" => section_key}, socket) do
+    section = String.to_existing_atom(section_key)
+    {:noreply, assign(socket, settings_section: section) |> refresh()}
+  end
+
   defp entry_id_for_plugin(runtime, plugin) do
     runtime
     |> DshBeam.Runtime.entries()
@@ -386,9 +401,43 @@ defmodule DshBeamWeb.ConsoleLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <main>
-      <%= DshBeam.Ui.render_slot(:panels, assigns) %>
-    </main>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">dsh-beam</div>
+        <%= DshBeam.Ui.render_slot(:sidebar, assigns) %>
+      </aside>
+      <main class="main">
+        <header class="topbar">
+          <span class="muted">console</span>
+          <button phx-click="open_settings">settings</button>
+        </header>
+        <div class="content">
+          <%= DshBeam.Ui.render_slot(:main, assigns) %>
+        </div>
+      </main>
+    </div>
+
+    <%= if @settings_open do %>
+      <div class="settings-overlay" phx-click="close_settings">
+        <div class="settings-panel" phx-click-stop>
+          <nav class="settings-nav">
+            <%= for section <- @settings_sections do %>
+              <button
+                phx-click="settings_tab"
+                phx-value-section={section.key}
+                class={"settings-nav-item #{if section.key == @settings_section, do: "active"}"}
+              >
+                <%= section.label %>
+              </button>
+            <% end %>
+            <button phx-click="close_settings" class="settings-nav-item close">close</button>
+          </nav>
+          <div class="settings-content">
+            <%= DshBeam.Ui.render_slot(:settings_section, assigns, key: @settings_section) %>
+          </div>
+        </div>
+      </div>
+    <% end %>
     """
   end
 
@@ -489,7 +538,8 @@ defmodule DshBeamWeb.ConsoleLive do
       todos: todos(socket.assigns.ctx),
       trajectory: trajectory(socket.assigns.ctx),
       workspace_sessions: workspace_sessions(socket.assigns.ctx),
-      inventory: build_inventory(runtime, entries)
+      inventory: build_inventory(runtime, entries),
+      settings_sections: settings_sections()
     )
   end
 
@@ -608,6 +658,26 @@ defmodule DshBeamWeb.ConsoleLive do
     end
   catch
     :exit, _ -> %{}
+  end
+
+  # The settings modal's left nav: every registered settings section, sorted by
+  # order, with a human label (the ui_slot DSL has no label field, so sections
+  # carry a `key` and the shell maps it here).
+  defp settings_sections do
+    labels = %{
+      models: "Models",
+      plugins: "Plugins",
+      composition: "Composition",
+      bindings: "Bindings",
+      events: "Events",
+      creator: "Creator"
+    }
+
+    DshBeam.Ui.Registry.for_slot(:settings_section)
+    |> Enum.sort_by(& &1.order)
+    |> Enum.map(fn entry ->
+      %{key: entry.key, label: Map.get(labels, entry.key, inspect(entry.key))}
+    end)
   end
 
   defp module_name(source) do

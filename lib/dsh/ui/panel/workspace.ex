@@ -9,7 +9,7 @@ defmodule DshBeam.Ui.Panel.Workspace do
   use DshBeam.Plugin
   import Phoenix.Component
 
-  ui_slot(:panels, kind: :list, order: 5, component: {__MODULE__, :panel, []})
+  ui_slot(:sidebar, kind: :list, order: 10, component: {__MODULE__, :panel, []})
 
   def panel(assigns) do
     ~H"""

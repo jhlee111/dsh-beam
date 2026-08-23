@@ -34,10 +34,19 @@ defmodule DshBeam.ConsoleTest do
     %{runtime: runtime, ctx: ctx, session: session}
   end
 
+  # The composition/plugins/models/creator panels live in the settings modal.
+  defp open_settings(view), do: render_click(view, "open_settings", %{})
+
+  defp open_section(view, section),
+    do: render_click(view, "settings_tab", %{"section" => to_string(section)})
+
   test "renders the composition with live fiber states and seeds the demo", %{session: session} do
     {:ok, view, html} = live(build_conn(), "/", session: session)
-
     assert html =~ "dsh-beam console"
+    _ = open_settings(view)
+    _ = open_section(view, :composition)
+
+    html = render(view)
     assert html =~ ":console"
     assert html =~ "DshBeam.Console"
     # the console's own fiber is active
@@ -195,6 +204,8 @@ defmodule DshBeam.ConsoleTest do
 
   test "the creator form defines a plugin in-process", %{session: session, ctx: ctx} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
+    _ = open_settings(view)
+    _ = open_section(view, :creator)
 
     source = """
     defmodule FormMade do
@@ -212,6 +223,8 @@ defmodule DshBeam.ConsoleTest do
        %{session: session, ctx: ctx, runtime: runtime} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
     render_submit(view, "seed", %{})
+    _ = open_settings(view)
+    _ = open_section(view, :models)
 
     {:ok, llm} = DshBeam.Context.get(ctx, :llm)
     %{llm: %{pid: pid_before}} = DshBeam.Runtime.entries(runtime)
@@ -261,8 +274,11 @@ defmodule DshBeam.ConsoleTest do
 
   test "the plugins panel lists the inventory and saves a setting override",
        %{session: session, runtime: runtime} do
-    {:ok, view, html} = live(build_conn(), "/", session: session)
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    _ = open_settings(view)
+    _ = open_section(view, :plugins)
 
+    html = render(view)
     assert html =~ "ConsoleSettingsPlugin"
     assert html =~ "enabled"
 
@@ -280,6 +296,8 @@ defmodule DshBeam.ConsoleTest do
 
   test "the sandbox form defines a plugin outside the host BEAM", %{session: session, ctx: ctx} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
+    _ = open_settings(view)
+    _ = open_section(view, :composition)
 
     source = """
     defmodule SbxConsoleMade do
@@ -300,6 +318,8 @@ defmodule DshBeam.ConsoleTest do
   test "a kill updates the view through the runtime event stream", %{session: session} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
     render_submit(view, "seed", %{})
+    _ = open_settings(view)
+    _ = open_section(view, :composition)
 
     key = encode(:session)
     render_click(view, "kill", %{"id" => key})

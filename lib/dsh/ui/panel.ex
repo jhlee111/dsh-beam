@@ -11,7 +11,12 @@ defmodule DshBeam.Ui.Panel do
     use DshBeam.Plugin
     import Phoenix.Component
 
-    ui_slot(:panels, kind: :list, order: 10, component: {__MODULE__, :panel, []})
+    ui_slot(:settings_section,
+      kind: :keyed,
+      order: 40,
+      key: :composition,
+      component: {__MODULE__, :panel, []}
+    )
 
     def panel(assigns) do
       ~H"""
@@ -60,7 +65,12 @@ defmodule DshBeam.Ui.Panel do
     use DshBeam.Plugin
     import Phoenix.Component
 
-    ui_slot(:panels, kind: :list, order: 20, component: {__MODULE__, :panel, []})
+    ui_slot(:settings_section,
+      kind: :keyed,
+      order: 50,
+      key: :bindings,
+      component: {__MODULE__, :panel, []}
+    )
 
     def panel(assigns) do
       ~H"""
@@ -84,7 +94,7 @@ defmodule DshBeam.Ui.Panel do
     use DshBeam.Plugin
     import Phoenix.Component
 
-    ui_slot(:panels, kind: :list, order: 30, component: {__MODULE__, :panel, []})
+    ui_slot(:main, kind: :list, order: 10, component: {__MODULE__, :panel, []})
 
     def panel(assigns) do
       ~H"""
@@ -118,7 +128,7 @@ defmodule DshBeam.Ui.Panel do
     use DshBeam.Plugin
     import Phoenix.Component
 
-    ui_slot(:panels, kind: :list, order: 40, component: {__MODULE__, :panel, []})
+    ui_slot(:main, kind: :list, order: 40, component: {__MODULE__, :panel, []})
 
     def panel(assigns) do
       ~H"""
@@ -149,7 +159,12 @@ defmodule DshBeam.Ui.Panel do
     use DshBeam.Plugin
     import Phoenix.Component
 
-    ui_slot(:panels, kind: :list, order: 50, component: {__MODULE__, :panel, []})
+    ui_slot(:settings_section,
+      kind: :keyed,
+      order: 10,
+      key: :models,
+      component: {__MODULE__, :panel, []}
+    )
 
     def panel(assigns) do
       ~H"""
@@ -192,7 +207,12 @@ defmodule DshBeam.Ui.Panel do
     use DshBeam.Plugin
     import Phoenix.Component
 
-    ui_slot(:panels, kind: :list, order: 60, component: {__MODULE__, :panel, []})
+    ui_slot(:settings_section,
+      kind: :keyed,
+      order: 70,
+      key: :creator,
+      component: {__MODULE__, :panel, []}
+    )
 
     def panel(assigns) do
       ~H"""
@@ -218,7 +238,12 @@ defmodule DshBeam.Ui.Panel do
     use DshBeam.Plugin
     import Phoenix.Component
 
-    ui_slot(:panels, kind: :list, order: 70, component: {__MODULE__, :panel, []})
+    ui_slot(:settings_section,
+      kind: :keyed,
+      order: 60,
+      key: :events,
+      component: {__MODULE__, :panel, []}
+    )
 
     def panel(assigns) do
       ~H"""
@@ -241,7 +266,12 @@ defmodule DshBeam.Ui.Panel do
     use DshBeam.Plugin
     import Phoenix.Component
 
-    ui_slot(:panels, kind: :list, order: 80, component: {__MODULE__, :panel, []})
+    ui_slot(:settings_section,
+      kind: :keyed,
+      order: 20,
+      key: :plugins,
+      component: {__MODULE__, :panel, []}
+    )
 
     def panel(assigns) do
       ~H"""
