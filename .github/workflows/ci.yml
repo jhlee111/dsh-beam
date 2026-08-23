@@ -17,4 +17,4 @@ jobs:
       - run: mix format --check-formatted
       - run: mix compile --warnings-as-errors
       - run: mix credo --strict
-      - run: mix test
+      - run: mix test --exclude distributed

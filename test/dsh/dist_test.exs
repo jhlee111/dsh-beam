@@ -14,8 +14,8 @@ defmodule DshBeam.DistTest do
         setup_peer(context)
 
       true ->
-        # ExUnit skips a test whose context carries a :skip key; a setup
-        # callback may not return {:skip, ...} (that shape is rejected).
+        # CI runs `mix test --exclude distributed`, so this branch only matters
+        # locally without epmd: mark the tests skipped via a :skip tag.
         Map.put(context, :skip, "distributed Erlang unavailable (needs epmd + ~/.erlang.cookie)")
     end
   end
@@ -44,7 +44,9 @@ defmodule DshBeam.DistTest do
     }
   end
 
-  test "a remote fiber provides a value a local consumer resolves", %{peer_node: peer_node} do
+  test "a remote fiber provides a value a local consumer resolves", context do
+    peer_node = context.peer_node
+
     {:ok, runtime} = DshBeam.Runtime.start_link([], [])
     ctx = DshBeam.Runtime.context(runtime)
 
@@ -59,7 +61,9 @@ defmodule DshBeam.DistTest do
   end
 
   test "unloading the remote provider deactivates the local consumer first (the guard)",
-       %{peer_node: peer_node} do
+       context do
+    peer_node = context.peer_node
+
     {:ok, runtime} = DshBeam.Runtime.start_link([], [])
     ctx = DshBeam.Runtime.context(runtime)
 
@@ -78,7 +82,9 @@ defmodule DshBeam.DistTest do
     assert DshBeam.Plugin.fiber_state(consumer) == :inactive
   end
 
-  test "a remote fiber crash withdraws through the monitor safety net", %{peer_node: peer_node} do
+  test "a remote fiber crash withdraws through the monitor safety net", context do
+    peer_node = context.peer_node
+
     {:ok, runtime} = DshBeam.Runtime.start_link([], [])
     ctx = DshBeam.Runtime.context(runtime)
 
