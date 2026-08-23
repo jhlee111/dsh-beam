@@ -117,6 +117,36 @@ defmodule DshBeam.LlmTest do
     assert {"authorization", "Bearer test-key"} in headers
   end
 
+  test "the Req adapter forwards tools without crashing on the keyword opts" do
+    # regression: chat/3 passes opts as a keyword list [tools: ...]; the adapter
+    # must read it with opts[:tools], not the map-only opts.tools (BadMapError).
+    test = self()
+
+    plug = fn conn ->
+      send(test, {:body, conn.body_params})
+      Req.Test.json(conn, %{"choices" => [%{"message" => %{"content" => "with-tools"}}]})
+    end
+
+    config = [
+      base_url: "https://api.deepseek.com",
+      credential: {:literal, "test-key"},
+      model: "deepseek-chat",
+      adapter_config: %{plug: plug}
+    ]
+
+    {:ok, runtime} = DshBeam.Runtime.start_link([llm_entry(config)], [])
+    ctx = DshBeam.Runtime.context(runtime)
+
+    {:ok, llm} = DshBeam.Context.get(ctx, :llm)
+    tools = [%{"type" => "function", "function" => %{"name" => "bash"}}]
+
+    assert {:ok, %{content: "with-tools"}} =
+             DshBeam.Llm.chat(llm, [%{"role" => "user", "content" => "hi"}], tools: tools)
+
+    # the tools list made it into the outgoing JSON body
+    assert_receive {:body, %{"tools" => ^tools}}, 1000
+  end
+
   test "configure/2 changes connection facts for the next request without re-mounting" do
     config = [adapter: StubLlmAdapter, model: "stub-model", adapter_config: %{parent: self()}]
     {:ok, runtime} = DshBeam.Runtime.start_link([llm_entry(config)], [])

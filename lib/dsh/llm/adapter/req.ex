@@ -19,7 +19,8 @@ defmodule DshBeam.Llm.Adapter.Req do
     url = String.trim_trailing(config.base_url, "/") <> "/chat/completions"
 
     body = %{model: config.model, messages: messages, stream: false}
-    body = if opts[:tools] in [nil, []], do: body, else: Map.put(body, :tools, opts.tools)
+    tools = opts[:tools]
+    body = if tools in [nil, []], do: body, else: Map.put(body, :tools, tools)
 
     headers = [
       {"authorization", "Bearer " <> api_key},
