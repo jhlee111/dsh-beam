@@ -61,6 +61,7 @@ defmodule DshBeam.Ui.Panel.Workspace do
   end
 
   defp result_label({:ok, _session}), do: "session created"
+  defp result_label(:ok), do: "session closed"
   defp result_label({:error, reason}), do: "error: " <> inspect(reason)
   defp result_label(other), do: inspect(other)
 end

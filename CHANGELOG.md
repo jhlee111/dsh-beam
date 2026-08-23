@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fixes
+
+- Closing the current workspace session no longer crashes the console: the
+  chat/todo/trajectory projections now guard against a stale (dead) `:session`
+  binding instead of calling `subscribe`/`all` on the killed pid. Closing also
+  reports "session closed" instead of a raw `:ok`.
+
 ### Conversation rendering
 
 - Ported the reference chat's role chrome: assistant/tool/error entries carry

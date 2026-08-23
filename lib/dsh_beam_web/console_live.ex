@@ -847,8 +847,8 @@ defmodule DshBeamWeb.ConsoleLive do
   # The todo list is a projection of the session: the latest todo_write event
   # (whole-list, last-write-wins), nil before the first write.
   defp todos(ctx) do
-    case DshBeam.Context.get(ctx, :session) do
-      {:ok, session} when is_pid(session) ->
+    case alive_session(ctx) do
+      {:ok, session} ->
         session
         |> DshBeam.Session.all()
         |> Enum.filter(&(&1["role"] == "todo_write"))
@@ -867,8 +867,8 @@ defmodule DshBeamWeb.ConsoleLive do
   # The chat pane renders the session log (the single source of truth), so the
   # conversation survives a page refresh and tool calls appear chronologically.
   defp chat_log(ctx) do
-    case DshBeam.Context.get(ctx, :session) do
-      {:ok, session} when is_pid(session) ->
+    case alive_session(ctx) do
+      {:ok, session} ->
         # idempotent: once subscribed, appends fan out {:dsh_session_event, ...}
         # and re-render the pane incrementally (reactive coeffect, not polling)
         _ = DshBeam.Session.subscribe(session)
@@ -913,8 +913,8 @@ defmodule DshBeamWeb.ConsoleLive do
   # The trajectory is the same session log grouped by turn: a "user" event opens
   # a turn; the tool calls, results, and the answer that follow belong to it.
   defp trajectory(ctx) do
-    case DshBeam.Context.get(ctx, :session) do
-      {:ok, session} when is_pid(session) ->
+    case alive_session(ctx) do
+      {:ok, session} ->
         session
         |> DshBeam.Session.all()
         |> group_turns()
@@ -922,6 +922,20 @@ defmodule DshBeamWeb.ConsoleLive do
 
       _ ->
         []
+    end
+  end
+
+  # The current :session, only while its process is alive. Closing a session
+  # (e.g. the current workspace session) kills its pid, but the :session
+  # binding can briefly keep the stale pid — reading or subscribing to it
+  # would raise :noproc and crash the console.
+  defp alive_session(ctx) do
+    case DshBeam.Context.get(ctx, :session) do
+      {:ok, session} when is_pid(session) ->
+        if Process.alive?(session), do: {:ok, session}, else: :dead
+
+      _ ->
+        :none
     end
   end
 
