@@ -29,6 +29,15 @@ defmodule DshBeam.Shell.Plugin do
     :gen_statem.call(shell, {:run, command, args})
   end
 
+  @doc """
+  Run a command in a specific working directory (the session's worktree).
+  Each session owns its own `cwd`, so two sessions over one repository do not
+  clobber each other's files.
+  """
+  def run_in(shell, cwd, command, args \\ []) when is_pid(shell) and is_binary(cwd) do
+    :gen_statem.call(shell, {:run_in, cwd, command, args})
+  end
+
   @impl DshBeam.Plugin
   def mount(_ctx, opts) do
     timeout = Keyword.get(opts, :command_timeout_ms, 60_000)
@@ -38,21 +47,27 @@ defmodule DshBeam.Shell.Plugin do
 
   @impl true
   def handle_event({:call, from}, {:run, command, args}, _state, data) do
-    result = run_command(command, args, data.extra)
+    result = run_command(command, args, nil, data.extra)
     {:keep_state_and_data, [{:reply, from, result}]}
   end
 
-  defp run_command(command, args, extra) do
+  def handle_event({:call, from}, {:run_in, cwd, command, args}, _state, data) do
+    result = run_command(command, args, cwd, data.extra)
+    {:keep_state_and_data, [{:reply, from, result}]}
+  end
+
+  defp run_command(command, args, cwd, extra) do
     # System.cmd has no timeout and its subprocess port must not link to the
     # fiber (a linked completion EXIT would stop the fiber). Run it in an
     # unlinked, monitored process and have it send the result back.
     parent = self()
     command = to_string(command)
     args = Enum.map(args, &to_string/1)
+    opts = if cwd, do: [stderr_to_stdout: true, cd: cwd], else: [stderr_to_stdout: true]
 
     pid =
       spawn(fn ->
-        send(parent, {:shell_result, self(), System.cmd(command, args, stderr_to_stdout: true)})
+        send(parent, {:shell_result, self(), System.cmd(command, args, opts)})
       end)
 
     ref = Process.monitor(pid)

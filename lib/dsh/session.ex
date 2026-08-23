@@ -26,6 +26,13 @@ defmodule DshBeam.Session do
   @doc "Truncate the log, dropping every event (a fresh conversation)."
   def clear(session), do: GenServer.call(session, :clear)
 
+  @doc "The session header (title/cwd) — its identity and working directory."
+  def header(session), do: GenServer.call(session, :header)
+
+  @doc "Merge a map into the session header (e.g. set its cwd)."
+  def set_header(session, header) when is_map(header),
+    do: GenServer.call(session, {:set_header, header})
+
   @doc """
   Subscribe the calling process to session appends. Each append fans out
   {:dsh_session_event, event} to every subscriber; the subscription is removed
