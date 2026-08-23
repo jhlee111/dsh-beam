@@ -568,8 +568,9 @@ defmodule DshBeamWeb.ConsoleLive do
     </div>
 
     <%= if @settings_open do %>
-      <div class="settings-overlay" phx-click="close_settings">
-        <div class="settings-panel" phx-click-stop>
+      <div class="settings-overlay">
+        <div class="settings-backdrop" phx-click="close_settings"></div>
+        <div class="settings-panel">
           <nav class="settings-nav">
             <%= for section <- @settings_sections do %>
               <button

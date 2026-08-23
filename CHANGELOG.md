@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fixes
+
+- The Settings modal no longer closes when clicking inside the panel (e.g. the
+  Models API-key input): the dim backdrop is now a sibling of the panel with
+  its own `close_settings` click, so clicks inside the panel can never bubble
+  to it. Clicking the backdrop still closes.
+
 ### General + Agent presets settings
 
 - A **General** tab persists app preferences (`default_preset`, workspace

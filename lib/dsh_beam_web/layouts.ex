@@ -145,10 +145,14 @@ defmodule DshBeamWeb.Layouts do
           /* Settings modal overlay. */
           .settings-overlay {
             position: fixed; inset: 0; z-index: 100;
-            background: rgba(0, 0, 0, .6);
             display: flex; align-items: center; justify-content: center;
           }
+          .settings-backdrop {
+            position: absolute; inset: 0;
+            background: rgba(0, 0, 0, .6);
+          }
           .settings-panel {
+            position: relative; z-index: 1;
             display: flex; width: min(760px, 92vw); max-height: 84vh;
             background: var(--dsw-static-neutral-bluish-850, #161a21);
             border: 1px solid var(--dsw-alias-border-l1, #232a36);
