@@ -317,3 +317,8 @@ or timeout). The dependent survives, becomes :inactive, and can be reactivated.
 - Unloading a remote provider deactivates the local consumer first; a remote
   crash withdraws through the DOWN monitor safety net. 91 tests, skipping
   gracefully without epmd/cookie.
+
+## Milestone 10 — MVP web UI (complete)
+
+- Agent.Loop.run_trace/2 exposes the loop's steps; the console chat pane drives
+  the loop and renders the trace. 93 tests.

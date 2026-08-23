@@ -258,3 +258,11 @@ with a local context. The context's monitor, activation messages, and the
 L-Unload guard all cross :erlang.dist — a remote owner is just {pid, node}
 (DshBeam.Dist, DshBeam.Pid). Guard + crash safety net hold across nodes.
 91 tests. (Requires epmd + ~/.erlang.cookie; the tests skip without them.)
+
+## 20. Milestone 10 — MVP web UI (complete)
+
+The console's chat pane now drives the agent loop and renders its step trace
+chronologically (task → tool call → result → answer); the seed mounts the full
+agent composition. Agent.Loop gained run_trace/2. 93 tests. A cleanup pass
+grouped the substrate modules, removed a crash dump, and boots the console demo
+with the full composition.
