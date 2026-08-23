@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Models settings surface
+
+- The Models settings tab is now a provider card in the reference's shape:
+  a provider name + credential-configured dot, a write-only API-key input
+  (env-reference or literal), and a collapsed "customized settings" area for
+  `base_url` and `model`. Applying reconfigures the running provider and
+  persists the values, and the result line no longer double-inspects.
+
 ## 0.1.0 — a usable agent harness (2026-08-23)
 
 The first release that is usable like Claude Code / Codex: workspaces, chat,

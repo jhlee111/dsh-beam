@@ -167,39 +167,79 @@ defmodule DshBeam.Ui.Panel do
     )
 
     def panel(assigns) do
+      assigns =
+        assigns
+        |> assign(:provider, provider_name(assigns.llm_config))
+        |> assign(:credential_configured, credential_configured?(assigns.llm_config))
+
       ~H"""
       <section>
-        <h2>llm settings</h2>
+        <h2>models</h2>
         <%= if @llm_config do %>
-          <form phx-submit="llm_apply">
-            <label class="muted">base_url</label>
-            <input type="text" name="base_url" value={@llm_config.base_url} />
-            <label class="muted">model</label>
-            <input type="text" name="model" value={@llm_config.model} />
-            <label class="muted">credential</label>
-            <select name="credential_mode">
-              <option value="env" selected={@credential_mode == "env"}>env</option>
-              <option value="literal" selected={@credential_mode == "literal"}>api key (literal)</option>
-            </select>
-            <input
-              type="text"
-              name="credential_value"
-              value={@credential_env}
-              placeholder={
-                if @credential_mode == "env",
-                  do: "env var name (e.g. DEEPSEEK_API_KEY)",
-                  else: "paste API key (blank keeps current)"
-              }
-            />
-            <button type="submit">apply</button>
-          </form>
-          <p class="muted">leave the credential field blank to keep the current key · result: <code><%= inspect(@llm_result) %></code></p>
+          <div class="provider-card">
+            <div class="provider-head">
+              <span class="provider-name"><%= @provider %></span>
+              <span
+                class={"credential-dot #{if @credential_configured, do: "configured", else: "missing"}"}
+                title={if @credential_configured, do: "credential configured", else: "credential missing"}
+              >
+                <%= if @credential_configured, do: "key set", else: "no key" %>
+              </span>
+              <span class="muted">route: deepseek</span>
+            </div>
+            <form phx-submit="llm_apply">
+              <label class="muted">api key</label>
+              <div class="key-row">
+                <select name="credential_mode">
+                  <option value="env" selected={@credential_mode == "env"}>env ref</option>
+                  <option value="literal" selected={@credential_mode == "literal"}>literal key</option>
+                </select>
+                <input
+                  type="password"
+                  name="credential_value"
+                  value={@credential_env}
+                  placeholder={
+                    if @credential_mode == "env",
+                      do: "env var name (e.g. DEEPSEEK_API_KEY)",
+                      else: "paste API key (blank keeps current)"
+                  }
+                />
+              </div>
+              <details>
+                <summary>customized settings</summary>
+                <label class="muted">base_url</label>
+                <input type="text" name="base_url" value={@llm_config.base_url} />
+                <label class="muted">model</label>
+                <input type="text" name="model" value={@llm_config.model} />
+              </details>
+              <div class="provider-actions">
+                <button type="submit">apply</button>
+                <span class="muted">leave the key blank to keep the current one</span>
+              </div>
+            </form>
+          </div>
+          <p class="muted">result: <code><%= @llm_result %></code></p>
         <% else %>
           <p class="muted">no :llm provider (seed the demo composition)</p>
         <% end %>
       </section>
       """
     end
+
+    defp provider_name(nil), do: "deepseek"
+
+    defp provider_name(%{base_url: base_url}) do
+      case URI.parse(base_url || "") do
+        %{host: host} when is_binary(host) and host != "" ->
+          if String.contains?(host, "deepseek"), do: "DeepSeek", else: host
+
+        _ ->
+          "deepseek"
+      end
+    end
+
+    defp credential_configured?(nil), do: false
+    defp credential_configured?(%{credential: credential}), do: credential != nil
   end
 
   defmodule Creator do

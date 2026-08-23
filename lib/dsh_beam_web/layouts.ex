@@ -101,6 +101,30 @@ defmodule DshBeamWeb.Layouts do
           .scroll { max-height: 400px; overflow-y: auto; }
           .events { max-height: 200px; overflow-y: auto; }
           .chat { max-height: 260px; overflow-y: auto; }
+
+          /* Models provider card (mirrors the reference models section). */
+          .provider-card {
+            border: 1px solid var(--dsw-alias-border-l3, #2b3442);
+            border-radius: 6px; padding: 8px; margin-bottom: 8px;
+          }
+          .provider-head {
+            display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+          }
+          .provider-name { font-weight: 600; }
+          .credential-dot {
+            display: inline-block; padding: 1px 6px; border-radius: 8px;
+            border: 1px solid var(--dsw-alias-border-l3, #2b3442);
+            font-size: 11px;
+          }
+          .credential-dot.configured { color: var(--dsw-static-green-500, #34d399); }
+          .credential-dot.missing { color: var(--dsw-static-amber-400, #f0b429); }
+          .key-row { display: flex; gap: 6px; align-items: center; }
+          .key-row input { flex: 1; }
+          details { margin: 6px 0; }
+          summary { cursor: pointer; color: var(--dsw-static-blue-300, #8fa3bf); }
+          details label { display: block; margin-top: 6px; }
+          details input { width: 100%; }
+          .provider-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
         </style>
       </head>
       <body>
