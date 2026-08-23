@@ -1,4 +1,4 @@
-defmodule Dsh.Loader do
+defmodule DshBeam.Loader do
   @moduledoc """
   Declarative composition (paper §5.2): a desired configuration is an ordered
   list of entries; reconciliation diffs the mounted entries against it and

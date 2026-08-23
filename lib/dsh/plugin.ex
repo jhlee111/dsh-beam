@@ -1,4 +1,4 @@
-defmodule Dsh.Plugin do
+defmodule DshBeam.Plugin do
   @moduledoc """
   Everything in the harness is a plugin — and every plugin is a fiber: a
   :gen_statem process whose four states realize the paper's fiber lifecycle
@@ -33,14 +33,14 @@ defmodule Dsh.Plugin do
   @callback mount(ctx(), keyword()) ::
               {:ok, deps :: [atom()], provides :: map(), extra :: term()}
 
-  @callback handle_dsh_withdraw(keys :: [atom()], state :: Dsh.Plugin.State.t()) ::
-              {:ok, Dsh.Plugin.State.t()}
+  @callback handle_dsh_withdraw(keys :: [atom()], state :: DshBeam.Plugin.State.t()) ::
+              {:ok, DshBeam.Plugin.State.t()}
 
-  @callback handle_dsh_activate(view :: map(), state :: Dsh.Plugin.State.t()) ::
-              {:ok, Dsh.Plugin.State.t()}
+  @callback handle_dsh_activate(view :: map(), state :: DshBeam.Plugin.State.t()) ::
+              {:ok, DshBeam.Plugin.State.t()}
 
-  @callback handle_dsh_ready(state :: Dsh.Plugin.State.t()) ::
-              {:ok, Dsh.Plugin.State.t()}
+  @callback handle_dsh_ready(state :: DshBeam.Plugin.State.t()) ::
+              {:ok, DshBeam.Plugin.State.t()}
 
   @optional_callbacks handle_dsh_withdraw: 2, handle_dsh_activate: 2, handle_dsh_ready: 1
 
@@ -49,11 +49,11 @@ defmodule Dsh.Plugin do
 
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
-      @behaviour Dsh.Plugin
+      @behaviour DshBeam.Plugin
       @behaviour :gen_statem
 
       # Declarative declarations: need/provide sections (Spark-validated).
-      use Dsh.Plugin.Dsl
+      use DshBeam.Plugin.Dsl
 
       @dsh_unload_timeout Keyword.get(opts, :unload_timeout, 2000)
 
@@ -72,9 +72,9 @@ defmodule Dsh.Plugin do
 
         # Registration is synchronous: start_link returns only after the fiber
         # exists in the context, so callers never observe a half-started fiber.
-        case Dsh.Context.register(ctx, id: id, deps: deps, provides: provides) do
+        case DshBeam.Context.register(ctx, id: id, deps: deps, provides: provides) do
           {:ok, fiber_state, view} ->
-            data = %Dsh.Plugin.State{
+            data = %DshBeam.Plugin.State{
               ctx: ctx,
               id: id,
               fiber_state: fiber_state,
@@ -162,7 +162,7 @@ defmodule Dsh.Plugin do
         ctx = data.ctx
 
         if is_pid(ctx) and Process.alive?(ctx) do
-          Dsh.Context.unload(ctx, self())
+          DshBeam.Context.unload(ctx, self())
 
           receive do
             {:dsh_unloaded, _owner} -> :ok

@@ -1,4 +1,4 @@
-defmodule Dsh.Context do
+defmodule DshBeam.Context do
   @moduledoc """
   The unified context: one GenServer state carrying the coeffect store
   (key -> provided value) and the fiber registry, realizing revertible effects
@@ -35,7 +35,7 @@ defmodule Dsh.Context do
 
   use GenServer
 
-  alias Dsh.{Coeffect, Effect, Fiber}
+  alias DshBeam.{Coeffect, Effect, Fiber}
 
   # -- public API --
 

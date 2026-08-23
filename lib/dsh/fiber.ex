@@ -1,4 +1,4 @@
-defmodule Dsh.Fiber do
+defmodule DshBeam.Fiber do
   @moduledoc """
   A fiber: one instantiation of a plugin inside the context (paper §4.1).
 
@@ -19,7 +19,7 @@ defmodule Dsh.Fiber do
           deps: MapSet.t(),
           provides: MapSet.t(),
           state: state(),
-          inverses: [Dsh.Effect.inverse()]
+          inverses: [DshBeam.Effect.inverse()]
         }
 
   defstruct id: nil,

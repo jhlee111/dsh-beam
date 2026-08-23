@@ -1,4 +1,4 @@
-defmodule Dsh.Coeffect do
+defmodule DshBeam.Coeffect do
   @moduledoc """
   Reactive coeffects — spatial composability (paper §3.2).
 

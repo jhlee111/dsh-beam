@@ -1,4 +1,4 @@
-defmodule Dsh.Consumer do
+defmodule DshBeam.Consumer do
   @moduledoc """
   A generic plugin that declares dependencies and records its lifecycle — the
   minimal shape of every capability consumer.
@@ -8,19 +8,19 @@ defmodule Dsh.Consumer do
   teardown stays recorded after the fact.
   """
 
-  use Dsh.Plugin
+  use DshBeam.Plugin
 
   def view(pid), do: :gen_statem.call(pid, :view)
   def state(pid), do: :gen_statem.call(pid, :state)
   def deactivations(pid), do: :gen_statem.call(pid, :deactivations)
 
-  @impl Dsh.Plugin
+  @impl DshBeam.Plugin
   def mount(_ctx, opts) do
     extra = %{parent: Keyword.get(opts, :parent), deactivations: []}
     {:ok, Keyword.fetch!(opts, :deps), %{}, extra}
   end
 
-  @impl Dsh.Plugin
+  @impl DshBeam.Plugin
   def handle_dsh_ready(state) do
     notify(
       state.extra.parent,
@@ -30,7 +30,7 @@ defmodule Dsh.Consumer do
     {:ok, state}
   end
 
-  @impl Dsh.Plugin
+  @impl DshBeam.Plugin
   def handle_dsh_withdraw(keys, state) do
     notify(state.extra.parent, {:consumer_deactivated, state.id, self(), keys, state.view})
 
@@ -38,7 +38,7 @@ defmodule Dsh.Consumer do
     {:ok, %{state | extra: extra}}
   end
 
-  @impl Dsh.Plugin
+  @impl DshBeam.Plugin
   def handle_dsh_activate(view, state) do
     notify(state.extra.parent, {:consumer_activated, state.id, self(), Map.keys(view)})
     {:ok, state}

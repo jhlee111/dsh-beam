@@ -1,4 +1,4 @@
-defmodule Dsh.Effect do
+defmodule DshBeam.Effect do
   @moduledoc """
   Revertible effects — temporal composability (paper §3.1).
 

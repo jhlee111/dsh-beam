@@ -1,4 +1,4 @@
-defmodule Dsh.Session.Memory do
+defmodule DshBeam.Session.Memory do
   @moduledoc """
   Session provider: an ETS-backed append-only log. Seq is assigned by the
   provider; all/1 reads events back in append order.

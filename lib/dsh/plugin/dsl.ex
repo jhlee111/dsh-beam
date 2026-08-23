@@ -1,4 +1,4 @@
-defmodule Dsh.Plugin.Dsl do
+defmodule DshBeam.Plugin.Dsl do
   @moduledoc """
   The declarative front of a plugin: need/provide sections compiled to the
   mount/3 contract (the paper's component declarations d and p, Definition

@@ -58,11 +58,11 @@ OTP 감독이 그 위의 조악한 안전망으로 겹치는지, 그리고 그 �
 
 "모든 것이 플러그인"을 참으로 만드는 메타프레임워크(Cordis core에 해당). 플러그인이 아니라 전제.
 
-- Dsh.Context — 통합 효과/코이펙트 context.
-- Dsh.Effect — ctx.effect(fn -> ... {value, inverse} end); 역 누산, LIFO dispose.
-- Dsh.Coeffect — 키 선언 d + resolve + 변경 통지.
-- Dsh.Fiber — 3상태 맵 레코드; L-Unload 가드는 Context의 pending-unload 머신이 구현(비동기, 의존자 ack/DOWN/타임아웃).
-- Dsh.Loader — 선언적 entry 목록(id/url/isolate/config/disabled) + 증분 재구성.
+- DshBeam.Context — 통합 효과/코이펙트 context.
+- DshBeam.Effect — ctx.effect(fn -> ... {value, inverse} end); 역 누산, LIFO dispose.
+- DshBeam.Coeffect — 키 선언 d + resolve + 변경 통지.
+- DshBeam.Fiber — 3상태 맵 레코드; L-Unload 가드는 Context의 pending-unload 머신이 구현(비동기, 의존자 ack/DOWN/타임아웃).
+- DshBeam.Loader — 선언적 entry 목록(id/url/isolate/config/disabled) + 증분 재구성.
 
 ## 5. 마일스톤 1: 첫 플러그인 — Session (append-only 로그)
 
@@ -100,7 +100,7 @@ OTP 감독이 그 위의 조악한 안전망으로 겹치는지, 그리고 그 �
 
 ## 9. 디렉터리
 
-elixir/ (저장소 최상위, python/·native/와 자매) — Mix 프로젝트 dsh.
+독립 저장소 jhlee111/dsh-beam — Mix 프로젝트 dsh_beam.
 .tool-versions에 Elixir 1.20.2 / Erlang 28.4.3 고정.
 
 ## 10. TDD 테스트 목록 (마일스톤 1 실행 사양)
@@ -129,7 +129,7 @@ ExUnit으로 테스트를 먼저 쓰고 구현으로 초록을 만든다. 각 �
 | M2. DSL | needs/provides 선언이 Spark로 검증·introspect | 논문 Def 44(d, p)의 인코딩 |
 | M2. DSL | 조성 DSL(entry)이 마일스톤 1 테스트를 그대로 통과 | Def 74의 인코딩 + 회귀망 |
 
-**마일스톤 2 — Spark DSL 전면.** 논문의 선언들(컴포넌트의 d/p, entry의 id/url/isolate/config/disabled)은 사실상 DSL 문법이다. Spark(Ash 팀, v2.6)의 section/entity/옵션 검증 + introspection으로 `use Dsh.Plugin`(needs/provides)과 `use Dsh.Composition`(entry)을 작성한다. 이점: (1) 선언의 컴파일타임 검증, (2) `Spark.Dsl.Extension` introspection이 cordis_inspect/크리에이터 모드의 기질, (3) entry 스키마 검증이 Loader.diff의 전제. **순서**: 증분 1–4로 런타임 의미론(인터프리터)을 먼저 고정한 뒤 DSL을 얹는다 — DSL의 관측 가능한 동작은 그 의미론뿐이고, 기존 테스트가 회귀망이 된다. 핸드롤 defmacro도 가능하나 검증·introspection 재발명을 피해 유지보수되는 Spark를 쓴다.
+**마일스톤 2 — Spark DSL 전면.** 논문의 선언들(컴포넌트의 d/p, entry의 id/url/isolate/config/disabled)은 사실상 DSL 문법이다. Spark(Ash 팀, v2.6)의 section/entity/옵션 검증 + introspection으로 `use DshBeam.Plugin`(needs/provides)과 `use DshBeam.Composition`(entry)을 작성한다. 이점: (1) 선언의 컴파일타임 검증, (2) `Spark.Dsl.Extension` introspection이 cordis_inspect/크리에이터 모드의 기질, (3) entry 스키마 검증이 Loader.diff의 전제. **순서**: 증분 1–4로 런타임 의미론(인터프리터)을 먼저 고정한 뒤 DSL을 얹는다 — DSL의 관측 가능한 동작은 그 의미론뿐이고, 기존 테스트가 회귀망이 된다. 핸드롤 defmacro도 가능하나 검증·introspection 재발명을 피해 유지보수되는 Spark를 쓴다.
 
 주의: Elixir는 미정의 모듈 참조가 테스트 컴파일을 깨므로, 전체 레드 스위트를 한 번에 쓰지 않고 증분(테스트 파일 하나 + 구현)으로 진행한다.
 
@@ -137,7 +137,7 @@ ExUnit으로 테스트를 먼저 쓰고 구현으로 초록을 만든다. 각 �
 
 - [x] 증분 1–4: 기판 + Session + Runtime — 마일스톤 1 구현 완료
 - [x] 독립 리뷰 2건(A: Elixir 공식 문서, B: 정확성·동시성) — REVIEW.md에 병합
-- [x] P1 register fiber 병합(H3) / P2 C' 비동기 철수 프로토콜 + use Dsh.Plugin(B-H1/B-H2) / P3 Runtime 실패 보고·재주입(A-H2) / P5 위생
+- [x] P1 register fiber 병합(H3) / P2 C' 비동기 철수 프로토콜 + use DshBeam.Plugin(B-H1/B-H2) / P3 Runtime 실패 보고·재주입(A-H2) / P5 위생
 - [x] P4 본 문서를 구현 상태와 정렬(3상태 축소 모델 명시)
 - [x] 마일스톤 2-①: 파이버 :gen_statem 4상태 프로세스 승격 — 23 passed
 - [x] 마일스톤 2-②: 크래시 경로 committed view(정렬된 shutdown) — 24 passed, 25개 시드 0 실패
@@ -146,7 +146,7 @@ ExUnit으로 테스트를 먼저 쓰고 구현으로 초록을 만든다. 각 �
 
 ## 13. 마일스톤 3 — 크리에이터 모드 (완료)
 
-Dsh.Creator: 소스 문자열을 Code.compile_string -> BEAM :code 서버로 로드 -> 파이버로 마운트.
+DshBeam.Creator: 소스 문자열을 Code.compile_string -> BEAM :code 서버로 로드 -> 파이버로 마운트.
 redefine은 논문 §5.2.2의 트랜잭션 HMR(컴파일 선행 -> 가드 통과 철수 -> 코드 교체 -> 실패 시 롤백).
 테스트 3개(define/redefine/undefine 스토리, mount 크래시 격리, syntax error 무변화) — 33 passed.
 
@@ -155,4 +155,4 @@ redefine은 논문 §5.2.2의 트랜잭션 HMR(컴파일 선행 -> 가드 통과
 - 파이버를 :gen_statem 프로세스로 승격(4상태) — 논문의 "미세 누산기 vs 프로세스 격리" 긴장을 실제로 시연
 - 크래시 경로에서도 committed view 보장(정렬된 shutdown: 제공자 자원이 의존자 teardown 동안 생존)
 - 합류(재구성 순서 무관)의 동시성 검증
-- Spark DSL 전면: use Dsh.Plugin의 needs/provides + 조성 DSL(entry)
+- Spark DSL 전면: use DshBeam.Plugin의 needs/provides + 조성 DSL(entry)

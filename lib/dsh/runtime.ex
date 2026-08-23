@@ -1,4 +1,4 @@
-defmodule Dsh.Runtime do
+defmodule DshBeam.Runtime do
   @moduledoc """
   Boots the unified context and mounts an ordered list of plugin entries under
   a DynamicSupervisor. reconcile/2 diffs the desired configuration against the
@@ -15,7 +15,7 @@ defmodule Dsh.Runtime do
 
   require Logger
 
-  alias Dsh.Loader
+  alias DshBeam.Loader
 
   @max_restarts 3
 
@@ -36,7 +36,7 @@ defmodule Dsh.Runtime do
 
   @impl true
   def init(entries) do
-    {:ok, ctx} = Dsh.Context.start_link([])
+    {:ok, ctx} = DshBeam.Context.start_link([])
     {:ok, sup} = DynamicSupervisor.start_link(strategy: :one_for_one)
     state = %{ctx: ctx, sup: sup, entries: %{}}
     {:ok, state, {:continue, {:apply, entries}}}
@@ -119,7 +119,7 @@ defmodule Dsh.Runtime do
     config = Keyword.put_new(entry.config, :id, entry.id)
 
     spec = %{
-      id: {Dsh.Plugin, entry.id},
+      id: {DshBeam.Plugin, entry.id},
       start: {entry.plugin, :start_link, [state.ctx, config]},
       restart: :temporary,
       shutdown: 5000

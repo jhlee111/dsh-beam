@@ -1,4 +1,4 @@
-defmodule Dsh.Session do
+defmodule DshBeam.Session do
   @moduledoc """
   The session capability seam: an append-only event log — the single source
   of truth that model-visible facts and projections derive from.

@@ -1,4 +1,4 @@
-defmodule Dsh.Session.File do
+defmodule DshBeam.Session.File do
   @moduledoc """
   Session provider: a JSONL append-only log. Writes are durable — outside the
   revertible-effect boundary (paper §6.1) — so recovery here is the file's own

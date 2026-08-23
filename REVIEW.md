@@ -11,7 +11,7 @@
 
 ## 리뷰어 A — Elixir best practice / 공식 문서 안티패턴
 
-### [높음] H1 — GenServer 재진입/교착 + 활성·비활성 비대칭 (Dsh.Context)
+### [높음] H1 — GenServer 재진입/교착 + 활성·비활성 비대칭 (DshBeam.Context)
 
 - 파일: lib/dsh/context.ex — reactivate/2 (246–273), do_unload/2 (277–290), deactivate_dependents/2 (297–310)
 - 문제: unload의 handle_call 처리 중 소비자에게 동기 GenServer.call({:dsh_deactivate, ...}) → 소비자가
@@ -20,7 +20,7 @@
 - 근거: hexdocs GenServer(재진입 주의), process-anti-patterns "Non-atomic operations"
 - 제안: 비활성화를 2-Phase(메시지 + ack 수집)로, 또는 활성/비활성을 동일한 비동기 규약으로 통일.
 
-### [높음] H2 — 감독이 desired state를 유지하지 않음 → 수렴 실패 (Dsh.Runtime)
+### [높음] H2 — 감독이 desired state를 유지하지 않음 → 수렴 실패 (DshBeam.Runtime)
 
 - 파일: lib/dsh/runtime.ex — start_entry/2 (79–98), stop_entry/2 (100–118), handle_info DOWN (56–59)
 - 문제: restart: :temporary + 시작 실패를 pid: nil로 기록하고 Logger.warning만 → 이후 같은 entry를
@@ -29,10 +29,10 @@
 - 근거: process-anti-patterns "Unsupervised processes", hexdocs DynamicSupervisor/Supervisor
 - 제안: 실패를 loud하게(:error 반환) 하거나 재시도/재주입으로 수렴 보장.
 
-### [중간] M1 — @behaviour Dsh.Session 콜백이 사코드 + 이중 경로
+### [중간] M1 — @behaviour DshBeam.Session 콜백이 사코드 + 이중 경로
 
 - 파일: lib/dsh/session.ex 25–29, memory.ex 15–21, file.ex 16–22
-- 문제: seam(Dsh.Session.append/all/count)은 GenServer.call 메시지 dispatch인데 provider의
+- 문제: seam(DshBeam.Session.append/all/count)은 GenServer.call 메시지 dispatch인데 provider의
   @behaviour 구현 append/all/count는 어디서도 호출 안 됨(grep 0회) → 죽은 코드 + 이중 경로.
 - 근거: code-anti-patterns "Keeping dead code" / "Accidental double calls"
 - 제안: behaviour 콜백을 실제 dispatch 경로로 사용하거나(seam이 provider 함수 호출), 콜백을 버리고
@@ -87,7 +87,7 @@
 ## 리뷰어 A 총평
 
 논문의 기질(복구 정확성·committed view·L-Unload 가드·monitor 안전망)은 테스트 15개로 잘 고정됨.
-그러나 조정을 단일 Dsh.Context에 몰고 파이버를 독립 프로세스로 만들지 않아 논문의 핵심 보증
+그러나 조정을 단일 DshBeam.Context에 몰고 파이버를 독립 프로세스로 만들지 않아 논문의 핵심 보증
 (교환성·고장 격리)이 실제로는 우회됐으며, 코디네이터 재진입/비원자성과 :temporary 감독의 수렴
 실패가 관용구를 벗어난 주 지점. 다음 마일스톤에서 파이버를 프로세스로 승격하거나 문서를 축소
 모델로 정정하고 H1·H2를 먼저 해소할 것.
@@ -152,9 +152,9 @@
 - P1 (정확성, 최우선): register가 기존 fiber를 병합(덮어쓰기 제거) — H3 회귀 테스트부터.
   [완료: 회귀 테스트 red→green, 16 passed, --warnings-as-errors 클린]
 - P2 (교착·전역 크래시): 비활성화를 비동기 2-phase로(메시지 + ack 수집, 타임아웃 폴백),
-  use Dsh.Plugin 매크로로 activate/deactivate/terminate 기본 구현 주입 + behaviour 계약 컴파일 강제 —
+  use DshBeam.Plugin 매크로로 activate/deactivate/terminate 기본 구현 주입 + behaviour 계약 컴파일 강제 —
   A-H1/B-H1/B-H2/A-M3 동시 해소. 재현 스크립트 2개를 테스트로 옮김.
-  [완료: C' 설계(하단 정정 참조)로 구현. use Dsh.Plugin 매크로 + pending-unload 상태 머신 +
+  [완료: C' 설계(하단 정정 참조)로 구현. use DshBeam.Plugin 매크로 + pending-unload 상태 머신 +
   {:dsh_withdraw}/{:dsh_deactivated} 프로토콜. B-H1/B-H2 회귀 테스트 red→green, 18 passed,
   --warnings-as-errors 클린. 1.20 타입 체커가 죽은 {:stop} 분기 2건을 잡아 계약을 {:ok, state} 단일형으로 단순화.]
 - P3 (수렴): Runtime — 시작 실패를 :error로 반환, DOWN 시 spec 재주입으로 자가 치유 — A-H2.
@@ -185,13 +185,13 @@
 
 ### 2-① 파이버 :gen_statem 프로세스 승격 (완료)
 
-- use Dsh.Plugin이 :gen_statem 4상태(:inactive/:reloading/:active/:unloading) 파이버를 생성.
+- use DshBeam.Plugin이 :gen_statem 4상태(:inactive/:reloading/:active/:unloading) 파이버를 생성.
 - 모든 전이가 {:dsh_fiber_state, pid, state}를 Context에 보고 — 미러는 그래프 계산용, 파이버가 권위.
 - 비즈니스 훅이 전이에 연결(ready/activate/withdraw), 활성화 중 뷰 변경 시 재커밋(L-Divert 축소판).
 
 ### 2-② 크래시 경로 committed view — 정렬된 shutdown (완료)
 
-- 자원(세션 서버)을 unlinked로 시작하고, "자원 해제"를 Dsh.Context.effect의 역으로 누산기에 등록.
+- 자원(세션 서버)을 unlinked로 시작하고, "자원 해제"를 DshBeam.Context.effect의 역으로 누산기에 등록.
   철수 프로토콜(의존자 drain) 후에만 역이 실행되므로, 제공자가 :kill로 죽어도 의존자의 teardown
   중에는 자원이 살아 있다. 크래시 경로도 동일한 ordered_withdraw를 통과.
 - 세션 서버 종료 폴백: Session.Plugin.terminate가 super 후 잔존 시 정리(앱 전체 종료 대비).
@@ -208,17 +208,17 @@
 
 ### 2-④ Spark DSL 전면 (완료)
 
-- {:spark, "~> 2.6"} 추가 (2.7.2 해석). Dsh.Plugin.Dsl: need/provide 섹션(top_level),
-  Dsh.Composition: entry 섹션(Def 74의 id/plugin/config/disabled). Spark Builder API로 정의,
+- {:spark, "~> 2.6"} 추가 (2.7.2 해석). DshBeam.Plugin.Dsl: need/provide 섹션(top_level),
+  DshBeam.Composition: entry 섹션(Def 74의 id/plugin/config/disabled). Spark Builder API로 정의,
   컴파일타임 스키마 검증 + Spark.Dsl.Extension.get_entities introspection(cordis_inspect의 기질).
-- use Dsh.Plugin이 기본 mount를 DSL에서 생성(need 목록 + provide value/via), 사용자 mount는
+- use DshBeam.Plugin이 기본 mount를 DSL에서 생성(need 목록 + provide value/via), 사용자 mount는
   defoverridable로 재정의. 조성 모듈의 entries/1이 Runtime 입력으로 직결.
 - 테스트 3개: need/provide → mount 계약 컴파일, via MFA 값 계산, 조성 DSL → Runtime 부팅·재구성.
 - 기존 27개 테스트가 DSL 위에서 그대로 통과(회귀망 성립).
 
 ## 마일스톤 3 — 크리에이터 모드 (완료)
 
-- Dsh.Creator: define(compile->load->mount) / redefine(트랜잭션 HMR: 컴파일 선행, 가드 통과 철수,
+- DshBeam.Creator: define(compile->load->mount) / redefine(트랜잭션 HMR: 컴파일 선행, 가드 통과 철수,
   :code.purge/delete + load_binary, 실패 시 롤백) / undefine(철수 + 코드 언로드).
 - BEAM :code 서버 = 논문 §6.4의 런타임 모듈 레지스트리(도입·퇴출이 1급). Node ESM은 퇴출 불가.
 - 트러블슈팅 기록: Code.compile_string은 모듈을 "Elixir." 접두 원자로 반환 -> Module.concat/1로 정렬.

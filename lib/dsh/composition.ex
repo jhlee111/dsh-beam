@@ -1,8 +1,8 @@
-defmodule Dsh.Composition do
+defmodule DshBeam.Composition do
   @moduledoc """
   A declarative composition (paper §5.2, Definition 74): entries declare id,
   plugin, config, and disabled; entries/1 projects them into the entry list
-  Dsh.Runtime consumes, so a composition module is the runtime's config file.
+  DshBeam.Runtime consumes, so a composition module is the runtime's config file.
   """
 
   alias Spark.Builder.{Entity, Field, Section}
@@ -13,12 +13,12 @@ defmodule Dsh.Composition do
         describe: "one plugin entry in this composition",
         top_level?: true,
         entities: [
-          Entity.new(:entry, Dsh.Composition.Entry,
+          Entity.new(:entry, DshBeam.Composition.Entry,
             describe: "one plugin entry",
             args: [:id, :plugin],
             schema: [
               Field.new(:id, :atom, required: true, doc: "stable entry id"),
-              Field.new(:plugin, {:behaviour, Dsh.Plugin},
+              Field.new(:plugin, {:behaviour, DshBeam.Plugin},
                 required: true,
                 doc: "plugin module"
               ),
@@ -43,7 +43,7 @@ defmodule Dsh.Composition do
     defstruct [:id, :plugin, :config, :disabled, :__identifier__, :__spark_metadata__]
   end
 
-  @doc "The entry list of a composition module, feedable to Dsh.Runtime."
+  @doc "The entry list of a composition module, feedable to DshBeam.Runtime."
   def entries(module) do
     module
     |> Spark.Dsl.Extension.get_entities([:entry])

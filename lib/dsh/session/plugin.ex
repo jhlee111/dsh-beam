@@ -1,4 +1,4 @@
-defmodule Dsh.Session.Plugin do
+defmodule DshBeam.Session.Plugin do
   @moduledoc """
   The first plugin of the harness: provides the session log under :session.
 
@@ -11,23 +11,23 @@ defmodule Dsh.Session.Plugin do
   the graceful and the crash path (ordered shutdown).
   """
 
-  use Dsh.Plugin
+  use DshBeam.Plugin
 
   def session(pid), do: :gen_statem.call(pid, :session)
 
-  @impl Dsh.Plugin
+  @impl DshBeam.Plugin
   def mount(_ctx, opts) do
-    provider = Keyword.get(opts, :provider, Dsh.Session.Memory)
+    provider = Keyword.get(opts, :provider, DshBeam.Session.Memory)
     {:ok, session} = provider.start(opts)
     {:ok, [], %{session: session}, %{session: session}}
   end
 
-  @impl Dsh.Plugin
+  @impl DshBeam.Plugin
   def handle_dsh_ready(state) do
     session = state.extra.session
 
     :ok =
-      Dsh.Context.effect(state.ctx, fn st ->
+      DshBeam.Context.effect(state.ctx, fn st ->
         if Process.alive?(session), do: Process.exit(session, :shutdown)
         st
       end)

@@ -1,4 +1,4 @@
-defmodule Dsh.Creator do
+defmodule DshBeam.Creator do
   @moduledoc """
   Creator mode: compile plugin source at runtime, mount it as a supervised
   fiber, and swap or withdraw it.
@@ -39,7 +39,7 @@ defmodule Dsh.Creator do
       entries = current_entries(runtime)
 
       # 1. withdraw the old fiber (its dependents drain through the guard)
-      :ok = Dsh.Runtime.reconcile(runtime, Enum.reject(entries, &(&1.id == mod)))
+      :ok = DshBeam.Runtime.reconcile(runtime, Enum.reject(entries, &(&1.id == mod)))
 
       # 2. swap the code
       purge_and_delete(mod)
@@ -52,7 +52,7 @@ defmodule Dsh.Creator do
 
         {:error, reason} ->
           restore_code(mod, old_binary)
-          Dsh.Runtime.reconcile(runtime, entries)
+          DshBeam.Runtime.reconcile(runtime, entries)
           {:error, {:start_failed, reason}}
       end
     end
@@ -61,7 +61,7 @@ defmodule Dsh.Creator do
   @doc "Withdraw the plugin fiber and unload its code."
   def undefine(runtime, mod) do
     entries = current_entries(runtime)
-    :ok = Dsh.Runtime.reconcile(runtime, Enum.reject(entries, &(&1.id == mod)))
+    :ok = DshBeam.Runtime.reconcile(runtime, Enum.reject(entries, &(&1.id == mod)))
     purge_and_delete(mod)
     :ok
   end
@@ -103,7 +103,7 @@ defmodule Dsh.Creator do
     new_entry = %{id: mod, plugin: mod, config: config, disabled: false}
     desired = Enum.reject(entries, &(&1.id == mod)) ++ [new_entry]
 
-    case Dsh.Runtime.reconcile(runtime, desired) do
+    case DshBeam.Runtime.reconcile(runtime, desired) do
       :ok -> {:ok, mod}
       {:error, errors} -> {:error, {:mount, errors}}
     end
@@ -111,7 +111,7 @@ defmodule Dsh.Creator do
 
   defp current_entries(runtime) do
     runtime
-    |> Dsh.Runtime.entries()
+    |> DshBeam.Runtime.entries()
     |> Enum.map(fn {_id, %{spec: entry}} -> entry end)
   end
 
