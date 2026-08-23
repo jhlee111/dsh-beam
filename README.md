@@ -15,16 +15,19 @@ Elixir 1.20.2 / OTP 28 (pinned via .tool-versions for asdf).
 
 ## Structure
 
-- lib/dsh/context.ex — the unified context (bindings + fibers + the pending-unload machine)
-- lib/dsh/plugin.ex — the use DshBeam.Plugin macro (activation/withdrawal/termination protocol)
-- lib/dsh/effect.ex · coeffect.ex · fiber.ex — the substrate primitives
-- lib/dsh/loader.ex · runtime.ex — declarative composition + incremental reconfiguration
-- lib/dsh/session.ex + session/* — the first plugin: an append-only session log
-- lib/dsh/creator.ex — creator mode: runtime code loading + transactional hot replacement
-- lib/dsh/sandbox.ex + sandbox/plugin.ex — the §6.3 execution boundary: untrusted source runs in a child OS process
-- lib/dsh/llm*.ex + llm/adapter/* — the LLM capability provider (OpenAI-compatible APIs, swappable adapter)
-- lib/dsh/console.ex — the live web console: a plugin that owns the Phoenix endpoint
-- lib/dsh_beam_web/* — the LiveView console (composition, bindings, event feed, chat, creator/sandbox editor)
+The layout mirrors the TS harness: a Cordis core (`vendor/cordis`) and the
+plugins built on it (`packages/*`).
+
+- lib/dsh/cordis/* — the substrate (= vendor/cordis): Context (unified context,
+  bindings + fibers + the pending-unload machine), Effect/Coeffect/Fiber, Loader
+  + Runtime (declarative composition + incremental reconfiguration), the
+  use DshBeam.Plugin macro + Spark DSL (need/provide/setting/tool) + the
+  installed-plugin inventory, Settings (typed overrides) + Credential
+  (references, not keys), and the Tool registry.
+- lib/dsh/* — the harness plugins (= packages/*): Session (append-only log),
+  Llm + Chat, Shell, Sandbox (§6.3 boundary), Creator, Console, and the generic
+  Provider/Consumer examples.
+- lib/dsh_beam_web/* — the LiveView console (composition, bindings, event feed, chat, plugins, creator/sandbox editor)
 - priv/sandbox_runner.exs — the child runtime (compiles and executes sandboxed plugins in their own BEAM)
 - test/dsh/* — the TDD suite (one test per paper guarantee)
 - reference/deepseek-harness — the TS harness as a git submodule: the read-source for
