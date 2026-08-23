@@ -264,3 +264,17 @@ or timeout). The dependent survives, becomes :inactive, and can be reactivated.
   runtime event stream (no reload), crash-child re-injection (fresh OS pid).
   Deterministic teardown via start_supervised! (on_exit runs after the test
   process died — a linked runtime was being torn down mid-test).
+
+## Milestone 5 — "everything is a plugin" substrate (complete)
+
+- The LLM/chat layer was kept minimal on purpose: the point is the design, not
+  another chat framework. The DeepSeek adapter is a thin non-streaming
+  transport; credentials are references (DshBeam.Credential) resolved per
+  request; configure/2 reconfigures without re-mounting the fiber.
+- `setting` declarations (Spark DSL) + DshBeam.Plugin.Inventory express the
+  original harness's plugin inventory and per-plugin typed settings.
+- DshBeam.Settings (owned by the Runtime) validates overrides against the
+  schema; a :credential setting stores a reference, never a key.
+- The console's plugins panel lists the inventory (enabled/disabled) and edits
+  settings with Save.
+- 71 tests, stable.

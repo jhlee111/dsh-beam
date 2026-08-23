@@ -205,3 +205,22 @@ protocol + DshBeam.Sandbox.Plugin guardian fiber); see REVIEW.md for the boundar
   teardown)
 - Concurrency verification of confluence (reconfiguration order irrelevant)
 - Spark DSL front: use DshBeam.Plugin's needs/provides + the composition DSL (entry)
+
+## 15. "Everything is a plugin" — the inventory + typed settings substrate (complete)
+
+The original harness's design is not the LLM/chat/loop framework (those exist
+everywhere); it is that EVERYTHING — shell limits, web search, storage,
+tools, UI panels, policies — is a plugin with typed settings and an inventory.
+Expressed here as:
+
+- `setting` declarations in use DshBeam.Plugin (name/type/default/doc, Spark
+  validated + introspectable) — the per-plugin typed settings schema.
+- DshBeam.Plugin.Inventory — the installed-plugin catalog (list + settings).
+- DshBeam.Settings — per-plugin overrides validated against the schema, layered
+  over defaults; credentials are references, never stored values.
+- The console's plugins panel — the inventory list (enabled/disabled) with
+  per-plugin typed forms and Save.
+
+LLM stays an example plugin: DshBeam.Credential (config carries a name, not a
+literal key) + configure/2 (adapter re-resolves per request — reconfiguration
+without re-mount) mirror the harness's credential/settings separation.
