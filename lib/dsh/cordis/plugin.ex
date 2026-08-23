@@ -68,6 +68,12 @@ defmodule DshBeam.Plugin do
   @doc "The fiber's own lifecycle state (its :gen_statem state)."
   def fiber_state(pid), do: :gen_statem.call(pid, :__dsh_fiber_state__)
 
+  @doc false
+  # Behind a remote call so the type checker does not narrow a plugin's own
+  # mount extra (which may not carry :intercepts) and flag the Map.get.
+  def intercepts_of(extra) when is_map(extra), do: Map.get(extra, :intercepts, %{})
+  def intercepts_of(_extra), do: %{}
+
   @doc """
   The module's declared tools (name/description/parameters), introspected
   from the Spark DSL — a tool is a plugin, and this is its model-facing schema.
@@ -151,7 +157,12 @@ defmodule DshBeam.Plugin do
 
         # Registration is synchronous: start_link returns only after the fiber
         # exists in the context, so callers never observe a half-started fiber.
-        case DshBeam.Context.register(ctx, id: id, deps: deps, provides: provides) do
+        case DshBeam.Context.register(ctx,
+               id: id,
+               deps: deps,
+               provides: provides,
+               intercepts: DshBeam.Plugin.intercepts_of(extra)
+             ) do
           {:ok, fiber_state, view} ->
             data = %DshBeam.Plugin.State{
               ctx: ctx,
@@ -309,7 +320,12 @@ defmodule DshBeam.Plugin do
           Spark.Dsl.Extension.get_entities(__MODULE__, [:tool])
           |> Map.new(&{&1.name, self()})
 
-        {:ok, needs, Map.merge(provides, tool_provides), %{}}
+        intercepts =
+          Spark.Dsl.Extension.get_entities(__MODULE__, [:need])
+          |> Enum.filter(&(not is_nil(&1.intercept)))
+          |> Map.new(&{&1.key, &1.intercept})
+
+        {:ok, needs, Map.merge(provides, tool_provides), %{intercepts: intercepts}}
       end
 
       def handle_dsh_withdraw(_keys, state), do: {:ok, state}

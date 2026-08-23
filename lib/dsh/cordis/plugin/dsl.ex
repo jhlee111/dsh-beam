@@ -10,7 +10,7 @@ defmodule DshBeam.Plugin.Dsl do
 
   defmodule Need do
     @moduledoc false
-    defstruct [:key, :__identifier__, :__spark_metadata__]
+    defstruct [:key, :intercept, :__identifier__, :__spark_metadata__]
   end
 
   defmodule Provide do
@@ -37,7 +37,12 @@ defmodule DshBeam.Plugin.Dsl do
           Entity.new(:need, Need,
             describe: "one dependency declaration",
             args: [:key],
-            schema: [Field.new(:key, :atom, required: true, doc: "the provided key")],
+            schema: [
+              Field.new(:key, :atom, required: true, doc: "the provided key"),
+              Field.new(:intercept, :any,
+                doc: "an {M, f, args} that wraps the resolved value for this fiber"
+              )
+            ],
             identifier: :key
           )
           |> Entity.build!()

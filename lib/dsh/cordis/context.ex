@@ -113,6 +113,7 @@ defmodule DshBeam.Context do
     id = Keyword.fetch!(opts, :id)
     deps = MapSet.new(Keyword.get(opts, :deps, []))
     provides = Keyword.get(opts, :provides, %{})
+    intercepts = Keyword.get(opts, :intercepts, %{})
     dupes = Enum.filter(Map.keys(provides), &Map.has_key?(state.bindings, &1))
 
     if dupes != [] do
@@ -138,6 +139,7 @@ defmodule DshBeam.Context do
         | id: id,
           deps: deps,
           provides: MapSet.union(existing.provides, MapSet.new(Map.keys(provides))),
+          intercepts: intercepts,
           inverses: inverses ++ existing.inverses
       }
 
@@ -207,8 +209,11 @@ defmodule DshBeam.Context do
 
       fiber ->
         case Coeffect.resolve(state.bindings, fiber.deps) do
-          {:satisfied, view} -> {:reply, {:active, view}, state}
-          {:unsatisfied, view, _missing} -> {:reply, {:inactive, view}, state}
+          {:satisfied, view} ->
+            {:reply, {:active, intercept_view(view, fiber)}, state}
+
+          {:unsatisfied, view, _missing} ->
+            {:reply, {:inactive, intercept_view(view, fiber)}, state}
         end
     end
   end
@@ -373,8 +378,8 @@ defmodule DshBeam.Context do
   defp reactivate(state, subject) do
     {subject_state, own_view} =
       case Coeffect.resolve(active_bindings(state), subject.deps) do
-        {:satisfied, view} -> {:active, view}
-        {:unsatisfied, view, _missing} -> {:inactive, view}
+        {:satisfied, view} -> {:active, intercept_view(view, subject)}
+        {:unsatisfied, view, _missing} -> {:inactive, intercept_view(view, subject)}
       end
 
     state = put_fiber(state, %{subject | state: subject_state})
@@ -395,6 +400,7 @@ defmodule DshBeam.Context do
             true ->
               case Coeffect.resolve(active_bindings(st2), fiber.deps) do
                 {:satisfied, view} ->
+                  view = intercept_view(view, fiber)
                   send(pid, {:dsh_activate, view})
 
                   st2
@@ -409,6 +415,18 @@ defmodule DshBeam.Context do
       end)
 
     {state, subject_state, own_view}
+  end
+
+  # Interception (access control / provider wrapping): a fiber's declared
+  # intercept transforms the resolved value of that dependency, per consumer —
+  # two fibers resolving the same provider see different views.
+  defp intercept_view(view, fiber) do
+    Map.new(view, fn {key, value} ->
+      case Map.get(fiber.intercepts, key) do
+        {mod, fun, args} -> {key, apply(mod, fun, [value | args])}
+        nil -> {key, value}
+      end
+    end)
   end
 
   defp active_dependents(state, fiber) do
