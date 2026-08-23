@@ -8,11 +8,13 @@ defmodule DshBeam.Llm.Adapter.Echo do
   @behaviour DshBeam.Llm.Adapter
 
   @impl true
-  def complete(_config, []) do
-    {:ok, "echo: (no messages)"}
-  end
+  def complete(_config, messages, _opts) do
+    content =
+      case messages do
+        [] -> "echo: (no messages)"
+        _ -> "echo: " <> List.last(messages)["content"]
+      end
 
-  def complete(_config, messages) do
-    {:ok, "echo: " <> List.last(messages)["content"]}
+    {:ok, %{content: content, tool_calls: [], finish_reason: :stop}}
   end
 end

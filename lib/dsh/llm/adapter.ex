@@ -1,13 +1,14 @@
 defmodule DshBeam.Llm.Adapter do
   @moduledoc """
-  The transport-only boundary of an LLM provider. complete/2 turns a
-  chat-completion request into the model's reply text.
+  The transport-only boundary of an LLM provider. complete/3 turns a
+  chat-completion request into the model's reply: the visible text, any
+  tool calls, and the finish reason (the minimal OpenAI-compatible wire
+  vocabulary an agent loop needs to dispatch tools).
 
   The adapter is swappable per configuration — the provider-swap pattern of
-  milestone 1: production mounts DshBeam.Llm.Adapter.Req, tests inject a stub
-  so the whole pipeline runs offline. Connection facts ride the config and
-  the credential reference is resolved per request, so a configuration change
-  reaches the next request without re-registration.
+  milestone 1. Connection facts ride the config and the credential reference
+  is resolved per request, so a configuration change reaches the next request
+  without re-registration.
   """
 
   @typedoc """
@@ -24,5 +25,15 @@ defmodule DshBeam.Llm.Adapter do
   @typedoc "One chat message: role and content (JSON-safe)."
   @type message :: %{required(String.t()) => String.t()}
 
-  @callback complete(config(), [message()]) :: {:ok, String.t()} | {:error, term()}
+  @typedoc "One model-issued tool call (arguments is the raw JSON string)."
+  @type tool_call :: %{id: String.t(), name: String.t(), arguments: String.t()}
+
+  @typedoc "A completed reply: content, tool calls, and finish reason."
+  @type result :: %{
+          content: String.t() | nil,
+          tool_calls: [tool_call()],
+          finish_reason: atom() | {:error, atom()}
+        }
+
+  @callback complete(config(), [message()], map()) :: {:ok, result()} | {:error, term()}
 end

@@ -29,16 +29,11 @@ defmodule DshBeam.Llm.Plugin do
 
   @impl true
   def handle_event({:call, from}, {:chat, messages}, _state, data) do
-    # the adapter sees connection facts + flattened adapter_config (so extras
-    # like a :plug or a stub's :parent ride the top level), never the registry
-    # fields (:adapter, :adapter_config)
-    adapter_config =
-      data.extra.config
-      |> Map.take([:base_url, :model, :credential])
-      |> Map.merge(data.extra.config.adapter_config)
+    {:keep_state_and_data, [{:reply, from, do_chat(data, messages, %{})}]}
+  end
 
-    result = data.extra.config.adapter.complete(adapter_config, messages)
-    {:keep_state_and_data, [{:reply, from, result}]}
+  def handle_event({:call, from}, {:chat, messages, opts}, _state, data) do
+    {:keep_state_and_data, [{:reply, from, do_chat(data, messages, opts)}]}
   end
 
   def handle_event({:call, from}, {:configure, opts}, _state, data) do
@@ -49,6 +44,18 @@ defmodule DshBeam.Llm.Plugin do
 
   def handle_event({:call, from}, :config, _state, data) do
     {:keep_state_and_data, [{:reply, from, data.extra.config}]}
+  end
+
+  defp do_chat(data, messages, opts) do
+    # the adapter sees connection facts + flattened adapter_config (so extras
+    # like a :plug or a stub's :parent ride the top level), never the registry
+    # fields (:adapter, :adapter_config)
+    adapter_config =
+      data.extra.config
+      |> Map.take([:base_url, :model, :credential])
+      |> Map.merge(data.extra.config.adapter_config)
+
+    data.extra.config.adapter.complete(adapter_config, messages, opts)
   end
 
   defp default_config(opts) do

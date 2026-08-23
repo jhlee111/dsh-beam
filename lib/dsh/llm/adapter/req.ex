@@ -2,23 +2,24 @@ defmodule DshBeam.Llm.Adapter.Req do
   @moduledoc """
   A minimal OpenAI-compatible adapter: POST /chat/completions (non-streaming).
   The LLM provider is an EXAMPLE of the "everything is a plugin" design, not a
-  client framework, so this adapter stays intentionally thin: transport-only,
-  resolving the credential reference on every request.
+  client framework, so this adapter stays thin: it forwards `tools` and parses
+  content, tool_calls, and finish_reason — the vocabulary an agent loop needs.
   """
 
   @behaviour DshBeam.Llm.Adapter
 
   @impl true
-  def complete(config, messages) do
+  def complete(config, messages, opts) do
     with {:ok, api_key} <- DshBeam.Credential.resolve(config.credential) do
-      post(config, messages, api_key)
+      post(config, messages, api_key, opts)
     end
   end
 
-  defp post(config, messages, api_key) do
+  defp post(config, messages, api_key, opts) do
     url = String.trim_trailing(config.base_url, "/") <> "/chat/completions"
 
     body = %{model: config.model, messages: messages, stream: false}
+    body = if opts[:tools] in [nil, []], do: body, else: Map.put(body, :tools, opts.tools)
 
     headers = [
       {"authorization", "Bearer " <> api_key},
@@ -39,10 +40,31 @@ defmodule DshBeam.Llm.Adapter.Req do
     end
   end
 
-  defp parse(%{"choices" => [%{"message" => %{"content" => content}} | _]})
-       when is_binary(content) do
-    {:ok, content}
+  defp parse(%{"choices" => [choice | _]}) do
+    message = choice["message"] || %{}
+
+    {:ok,
+     %{
+       content: message["content"],
+       tool_calls: parse_tool_calls(message["tool_calls"]),
+       finish_reason: map_finish_reason(choice["finish_reason"])
+     }}
   end
 
   defp parse(other), do: {:error, {:unexpected_response, other}}
+
+  defp parse_tool_calls(nil), do: []
+
+  defp parse_tool_calls(calls) do
+    Enum.map(calls, fn call ->
+      function = call["function"] || %{}
+      %{id: call["id"], name: function["name"], arguments: function["arguments"] || "{}"}
+    end)
+  end
+
+  defp map_finish_reason(nil), do: :stop
+  defp map_finish_reason("stop"), do: :stop
+  defp map_finish_reason("tool_calls"), do: :tool_calls
+  defp map_finish_reason("length"), do: :max_tokens
+  defp map_finish_reason(other), do: {:error, String.upcase(other)}
 end

@@ -8,10 +8,26 @@ defmodule DshBeam.Llm do
   @typedoc "One chat message: role and content."
   @type message :: %{required(String.t()) => String.t()}
 
-  @doc "Complete messages through the LLM provider fiber. Returns {:ok, content}."
+  @typedoc "A full completion: content, tool calls, and finish reason."
+  @type result :: %{
+          content: String.t() | nil,
+          tool_calls: [DshBeam.Llm.Adapter.tool_call()],
+          finish_reason: atom() | {:error, atom()}
+        }
+
+  @doc "Complete messages. Returns {:ok, content} (the visible text)."
   @spec chat(pid(), [message()]) :: {:ok, String.t()} | {:error, term()}
   def chat(llm, messages) when is_pid(llm) and is_list(messages) do
-    :gen_statem.call(llm, {:chat, messages})
+    case :gen_statem.call(llm, {:chat, messages}) do
+      {:ok, %{content: content}} -> {:ok, content}
+      other -> other
+    end
+  end
+
+  @doc "Complete messages with options (:tools). Returns the full completion."
+  @spec chat(pid(), [message()], keyword()) :: {:ok, result()} | {:error, term()}
+  def chat(llm, messages, opts) when is_pid(llm) and is_list(messages) and is_list(opts) do
+    :gen_statem.call(llm, {:chat, messages, opts})
   end
 
   @doc "Update connection facts (model, endpoint, credential). Returns :ok."

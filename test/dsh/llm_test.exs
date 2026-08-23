@@ -180,9 +180,15 @@ defmodule StubLlmAdapter do
   @behaviour DshBeam.Llm.Adapter
 
   @impl true
-  def complete(config, messages) do
+  def complete(config, messages, _opts) do
     parent = Map.get(config, :parent, self())
     send(parent, {:complete, config.model, messages})
-    {:ok, "stub reply: " <> List.last(messages)["content"]}
+
+    {:ok,
+     %{
+       content: "stub reply: " <> List.last(messages)["content"],
+       tool_calls: [],
+       finish_reason: :stop
+     }}
   end
 end
