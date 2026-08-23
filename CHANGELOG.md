@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Workspace folder picker
+
+- The workspace "repository" field is now a folder picker (a server-side
+  directory browser, since the browser File System Access API cannot expose a
+  picked folder's path): a "browse" button opens an overlay to navigate
+  subdirectories and select a real path. The raw path input and the misleading
+  "repository path (a git repo)" copy are gone.
+- Removed the stray "new conversation" button from the conversation header;
+  opening a new session is the sidebar workspace's "+ new session", which is
+  where multiple sessions within a workspace are opened.
+
 ### Sidebar toggle
 
 - The sidebar "panel" control is now the collapse/expand toggle (280px ↔ 56px

@@ -17,14 +17,12 @@ defmodule DshBeam.Ui.Panel.Workspace do
       <h2>workspace</h2>
 
       <form class="workspace-form" phx-submit="workspace_create">
-        <label class="muted" for="ws-repo">repository path (a git repo)</label>
-        <input
-          type="text"
-          name="repo"
-          id="ws-repo"
-          value={@workspace_repo}
-          placeholder="/path/to/git/repo"
-        />
+        <input type="hidden" name="repo" value={@workspace_repo} />
+        <label class="muted">workspace folder</label>
+        <div class="repo-picker">
+          <code class="repo-path"><%= @workspace_repo %></code>
+          <button type="button" phx-click="browse_dir">browse</button>
+        </div>
         <label class="muted" for="ws-title">session title (optional)</label>
         <input type="text" name="title" id="ws-title" placeholder="e.g. my task" />
         <button type="submit" class="new-session-btn">+ new session</button>
@@ -37,7 +35,7 @@ defmodule DshBeam.Ui.Panel.Workspace do
       <div class="workspace-list">
         <%= if @workspace_sessions == [] do %>
           <p class="muted empty-hint">
-            no sessions yet — enter a git repository path above and press “+ new session”
+            no sessions yet — pick a workspace folder and press “+ new session”
           </p>
         <% end %>
         <%= for s <- @workspace_sessions do %>

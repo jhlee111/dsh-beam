@@ -108,6 +108,9 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:custom_presets, [])
       |> assign(:presets_result, nil)
       |> assign(:sidebar_collapsed, false)
+      |> assign(:picker_open, false)
+      |> assign(:picker_path, nil)
+      |> assign(:picker_entries, [])
       |> refresh()
 
     {:ok, socket}
@@ -376,6 +379,30 @@ defmodule DshBeamWeb.ConsoleLive do
      assign(socket, sidebar_collapsed: not socket.assigns.sidebar_collapsed) |> refresh()}
   end
 
+  def handle_event("browse_dir", _params, socket) do
+    root = Path.expand(socket.assigns.workspace_repo || ".")
+
+    {:noreply,
+     socket
+     |> assign(picker_open: true, picker_path: root, picker_entries: list_dirs(root))
+     |> refresh()}
+  end
+
+  def handle_event("picker_nav", %{"path" => path}, socket) do
+    {:noreply, socket |> assign(picker_path: path, picker_entries: list_dirs(path)) |> refresh()}
+  end
+
+  def handle_event("picker_select", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(workspace_repo: socket.assigns.picker_path, picker_open: false)
+     |> refresh()}
+  end
+
+  def handle_event("picker_cancel", _params, socket) do
+    {:noreply, assign(socket, picker_open: false) |> refresh()}
+  end
+
   def handle_event("view_tab", %{"tab" => tab}, socket) do
     view_tab = if tab == "trajectory", do: :trajectory, else: :chat
     {:noreply, assign(socket, view_tab: view_tab) |> refresh()}
@@ -556,11 +583,6 @@ defmodule DshBeamWeb.ConsoleLive do
           <div class="conv-header">
             <div class="title-row">
               <div class="crumbs"><span class="crumb crumb-current">console</span></div>
-              <div class="header-actions">
-                <button type="button" class="header-action" phx-click="clear_chat">
-                  new conversation
-                </button>
-              </div>
             </div>
             <div class="tabs">
               <button
@@ -631,6 +653,35 @@ defmodule DshBeamWeb.ConsoleLive do
         </div>
       </div>
     <% end %>
+
+    <%= if @picker_open do %>
+      <div class="settings-overlay">
+        <div class="settings-backdrop" phx-click="picker_cancel"></div>
+        <div class="settings-panel picker-panel">
+          <div class="picker-head">
+            <span class="picker-title">choose a workspace folder</span>
+            <button phx-click="picker_cancel">cancel</button>
+          </div>
+          <div class="picker-path"><code><%= @picker_path %></code></div>
+          <div class="picker-list">
+            <button class="picker-entry" phx-click="picker_nav" phx-value-path={Path.dirname(@picker_path)}>
+              ../ (up)
+            </button>
+            <%= for dir <- @picker_entries do %>
+              <button class="picker-entry" phx-click="picker_nav" phx-value-path={dir.path}>
+                📁 <%= dir.name %>
+              </button>
+            <% end %>
+            <%= if @picker_entries == [] do %>
+              <p class="muted">no subdirectories here</p>
+            <% end %>
+          </div>
+          <div class="picker-foot">
+            <button class="new-session-btn" phx-click="picker_select">select this folder</button>
+          </div>
+        </div>
+      </div>
+    <% end %>
     """
   end
 
@@ -654,6 +705,22 @@ defmodule DshBeamWeb.ConsoleLive do
     case DshBeam.Context.get(ctx, :workspace) do
       {:ok, workspace} when is_pid(workspace) -> {:ok, workspace}
       _ -> :not_found
+    end
+  end
+
+  # Subdirectories of a path, sorted by name — the server-side folder picker
+  # browses the local filesystem and returns real absolute paths (the browser
+  # File System Access API cannot expose a picked folder's path).
+  defp list_dirs(path) do
+    case File.ls(path) do
+      {:ok, entries} ->
+        entries
+        |> Enum.filter(&File.dir?(Path.join(path, &1)))
+        |> Enum.map(fn name -> %{name: name, path: Path.join(path, name)} end)
+        |> Enum.sort_by(& &1.name)
+
+      {:error, _} ->
+        []
     end
   end
 

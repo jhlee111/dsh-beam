@@ -231,6 +231,33 @@ defmodule DshBeamWeb.Layouts do
           .workspace-meta .muted { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
           .workspace-actions { display: flex; gap: 4px; }
 
+          /* Workspace folder picker. */
+          .repo-picker {
+            display: flex; align-items: center; gap: 6px;
+            border: 1px solid var(--dsw-alias-border-l3, #2b3442); border-radius: 6px;
+            padding: 4px 8px; background: var(--dsw-static-neutral-bluish-900, #0c0f14);
+          }
+          .repo-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+          .picker-panel {
+            width: min(480px, 92vw); height: min(520px, 84vh);
+            flex-direction: column; padding: 12px;
+          }
+          .picker-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+          .picker-title { font-weight: 600; font-size: 14px; }
+          .picker-path {
+            border: 1px solid var(--dsw-alias-border-l3, #2b3442); border-radius: 6px;
+            padding: 6px 8px; margin-bottom: 8px; background: var(--dsw-static-neutral-bluish-900, #0c0f14);
+            font-size: 12px; overflow-x: auto; white-space: nowrap;
+          }
+          .picker-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+          .picker-entry {
+            display: flex; align-items: center; gap: 6px; width: 100%;
+            border: none; background: transparent; color: var(--dsw-alias-label-primary);
+            padding: 6px 8px; border-radius: 6px; text-align: left; cursor: pointer; font-size: 13px;
+          }
+          .picker-entry:hover { background: var(--dsw-alias-interactive-bg-hover); }
+          .picker-foot { margin-top: 10px; }
+
           /* Settings modal overlay. */
           .settings-overlay {
             position: fixed; inset: 0; z-index: 100;
