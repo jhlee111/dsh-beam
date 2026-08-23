@@ -10,6 +10,9 @@ config :dsh_beam, DshBeamWeb.Endpoint,
   secret_key_base: "dsh_beam_dev_secret_do_not_use_in_production",
   live_view: [signing_salt: "dsh_beam_lv"],
   check_origin: false,
-  pubsub_server: DshBeam.PubSub
+  pubsub_server: DshBeam.PubSub,
+  # Recompile + reload changed modules on each request in dev, so the console
+  # demo (mix run, not mix phx.server) reflects edits without a restart.
+  code_reloader: config_env() == :dev
 
 config :phoenix, :json_library, Jason

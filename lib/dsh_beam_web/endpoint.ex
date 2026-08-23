@@ -9,6 +9,10 @@ defmodule DshBeamWeb.Endpoint do
 
   socket("/live", Phoenix.LiveView.Socket)
 
+  if code_reloading? do
+    plug(Phoenix.CodeReloader)
+  end
+
   plug(Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
