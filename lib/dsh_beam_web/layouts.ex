@@ -180,7 +180,7 @@ defmodule DshBeamWeb.Layouts do
           .markdown pre {
             background: var(--dsw-static-neutral-bluish-900, #0c0f14);
             border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px;
-            padding: 10px; overflow-x: auto;
+            padding: 10px; overflow: auto; max-height: 320px;
           }
           .markdown pre code { background: transparent; padding: 0; }
           .markdown blockquote {
@@ -202,7 +202,7 @@ defmodule DshBeamWeb.Layouts do
             background: var(--dsw-static-neutral-bluish-900, #0c0f14); overflow: hidden;
           }
           .tool-result pre {
-            margin: 0; padding: 8px 12px; overflow-x: auto;
+            margin: 0; padding: 8px 12px; overflow: auto; max-height: 320px;
             font-family: var(--ds-font-family-code); font-size: 12px;
             color: var(--dsw-alias-label-primary); white-space: pre-wrap; word-break: break-all;
           }

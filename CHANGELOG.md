@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Conversation rendering
+
+- Long tool output and markdown code blocks are capped to a scrollable
+  `max-height` (320px) instead of expanding the transcript to the full
+  content, matching the reference's collapsed-to-max presentation.
+
 ### Workspace sessions — relaxed to any folder
 
 - Opening a session no longer requires a git repository. A folder inside a git
