@@ -37,7 +37,11 @@ defmodule DshBeam.MixProject do
       # LiveViewTest's DOM backend (LiveView 1.2). Pinned to 0.1.11: 0.1.12
       # ships no precompiled NIF for aarch64-apple-darwin and this machine
       # has no cmake for a source build.
-      {:lazy_html, "0.1.11", only: :test}
+      {:lazy_html, "0.1.11", only: :test},
+      # Static analysis: bug-catching checks only. Elixir 1.18+'s built-in type
+      # checker already covers undefined/unused via --warnings-as-errors, so
+      # Credo is scoped to what that checker does not see.
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end
 end

@@ -49,4 +49,4 @@ IO.puts("answer: " <> inspect(DshBeam.Agent.Loop.run(loop, "list the files")))
 
 IO.puts("== session log ==")
 {:ok, session} = DshBeam.Context.get(ctx, :session)
-IO.inspect(DshBeam.Session.all(session))
+IO.puts(inspect(DshBeam.Session.all(session)))

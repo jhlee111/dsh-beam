@@ -271,7 +271,8 @@ defmodule DshBeam.Sandbox.Plugin do
       String.to_existing_atom(name)
     rescue
       ArgumentError ->
-        raise "sandboxed plugin references key #{inspect(name)}, which does not exist on the host"
+        reraise "sandboxed plugin references key #{inspect(name)}, which does not exist on the host",
+                __STACKTRACE__
     end
   end
 
