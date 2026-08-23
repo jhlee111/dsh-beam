@@ -7,9 +7,10 @@ defmodule DshBeam.MixProject do
       version: "0.1.0",
       elixir: "~> 1.20",
       start_permanent: Mix.env() == :prod,
-      deps: deps(),
-      # Phoenix 1.8's CodeReloader hooks compilation through a Mix listener.
-      listeners: [Phoenix.CodeReloader]
+      deps: deps()
+      # Code reloading is off (see config/config.exs): Phoenix 1.8's
+      # CodeReloader hooks compilation through a Mix listener, but it cannot
+      # survive a config change or a mid-edit compile error, so we omit it.
     ]
   end
 
