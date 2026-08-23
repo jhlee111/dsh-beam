@@ -77,6 +77,42 @@ defmodule DshBeam.ConsoleTest do
     assert html =~ "write a summary"
   end
 
+  test "the agent plans (todo_write) and runs a tool in one turn, both visible",
+       %{session: session, runtime: runtime, ctx: ctx} do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+
+    entries = [
+      %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
+      %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [adapter: ConsolePlanLlm], disabled: false},
+      %{id: :todo, plugin: DshBeam.Tool.Todo, config: [], disabled: false},
+      %{id: :tool, plugin: ConsoleEchoTool, config: [], disabled: false},
+      %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false}
+    ]
+
+    :ok = DshBeam.Runtime.reconcile(runtime, entries)
+
+    # the scripted model first writes a todo plan AND calls console_echo, then
+    # answers on the second round-trip
+    render_submit(view, "ask", %{"text" => "plan and do it"})
+    wait_until(fn -> render(view) =~ "final answer" end)
+
+    # chat pane shows both the plan (todo_write) and the tool execution
+    html = render(view)
+    assert html =~ "todo_write"
+    assert html =~ "inspect the workspace"
+    assert html =~ "console_echo"
+    assert html =~ "final answer"
+
+    # the todo panel projects the plan the agent wrote during the turn
+    assert html =~ "write a summary"
+
+    # the session recorded the whole turn chronologically, including the plan
+    {:ok, session_pid} = DshBeam.Context.get(ctx, :session)
+
+    assert Enum.any?(DshBeam.Session.all(session_pid), &(&1["role"] == "todo_write"))
+    assert Enum.any?(DshBeam.Session.all(session_pid), &(&1["role"] == "assistant"))
+  end
+
   test "the chat pane reports a missing credential honestly", %{session: session} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
     render_submit(view, "seed", %{})
@@ -371,6 +407,33 @@ defmodule ConsoleLoopLlm do
        %{
          content: nil,
          tool_calls: [%{id: "c1", name: "console_echo", arguments: ~s({"text":"hi"})}],
+         finish_reason: :tool_calls
+       }}
+    end
+  end
+end
+
+defmodule ConsolePlanLlm do
+  @moduledoc false
+  @behaviour DshBeam.Llm.Adapter
+
+  @impl true
+  def complete(_config, messages, _opts) do
+    if Enum.any?(messages, &(&1["role"] == "tool")) do
+      {:ok, %{content: "final answer", tool_calls: [], finish_reason: :stop}}
+    else
+      {:ok,
+       %{
+         content: nil,
+         tool_calls: [
+           %{
+             id: "plan_1",
+             name: "todo_write",
+             arguments:
+               ~s({"todos":[{"content":"inspect the workspace","status":"in_progress"},{"content":"write a summary","status":"pending"}]})
+           },
+           %{id: "echo_1", name: "console_echo", arguments: ~s({"text":"hi"})}
+         ],
          finish_reason: :tool_calls
        }}
     end
