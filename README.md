@@ -1,72 +1,71 @@
 # dsh-beam — a harness for the BEAM
 
-"Everything is a plugin" — a PoC that reproduces the paper (A Programming
-Paradigm for Spatiotemporal Composability) on Elixir/OTP: revertible effects,
+"Everything is a plugin" — a PoC that reproduces the paper (*A Programming
+Paradigm for Spatiotemporal Composability*) on Elixir/OTP: revertible effects,
 reactive coeffects, and the L-Unload guard.
 
-Design and test list: [PLAN.md](PLAN.md). Review history and fix plan:
-[REVIEW.md](REVIEW.md). The answer to the PoC's core question (where revertible
-effects and OTP isolation reinforce vs collide): [PLAN.md §22](PLAN.md#22-conclusion--where-the-two-reinforce-and-where-they-collide).
+A plugin is the unit of everything — a tool, a UI panel, a safety guard, a
+capability — and the substrate makes them compose, swap, and roll back.
 
-## Running
+## Quick start
 
-    mix test
+```bash
+git submodule update --init
+mix deps.get
+mix test                              # 120+ tests, one per paper guarantee
 
-Elixir 1.20.2 / OTP 28 (pinned via .tool-versions for asdf).
+DEEPSEEK_API_KEY=sk-... mix run scripts/console.exs   # http://127.0.0.1:4001
+```
 
-## Structure
+Elixir 1.20.2 / OTP 28 (pinned via `.tool-versions`).
 
-The layout mirrors the TS harness: a Cordis core (`vendor/cordis`) and the
-plugins built on it (`packages/*`).
+## Documentation
 
-- lib/dsh/cordis/* — the substrate (= vendor/cordis): Context (unified context,
-  bindings + fibers + the pending-unload machine), Effect/Coeffect/Fiber, Loader
-  + Runtime (declarative composition + incremental reconfiguration), the
-  use DshBeam.Plugin macro + Spark DSL (need/provide/setting/tool) + the
-  installed-plugin inventory, Settings (typed overrides) + Credential
-  (references, not keys), and the Tool registry.
-- lib/dsh/* — the harness plugins (= packages/*): Session (append-only log),
-  Llm + Chat, Shell, Sandbox (§6.3 boundary), Creator, Console, and the generic
-  Provider/Consumer examples.
-- lib/dsh_beam_web/* — the LiveView console (composition, bindings, event feed, chat, plugins, creator/sandbox editor)
-- priv/sandbox_runner.exs — the child runtime (compiles and executes sandboxed plugins in their own BEAM)
-- test/dsh/* — the TDD suite (one test per paper guarantee)
-- reference/deepseek-harness — the TS harness as a git submodule: the read-source for
-  porting its modules and UI (when modifying it, work on a branch of that repository)
+Start here, then follow the links:
 
-## Live console
+- **[docs/guide](docs/guide/README.md)** — onboarding, architecture,
+  contributing, glossary.
+- **[docs/adr](docs/adr/README.md)** — architecture decision records: *why* each
+  choice was made, and its alternatives.
+- **[PLAN.md](PLAN.md)** — the research question, the OTP mapping, the milestone
+  history, and the conclusion (where OTP isolation and the paper's model
+  reinforce vs collide).
+- **[REVIEW.md](REVIEW.md)** — the review history and fix log.
 
-Everything the harness does is visible on one page — a plugin that owns the
-Phoenix endpoint, fed by the context/runtime subscription streams:
+## What's inside
 
-    DEEPSEEK_API_KEY=sk-... mix run scripts/console.exs   # http://127.0.0.1:4001
+```
+lib/dsh/cordis/*    the substrate (= vendor/cordis): Context, Effect/Coeffect,
+                    Fiber, Runtime, use DshBeam.Plugin + Spark DSL,
+                    Settings/Credential, Tool + UI slot registries
+lib/dsh/*           the harness plugins (= packages/*): Session, Llm, Shell,
+                    Sandbox, Creator, Console, Agent.Loop, tools, guards
+lib/dsh_beam_web/*  the LiveView console
+priv/static/assets/ vendored LiveView JS + the DSH design tokens (CSS)
+priv/sandbox_runner.exs  child runtime for sandboxed plugins
+scripts/            demo entrypoints
+test/dsh/*          the TDD suite
+docs/               guides + ADRs
+reference/          the TS harness as a git submodule (porting source)
+```
 
-The chat pane drives the agent loop (model ↔ bash/fs tools) and renders its
-trace; the llm provider talks to real deepseek-chat. Set the API key either
-via the DEEPSEEK_API_KEY environment variable or paste it into the page's
-"llm settings" panel (a literal key is held in the fiber's memory, resolved per
-request — re-enter it after a server restart). Without a key the pane reports
-{:error, {:missing_env, "DEEPSEEK_API_KEY"}}. The page shows fibers (4 states),
-bindings, the event feed, and a creator/sandbox source editor with kill/crash
-buttons to watch re-injection and the L-Unload guard live. The agent loop runs
-off the LiveView process, so a slow model round-trip shows a "thinking" row
-instead of freezing the page. Code reloading is disabled (see config/config.exs):
-restart the demo after an edit.
+## The console
 
-## Protocol summary
-
-- Plugins declare dependencies (deps) and provisions (provides) via DshBeam.Context.register.
-- Activation: {:dsh_activate, view} / withdrawal: {:dsh_withdraw, keys} -> ack
-  {:dsh_deactivated, pid, keys} (or :DOWN, or a timeout).
-- Withdrawal removes a binding only after every dependent's teardown completes
-  (the L-Unload guard).
+One page shows the whole harness: the composition (fiber states, restarts,
+kill/crash), bindings, the event feed, the chat pane (agent loop, multi-turn,
+real-time tool trace), the todo panel (the agent's plan as a session
+projection), the llm settings, the plugin inventory, and a creator/sandbox
+editor with **export plugin (.exs)** — an edited plugin becomes a deployable
+script.
 
 ## reference/ submodule
 
-`reference/deepseek-harness` is a git submodule pointing at
-[jhlee111/deepseek-harness](https://github.com/jhlee111/deepseek-harness). It is
-the source read while porting the TS harness's packages/* modules and apps/web
-UI to Elixir.
+`reference/deepseek-harness` points at
+[jhlee111/deepseek-harness](https://github.com/jhlee111/deepseek-harness) — the
+source read while porting its `packages/*` modules and `apps/web` UI. Work on a
+branch of that repository when modifying it.
 
-    git submodule update --init            # initialize after cloning
-    git -C reference/deepseek-harness pull # track upstream
+```bash
+git submodule update --init
+git -C reference/deepseek-harness pull
+```
