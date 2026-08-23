@@ -241,3 +241,26 @@ or timeout). The dependent survives, becomes :inactive, and can be reactivated.
   (String.to_existing_atom) may be referenced, only inert JSON-safe data crosses — capabilities never do.
   5 tests: boundary execution, crash+guard+re-injection (fresh OS pid), dependency activation,
   loud failure, atom containment.]
+
+## Milestone 4 — LLM provider plugin + live web console (complete)
+
+- LLM provider: DshBeam.Llm.Plugin provides :llm via an OpenAI-compatible
+  POST /chat/completions (deepseek-chat and peers). The HTTP transport is a
+  swappable DshBeam.Llm.Adapter: the real one uses Req (a :plug in its config
+  replaces the network, so tests run offline), and an Echo adapter powers the
+  console's offline chat. DshBeam.Llm.Chat declares :session + :llm and appends
+  both turns as revertible effects; it resolves capabilities at call time so a
+  withdrawn provider yields {:error, :capabilities_unavailable} instead of a
+  stale pid.
+- Observer streams: Context.subscribe / Runtime.subscribe fan out state
+  changes and entry changes to subscribers (cleaned up on :DOWN).
+- The console is a plugin: DshBeam.Console owns the Phoenix endpoint + pubsub
+  (started unlinked, stopped synchronously on withdrawal via a wait-out
+  handoff for re-injection). Phoenix 1.8 no longer supervises the pubsub, so
+  the console starts it; LiveView 1.2 requires lazy_html (pinned to 0.1.11:
+  0.1.12 ships no aarch64-apple-darwin precompiled NIF).
+- LiveView tests (6): render + seed demo, chat loop, creator define, sandbox
+  define (host module never loaded + HTML-escaped id), kill through the
+  runtime event stream (no reload), crash-child re-injection (fresh OS pid).
+  Deterministic teardown via start_supervised! (on_exit runs after the test
+  process died — a linked runtime was being torn down mid-test).

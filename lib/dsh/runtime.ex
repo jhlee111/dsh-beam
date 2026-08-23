@@ -257,7 +257,10 @@ defmodule DshBeam.Runtime do
   defp start_entry(state, %{disabled: true}, _restarts), do: {state, :ok}
 
   defp start_entry(state, entry, restarts) do
-    config = Keyword.put_new(entry.config, :id, entry.id)
+    config =
+      entry.config
+      |> Keyword.put_new(:id, entry.id)
+      |> Keyword.put_new(:runtime, self())
 
     spec = %{
       id: {DshBeam.Plugin, entry.id},

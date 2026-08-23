@@ -172,6 +172,21 @@ implementation) rather than writing the whole red suite at once.
 - [x] Known-limitations backlog: §6.3 execution boundary implemented (DshBeam.Sandbox) — untrusted source compiles
   and runs in a child OS process with its own BEAM; crash → guard → re-injection crosses the boundary — 40 passed
 
+## 14. Milestone 4 — LLM provider plugin + live web console (complete)
+
+- LLM capability: DshBeam.Llm.Plugin provides :llm (OpenAI-compatible
+  /chat/completions, deepseek-chat and peers) with a swappable adapter
+  (provider-swap pattern; a :plug replaces the transport for offline tests).
+  DshBeam.Llm.Chat declares :session + :llm and appends user/assistant turns.
+- Subscriber streams: Context.subscribe / Runtime.subscribe fan out state
+  and entry changes to observers; dead subscribers are cleaned up.
+- The UI is a plugin: DshBeam.Console owns the Phoenix endpoint (started
+  unlinked, stopped synchronously on withdrawal), and the LiveView reads the
+  composition and chat through the subscription streams.
+- Tests: llm (4), subscribe (4), console LiveView (6: render/seed, chat loop,
+  creator define, sandbox define, kill-via-event-stream, crash-child
+  re-injection) — 54 passed, stable across seeds.
+
 ## 13. Milestone 3 — creator mode (complete)
 
 DshBeam.Creator: load a source string via Code.compile_string -> the BEAM :code server -> mount as a fiber.
