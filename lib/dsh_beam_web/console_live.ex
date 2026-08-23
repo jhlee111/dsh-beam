@@ -602,24 +602,38 @@ defmodule DshBeamWeb.ConsoleLive do
             </div>
           </div>
           <div class="conv-scroll">
-            <%= DshBeam.Ui.render_slot(:conversation, assigns, key: @view_tab) %>
+            <%= if @workspace_active do %>
+              <%= DshBeam.Ui.render_slot(:conversation, assigns, key: @view_tab) %>
+            <% else %>
+              <div class="conversation-empty">
+                <p class="empty-title">no workspace open</p>
+                <p class="muted">pick a folder in the sidebar and press “+ new session” to start a conversation</p>
+              </div>
+            <% end %>
             <div class="composer-seat">
-              <form class="composer" phx-submit="ask">
-                <input
-                  type="text"
-                  name="text"
-                  value={@chat_text}
-                  placeholder="run a task (drives the agent loop)"
-                  disabled={@chat_busy}
-                />
+              <%= if @workspace_active do %>
+                <form class="composer" phx-submit="ask">
+                  <input
+                    type="text"
+                    name="text"
+                    value={@chat_text}
+                    placeholder="run a task (drives the agent loop)"
+                    disabled={@chat_busy}
+                  />
+                  <%= if @chat_busy do %>
+                    <button type="button" phx-click="stop_chat">stop</button>
+                  <% else %>
+                    <button type="submit">send</button>
+                  <% end %>
+                </form>
                 <%= if @chat_busy do %>
-                  <button type="button" phx-click="stop_chat">stop</button>
-                <% else %>
-                  <button type="submit">send</button>
+                  <div class="composer-status muted">thinking (model round-trip)…</div>
                 <% end %>
-              </form>
-              <%= if @chat_busy do %>
-                <div class="composer-status muted">thinking (model round-trip)…</div>
+              <% else %>
+                <div class="composer composer-inert">
+                  <input type="text" disabled placeholder="open a workspace to start" />
+                  <button type="button" disabled>send</button>
+                </div>
               <% end %>
             </div>
           </div>
@@ -790,6 +804,8 @@ defmodule DshBeamWeb.ConsoleLive do
 
     store = DshBeam.Runtime.settings(runtime)
     default_preset = resolve_default_preset(store)
+    workspace_sessions = workspace_sessions(socket.assigns.ctx)
+    workspace_active = Enum.any?(workspace_sessions, & &1.current)
 
     assign(socket,
       rows: rows,
@@ -800,7 +816,8 @@ defmodule DshBeamWeb.ConsoleLive do
       chat_log: chat_log(socket.assigns.ctx),
       todos: todos(socket.assigns.ctx),
       trajectory: trajectory(socket.assigns.ctx),
-      workspace_sessions: workspace_sessions(socket.assigns.ctx),
+      workspace_sessions: workspace_sessions,
+      workspace_active: workspace_active,
       inventory:
         build_inventory(
           runtime,

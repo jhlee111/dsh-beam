@@ -155,6 +155,12 @@ defmodule DshBeamWeb.Layouts do
           .composer { display: flex; gap: 6px; align-items: center; }
           .composer input { flex: 1; }
           .composer-status { margin: 4px 0 0; font-size: 12px; }
+          .conversation-empty {
+            flex: 1; display: flex; flex-direction: column; align-items: center;
+            justify-content: center; gap: 6px; padding: 40px 20px; text-align: center;
+          }
+          .empty-title { font-size: 15px; font-weight: 600; color: var(--dsw-alias-label-primary); }
+          .composer-inert { opacity: .55; }
 
           /* Conversation entries (reference ui-conversation chat + ui-tool). */
           .chat-flow { display: flex; flex-direction: column; gap: 10px; }

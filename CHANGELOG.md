@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Conversation gated on a workspace session
+
+- The chat/trajectory conversation and its composer only render while a
+  workspace session is current. With no workspace open, the conversation
+  column shows an empty state ("no workspace open") and an inert composer,
+  so the chat no longer silently runs over the boot's default directory.
+
 ### Conversation rendering
 
 - Long tool output and markdown code blocks are capped to a scrollable

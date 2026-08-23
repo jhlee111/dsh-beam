@@ -77,8 +77,19 @@ defmodule DshBeam.ConsoleWorkspaceTest do
     assert render(view) =~ "current"
   end
 
-  test "the trajectory panel groups the session log into turns", %{session: session, ctx: ctx} do
+  test "the trajectory panel groups the session log into turns", %{
+    session: session,
+    ctx: ctx,
+    repo: repo
+  } do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
+
+    # chat/trajectory render only under a workspace session
+    render_submit(view, "workspace_create", %{"repo" => repo, "title" => "trajectory"})
+    {:ok, workspace} = DshBeam.Context.get(ctx, :workspace)
+    [ws] = Map.keys(DshBeam.Workspace.all_sessions(workspace))
+    render_click(view, "workspace_switch", %{"session" => encode(ws)})
+    wait_until(fn -> DshBeam.Context.get(ctx, :session) == {:ok, ws} end)
 
     {:ok, session_pid} = DshBeam.Context.get(ctx, :session)
 

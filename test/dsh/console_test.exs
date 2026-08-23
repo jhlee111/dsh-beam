@@ -40,6 +40,16 @@ defmodule DshBeam.ConsoleTest do
   defp open_section(view, section),
     do: render_click(view, "settings_tab", %{"section" => to_string(section)})
 
+  # The chat pane renders only while a workspace session is current. Open an
+  # in-place session over a temp dir and switch to it.
+  defp open_chat_session(view, ctx) do
+    render_submit(view, "workspace_create", %{"repo" => System.tmp_dir!(), "title" => "chat"})
+    {:ok, workspace} = DshBeam.Context.get(ctx, :workspace)
+    [ws] = Map.keys(DshBeam.Workspace.all_sessions(workspace))
+    render_click(view, "workspace_switch", %{"session" => encode(ws)})
+    wait_until(fn -> DshBeam.Context.get(ctx, :session) == {:ok, ws} end)
+  end
+
   test "renders the composition with live fiber states and seeds the demo", %{session: session} do
     {:ok, view, html} = live(build_conn(), "/", session: session)
     assert html =~ "dsh-beam console"
@@ -92,6 +102,7 @@ defmodule DshBeam.ConsoleTest do
 
     entries = [
       %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
+      %{id: :workspace, plugin: DshBeam.Workspace, config: [], disabled: false},
       %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [], disabled: false},
       %{id: :adapter, plugin: ConsolePlanLlm, config: [], disabled: false},
       %{id: :todo, plugin: DshBeam.Tool.Todo, config: [], disabled: false},
@@ -100,6 +111,7 @@ defmodule DshBeam.ConsoleTest do
     ]
 
     :ok = DshBeam.Runtime.reconcile(runtime, entries)
+    open_chat_session(view, ctx)
 
     # the scripted model first writes a todo plan AND calls console_echo, then
     # answers on the second round-trip
@@ -123,9 +135,10 @@ defmodule DshBeam.ConsoleTest do
     assert Enum.any?(DshBeam.Session.all(session_pid), &(&1["role"] == "assistant"))
   end
 
-  test "the chat pane reports a missing credential honestly", %{session: session} do
+  test "the chat pane reports a missing credential honestly", %{session: session, ctx: ctx} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
     render_submit(view, "seed", %{})
+    open_chat_session(view, ctx)
 
     # no DEEPSEEK_API_KEY -> the real Req adapter fails the credential
     # resolution, and the chat pane surfaces the error instead of a fake reply.
@@ -136,11 +149,16 @@ defmodule DshBeam.ConsoleTest do
     assert render(view) =~ "missing_env"
   end
 
-  test "the chat pane renders the loop's tool trace", %{session: session, runtime: runtime} do
+  test "the chat pane renders the loop's tool trace", %{
+    session: session,
+    runtime: runtime,
+    ctx: ctx
+  } do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
 
     entries = [
       %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
+      %{id: :workspace, plugin: DshBeam.Workspace, config: [], disabled: false},
       %{
         id: :llm,
         plugin: DshBeam.Llm.Plugin,
@@ -153,6 +171,7 @@ defmodule DshBeam.ConsoleTest do
     ]
 
     :ok = DshBeam.Runtime.reconcile(runtime, entries)
+    open_chat_session(view, ctx)
 
     html = render_submit(view, "ask", %{"text" => "run"})
     wait_until(fn -> render(view) =~ "final answer" end)
@@ -169,6 +188,7 @@ defmodule DshBeam.ConsoleTest do
 
     entries = [
       %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
+      %{id: :workspace, plugin: DshBeam.Workspace, config: [], disabled: false},
       %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [], disabled: false},
       %{id: :adapter, plugin: ConsoleLoopLlm, config: [], disabled: false},
       %{id: :tool, plugin: ConsoleEchoTool, config: [], disabled: false},
@@ -176,6 +196,7 @@ defmodule DshBeam.ConsoleTest do
     ]
 
     :ok = DshBeam.Runtime.reconcile(runtime, entries)
+    open_chat_session(view, ctx)
 
     render_submit(view, "ask", %{"text" => "run"})
     wait_until(fn -> render(view) =~ "final answer" end)
