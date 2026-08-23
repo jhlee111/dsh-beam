@@ -242,3 +242,11 @@ answers {:tool_call, ...}); the agent loop is a plugin (`need :llm, :session`)
 that discovers tools from the registry, dispatches their calls, and answers.
 tool-bash (needs :shell) and tool-fs (workspace root, path containment) are the
 first tools. The LLM result now carries tool_calls + finish_reason. 85 tests.
+
+## 18. Milestone 8 — intercept (access control = provider wrapping) (complete)
+
+Cordis's `intercept` (inject=capability, interception=provider wrapping): a
+`need` may declare an intercept ({M, f, args}) that wraps the resolved value
+for that fiber only. The same provider resolves to different views per
+consumer; a swap re-applies the intercept; the intercepted consumer is still a
+dependent. 88 tests.

@@ -301,3 +301,10 @@ or timeout). The dependent survives, becomes :inactive, and can be reactivated.
   = vendor/cordis) vs lib/dsh/* (the plugins = packages/*).
 - 85 tests. (A type-checker "never match" warning on a test helper's dynamic
   notify delegation is benign and test-only.)
+
+## Milestone 8 — intercept (provider wrapping) (complete)
+
+- need gains an intercept option; the default mount collects it, register
+  stores it on the fiber, resolve/reactivate wrap the committed view per
+  consumer (the access-control row of PLAN §3). Same provider, different
+  views; swap re-applies; guard holds. 88 tests.
