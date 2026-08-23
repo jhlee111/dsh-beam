@@ -43,26 +43,40 @@ defmodule DshBeam.Shell.Plugin do
   end
 
   defp run_command(command, args, extra) do
-    # System.cmd has no timeout: run it in a linked task and kill the task
-    # (which owns the subprocess port) when it overruns.
-    task =
-      Task.async(fn ->
-        System.cmd(to_string(command), Enum.map(args, &to_string/1), stderr_to_stdout: true)
+    # System.cmd has no timeout and its subprocess port must not link to the
+    # fiber (a linked completion EXIT would stop the fiber). Run it in an
+    # unlinked, monitored process and have it send the result back.
+    parent = self()
+    command = to_string(command)
+    args = Enum.map(args, &to_string/1)
+
+    pid =
+      spawn(fn ->
+        send(parent, {:shell_result, self(), System.cmd(command, args, stderr_to_stdout: true)})
       end)
 
-    case Task.yield(task, extra.timeout) do
-      {:ok, {output, 0}} ->
-        {:ok, cap(output, extra.cap)}
+    ref = Process.monitor(pid)
 
-      {:ok, {output, status}} ->
-        {:error, {:exit_status, status}, cap(output, extra.cap)}
+    receive do
+      {:shell_result, ^pid, result} ->
+        Process.demonitor(ref, [:flush])
+        finish(result, extra.cap)
 
-      nil ->
-        Task.shutdown(task, :brutal_kill)
+      {:DOWN, ^ref, :process, ^pid, _reason} ->
+        {:error, :crashed, ""}
+    after
+      extra.timeout ->
+        Process.exit(pid, :kill)
+        Process.demonitor(ref, [:flush])
         {:error, :timeout, ""}
     end
   end
 
-  defp cap(output, cap) when byte_size(output) <= cap, do: output
-  defp cap(output, cap), do: binary_part(output, 0, cap)
+  defp finish({output, 0}, cap), do: {:ok, cap_output(output, cap)}
+
+  defp finish({output, status}, cap),
+    do: {:error, {:exit_status, status}, cap_output(output, cap)}
+
+  defp cap_output(output, cap) when byte_size(output) <= cap, do: output
+  defp cap_output(output, cap), do: binary_part(output, 0, cap)
 end

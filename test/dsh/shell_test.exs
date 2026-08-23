@@ -21,6 +21,10 @@ defmodule DshBeam.ShellTest do
 
     {:ok, shell} = DshBeam.Context.get(ctx, :shell)
     assert {:ok, "hi\n"} = DshBeam.Shell.Plugin.run(shell, "echo", ["hi"])
+
+    # the fiber survives a run: a completed subprocess must not stop it
+    assert Process.alive?(shell)
+    assert {:ok, "second\n"} = DshBeam.Shell.Plugin.run(shell, "echo", ["second"])
   end
 
   test "output is capped at the configured limit" do
