@@ -45,6 +45,7 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:result, nil)
       |> assign(:chat_text, "")
       |> assign(:chat_log, [])
+      |> assign(:chat_busy, false)
       |> assign(:events, [])
       |> assign(:rows, [])
       |> assign(:bindings, %{})
@@ -111,25 +112,30 @@ defmodule DshBeamWeb.ConsoleLive do
   end
 
   def handle_event("ask", %{"text" => text}, socket) do
-    result =
-      case loop_pid(socket.assigns.runtime) do
-        {:ok, loop} -> DshBeam.Agent.Loop.run_trace(loop, text)
-        :not_found -> {:error, :no_loop_plugin}
-      end
+    case loop_pid(socket.assigns.runtime) do
+      {:ok, loop} ->
+        # Run the whole model↔tool loop off the LiveView process: the loop
+        # makes a real (up to 2-minute) HTTP call, which must not block the
+        # event handler and freeze the chat pane. The result is pushed back
+        # as a message and rendered in handle_info/2.
+        from = self()
 
-    turn =
-      case result do
-        {:ok, answer, trace} ->
-          [{"user", text} | Enum.map(trace, &trace_entry/1)] ++ [{"assistant", answer}]
+        Task.start(fn ->
+          result = DshBeam.Agent.Loop.run_trace(loop, text)
+          send(from, {:chat_result, text, result})
+        end)
 
-        {:error, reason} ->
-          [{"user", text}, {"error", inspect(reason)}]
-      end
+        {:noreply, socket |> assign(chat_text: "", chat_busy: true) |> refresh()}
 
-    {:noreply,
-     socket
-     |> assign(chat_log: socket.assigns.chat_log ++ turn, chat_text: "")
-     |> refresh()}
+      :not_found ->
+        {:noreply,
+         socket
+         |> assign(
+           chat_log: socket.assigns.chat_log ++ [{"user", text}, {"error", ":no_loop_plugin"}],
+           chat_text: ""
+         )
+         |> refresh()}
+    end
   end
 
   def handle_event("llm_apply", params, socket) do
@@ -222,6 +228,22 @@ defmodule DshBeamWeb.ConsoleLive do
   defp parse_setting(_setting, _raw), do: :invalid
 
   @impl true
+  def handle_info({:chat_result, text, result}, socket) do
+    turn =
+      case result do
+        {:ok, answer, trace} ->
+          [{"user", text} | Enum.map(trace, &trace_entry/1)] ++ [{"assistant", answer}]
+
+        {:error, reason} ->
+          [{"user", text}, {"error", inspect(reason)}]
+      end
+
+    {:noreply,
+     socket
+     |> assign(chat_log: socket.assigns.chat_log ++ turn, chat_busy: false)
+     |> refresh()}
+  end
+
   def handle_info({:dsh_event, event}, socket) do
     {:noreply,
      socket |> assign(:events, Enum.take([event | socket.assigns.events], 100)) |> refresh()}
@@ -289,11 +311,14 @@ defmodule DshBeamWeb.ConsoleLive do
             <%= for {role, content} <- @chat_log do %>
               <li><strong><%= role %></strong>: <code><%= content %></code></li>
             <% end %>
+            <%= if @chat_busy do %>
+              <li><strong>…</strong>: <code>thinking (model round-trip)</code></li>
+            <% end %>
           </ul>
         </div>
         <form class="row" phx-submit="ask">
-          <input type="text" name="text" value={@chat_text} placeholder="run a task (drives the agent loop)" style="flex:1" />
-          <button type="submit">ask</button>
+          <input type="text" name="text" value={@chat_text} placeholder="run a task (drives the agent loop)" style="flex:1" disabled={@chat_busy} />
+          <button type="submit" disabled={@chat_busy}>ask</button>
         </form>
       </section>
 

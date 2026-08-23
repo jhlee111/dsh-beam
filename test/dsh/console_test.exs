@@ -57,9 +57,12 @@ defmodule DshBeam.ConsoleTest do
     render_submit(view, "seed", %{})
 
     # no DEEPSEEK_API_KEY -> the real Req adapter fails the credential
-    # resolution, and the chat pane surfaces the error instead of a fake reply
-    html = render_submit(view, "ask", %{"text" => "hello console"})
-    assert html =~ "missing_env"
+    # resolution, and the chat pane surfaces the error instead of a fake reply.
+    # ask_ runs the loop off the LiveView process, so the error arrives as an
+    # async message and is rendered afterwards.
+    render_submit(view, "ask", %{"text" => "hello console"})
+    wait_until(fn -> render(view) =~ "missing_env" end)
+    assert render(view) =~ "missing_env"
   end
 
   test "the chat pane renders the loop's tool trace", %{session: session, runtime: runtime} do
@@ -80,6 +83,8 @@ defmodule DshBeam.ConsoleTest do
     :ok = DshBeam.Runtime.reconcile(runtime, entries)
 
     html = render_submit(view, "ask", %{"text" => "run"})
+    wait_until(fn -> render(view) =~ "final answer" end)
+    html = render(view)
     assert html =~ "tool_call"
     assert html =~ "console_echo"
     assert html =~ "tool_result"
