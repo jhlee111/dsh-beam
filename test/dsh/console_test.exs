@@ -48,8 +48,33 @@ defmodule DshBeam.ConsoleTest do
     assert html =~ ":llm"
     assert html =~ ":shell"
     assert html =~ ":bash"
+    assert html =~ ":todo"
     assert html =~ ":loop"
     assert html =~ "DshBeam.Session.Plugin"
+  end
+
+  test "the todo panel renders the latest todo_write snapshot", %{session: session, ctx: ctx} do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    render_submit(view, "seed", %{})
+
+    # before any write, the panel shows the empty state
+    assert render(view) =~ "no plan yet"
+
+    # the agent writes a whole-list snapshot; the panel projects the latest one
+    {:ok, todo} = DshBeam.Context.get(ctx, :todo_write)
+
+    assert {:ok, _} =
+             DshBeam.Tool.call(todo, :todo_write, %{
+               "todos" => [
+                 %{"content" => "inspect the workspace", "status" => "in_progress"},
+                 %{"content" => "write a summary", "status" => "pending"}
+               ]
+             })
+
+    html = render(view)
+    assert html =~ "inspect the workspace"
+    assert html =~ "in_progress"
+    assert html =~ "write a summary"
   end
 
   test "the chat pane reports a missing credential honestly", %{session: session} do

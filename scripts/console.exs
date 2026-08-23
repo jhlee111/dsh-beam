@@ -14,6 +14,7 @@ entries = [
   %{id: :shell, plugin: DshBeam.Shell.Plugin, config: [], disabled: false},
   %{id: :bash, plugin: DshBeam.Tool.Bash, config: [], disabled: false},
   %{id: :fs, plugin: DshBeam.Tool.Fs, config: [root: File.cwd!()], disabled: false},
+  %{id: :todo, plugin: DshBeam.Tool.Todo, config: [], disabled: false},
   %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false}
 ]
 

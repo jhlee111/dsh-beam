@@ -26,6 +26,7 @@ defmodule DshBeamWeb.ConsoleLive do
     %{id: :shell, plugin: DshBeam.Shell.Plugin, config: [], disabled: false},
     %{id: :bash, plugin: DshBeam.Tool.Bash, config: [], disabled: false},
     %{id: :fs, plugin: DshBeam.Tool.Fs, config: [root: "."], disabled: false},
+    %{id: :todo, plugin: DshBeam.Tool.Todo, config: [], disabled: false},
     %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false}
   ]
 
@@ -47,6 +48,7 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:chat_log, [])
       |> assign(:chat_busy, false)
       |> assign(:chat_error, nil)
+      |> assign(:todos, [])
       |> assign(:events, [])
       |> assign(:rows, [])
       |> assign(:bindings, %{})
@@ -106,7 +108,7 @@ defmodule DshBeamWeb.ConsoleLive do
     specs =
       socket.assigns.runtime
       |> current_specs()
-      |> Enum.reject(&(&1.id in [:session, :llm, :shell, :bash, :fs, :loop]))
+      |> Enum.reject(&(&1.id in [:session, :llm, :shell, :bash, :fs, :todo, :loop]))
 
     :ok = DshBeam.Runtime.reconcile(socket.assigns.runtime, specs ++ @demo_entries)
     {:noreply, refresh(socket)}
@@ -335,6 +337,21 @@ defmodule DshBeamWeb.ConsoleLive do
       </section>
 
       <section>
+        <h2>todo</h2>
+        <ul>
+          <%= if @todos == [] do %>
+            <li class="muted">no plan yet (the agent writes it via todo_write)</li>
+          <% end %>
+          <%= for todo <- @todos do %>
+            <li>
+              <span class={"pill state-#{todo_status_class(todo["status"])}"}><%= todo["status"] %></span>
+              <code><%= todo["content"] %></code>
+            </li>
+          <% end %>
+        </ul>
+      </section>
+
+      <section>
         <h2>llm settings</h2>
         <%= if @llm_config do %>
           <form phx-submit="llm_apply">
@@ -478,8 +495,29 @@ defmodule DshBeamWeb.ConsoleLive do
       credential_mode: credential_mode,
       credential_env: credential_env,
       chat_log: chat_log(socket.assigns.ctx),
+      todos: todos(socket.assigns.ctx),
       inventory: build_inventory(runtime, entries)
     )
+  end
+
+  # The todo list is a projection of the session: the latest todo_write event
+  # (whole-list, last-write-wins), nil before the first write.
+  defp todos(ctx) do
+    case DshBeam.Context.get(ctx, :session) do
+      {:ok, session} when is_pid(session) ->
+        session
+        |> DshBeam.Session.all()
+        |> Enum.filter(&(&1["role"] == "todo_write"))
+        |> List.last()
+        |> case do
+          nil -> []
+          %{"todos" => todos} when is_list(todos) -> todos
+          _ -> []
+        end
+
+      _ ->
+        []
+    end
   end
 
   # The chat pane renders the session log (the single source of truth), so the
@@ -511,6 +549,10 @@ defmodule DshBeamWeb.ConsoleLive do
 
   defp chat_entry(%{"role" => "error", "content" => content}), do: {"error", content}
   defp chat_entry(other), do: {"event", inspect(other)}
+
+  defp todo_status_class("completed"), do: "active"
+  defp todo_status_class("in_progress"), do: "reloading"
+  defp todo_status_class(_), do: "gone"
 
   defp build_inventory(runtime, entries) do
     store = DshBeam.Runtime.settings(runtime)
