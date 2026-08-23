@@ -267,7 +267,7 @@ defmodule DshBeam.Plugin do
       def terminate(_reason, _state, data) do
         ctx = data.ctx
 
-        if is_pid(ctx) and Process.alive?(ctx) do
+        if is_pid(ctx) and DshBeam.Pid.alive?(ctx) do
           # the context may die between the alive? check and the call (the
           # runtime tears it down on the same exit cascade): a dead context
           # needs no unload, so swallow the race

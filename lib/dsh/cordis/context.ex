@@ -512,7 +512,7 @@ defmodule DshBeam.Context do
     state = log(state, {outcome, owner})
     state = %{state | fibers: Map.delete(state.fibers, owner)}
     state = demonitor_owner(state, owner)
-    if Process.alive?(owner), do: send(owner, {:dsh_unloaded, owner})
+    if DshBeam.Pid.alive?(owner), do: send(owner, {:dsh_unloaded, owner})
     state
   end
 
