@@ -408,3 +408,60 @@ hacks.
   "asset" the user asked for, named in the harness's own domain vocabulary
   ("plugin"), not "asset".
 - 114 tests.
+
+## 25. Milestone 14 — v0.1.0: a usable agent harness (in progress)
+
+**Goal** (tracked as a same-session goal): make dsh-beam usable like Claude
+Code/Codex — workspaces, chat, trajectory, settings — as plugins, verified
+end-to-end from the console.
+
+### Done (round 1)
+
+- `DshBeam.Shell.Plugin.run_in/4` — run a command in a given `cwd`
+  (`System.cmd` `cd:`); the mechanism behind per-session worktree isolation.
+- `DshBeam.Git` — `repo_root/1`, `worktree_add/3`, `worktree_remove/2`,
+  `branch/1`, `worktree_list/1` over `git(1)`.
+- `DshBeam.Session.header/1` + `set_header/2` — session identity (`title`,
+  `cwd`) on both Memory and File providers.
+- `DshBeam.Workspace` plugin (`provide :workspace`) — groups sessions by `cwd`;
+  `peers/2` returns the other sessions in a directory; `relay/3` appends a
+  `peer_message` to a target session's log (refused across workspaces). The
+  minimal port of the reference `agent-team` peer mailbox.
+- 126 tests.
+
+### Next (the roadmap to complete v0.1.0)
+
+1. **Wire worktree sessions together** — `Workspace` should create a session by
+   `git worktree add` (a session owns its checkout; `open_session/2`), and
+   close it with `git worktree remove`. `Tool.Bash`/`Tool.Fs` should run in the
+   current session's `cwd`.
+2. **Console: workspace sidebar** — a `WorkspacePanel` listing workspaces and
+   their sessions, with create/switch/close; the chat/todo panels bind to the
+   *current* session (multi-session, not the single-session console today).
+3. **Trajectory view** — a separate panel grouping session events by turn
+   (user/tool_call/tool_result/assistant), distinct from the chat pane
+   (reference `ui-trajectory`).
+4. **Settings surface** — model selection + plugin inventory + general settings
+   as a settings section (already partly present as llm-settings + plugins).
+5. **End-to-end verification** — workspace → session → chat task → trajectory →
+   settings, from the console; ADR for the workspace/session/worktree model;
+   v0.1.0 release notes.
+
+### Design decisions to record (when implemented)
+
+- **Session = git worktree** — each session checks out its own directory/branch,
+  so two sessions over one repository never clobber each other (the reference
+  `agent-team` documents "shared checkout" as an unsolved limitation; this is
+  our fix). Non-git directories: open question (git init vs refuse).
+- **Branch strategy** — per-session `session/<id>` branch (open question:
+  user-supplied branch vs auto-generated).
+- **Merge/commit** — v0.1.0 stops at *isolation*; merging session work back is
+  deferred.
+
+### Elixir idiom recorded (path canonicalization)
+
+OTP 28 has no `realpath/1`; `Path.expand/1` only resolves `..`/`.`. macOS
+resolves `/var` → `/private/var`, so *comparing path strings* is brittle. The
+idiom used: assert by **filesystem effect** (e.g. `File.exists?`), not by
+`pwd` string equality; resolve symlinks via `:file.read_link_all/1` only when a
+canonical path is truly required.
