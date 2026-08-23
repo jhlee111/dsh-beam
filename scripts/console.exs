@@ -15,7 +15,15 @@ entries = [
   %{id: :bash, plugin: DshBeam.Tool.Bash, config: [], disabled: false},
   %{id: :fs, plugin: DshBeam.Tool.Fs, config: [root: File.cwd!()], disabled: false},
   %{id: :todo, plugin: DshBeam.Tool.Todo, config: [], disabled: false},
-  %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false}
+  %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false},
+  %{id: :panel_composition, plugin: DshBeam.Ui.Panel.Composition, config: [], disabled: false},
+  %{id: :panel_bindings, plugin: DshBeam.Ui.Panel.Bindings, config: [], disabled: false},
+  %{id: :panel_chat, plugin: DshBeam.Ui.Panel.Chat, config: [], disabled: false},
+  %{id: :panel_todo, plugin: DshBeam.Ui.Panel.Todo, config: [], disabled: false},
+  %{id: :panel_llm, plugin: DshBeam.Ui.Panel.LlmSettings, config: [], disabled: false},
+  %{id: :panel_creator, plugin: DshBeam.Ui.Panel.Creator, config: [], disabled: false},
+  %{id: :panel_events, plugin: DshBeam.Ui.Panel.EventFeed, config: [], disabled: false},
+  %{id: :panel_plugins, plugin: DshBeam.Ui.Panel.Plugins, config: [], disabled: false}
 ]
 
 {:ok, runtime} = DshBeam.Runtime.start_link(entries, [])

@@ -27,7 +27,15 @@ defmodule DshBeamWeb.ConsoleLive do
     %{id: :bash, plugin: DshBeam.Tool.Bash, config: [], disabled: false},
     %{id: :fs, plugin: DshBeam.Tool.Fs, config: [root: "."], disabled: false},
     %{id: :todo, plugin: DshBeam.Tool.Todo, config: [], disabled: false},
-    %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false}
+    %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false},
+    %{id: :panel_composition, plugin: DshBeam.Ui.Panel.Composition, config: [], disabled: false},
+    %{id: :panel_bindings, plugin: DshBeam.Ui.Panel.Bindings, config: [], disabled: false},
+    %{id: :panel_chat, plugin: DshBeam.Ui.Panel.Chat, config: [], disabled: false},
+    %{id: :panel_todo, plugin: DshBeam.Ui.Panel.Todo, config: [], disabled: false},
+    %{id: :panel_llm, plugin: DshBeam.Ui.Panel.LlmSettings, config: [], disabled: false},
+    %{id: :panel_creator, plugin: DshBeam.Ui.Panel.Creator, config: [], disabled: false},
+    %{id: :panel_events, plugin: DshBeam.Ui.Panel.EventFeed, config: [], disabled: false},
+    %{id: :panel_plugins, plugin: DshBeam.Ui.Panel.Plugins, config: [], disabled: false}
   ]
 
   @impl true
@@ -126,7 +134,25 @@ defmodule DshBeamWeb.ConsoleLive do
     specs =
       socket.assigns.runtime
       |> current_specs()
-      |> Enum.reject(&(&1.id in [:session, :llm, :shell, :bash, :fs, :todo, :loop]))
+      |> Enum.reject(
+        &(&1.id in [
+            :session,
+            :llm,
+            :shell,
+            :bash,
+            :fs,
+            :todo,
+            :loop,
+            :panel_composition,
+            :panel_bindings,
+            :panel_chat,
+            :panel_todo,
+            :panel_llm,
+            :panel_creator,
+            :panel_events,
+            :panel_plugins
+          ])
+      )
 
     :ok = DshBeam.Runtime.reconcile(socket.assigns.runtime, specs ++ @demo_entries)
     {:noreply, refresh(socket)}
@@ -298,167 +324,7 @@ defmodule DshBeamWeb.ConsoleLive do
   def render(assigns) do
     ~H"""
     <main>
-      <section>
-        <h2>composition</h2>
-        <form class="row" phx-submit="seed">
-          <button type="submit">seed demo (session + llm + chat)</button>
-        </form>
-        <table>
-          <thead>
-            <tr>
-              <th>id</th><th>plugin</th><th>fiber</th><th>pid</th><th>restarts</th><th>error</th><th>os_pid</th><th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <%= for row <- @rows do %>
-              <tr>
-                <td><code><%= inspect(row.id) %></code></td>
-                <td class="muted"><%= row.plugin %></td>
-                <td><span class={"pill state-#{row.state}"}><%= row.state %></span></td>
-                <td class="muted"><%= inspect(row.pid) %></td>
-                <td><%= row.restarts %></td>
-                <td class="muted"><%= inspect(row.error) %></td>
-                <td class="muted"><%= inspect(row.os_pid) %></td>
-                <td>
-                  <button phx-click="kill" phx-value-id={row.id_key}>kill</button>
-                  <%= if row.sandboxed do %>
-                    <button phx-click="crash_child" phx-value-id={row.id_key}>crash child</button>
-                  <% end %>
-                  <button phx-click="remove" phx-value-id={row.id_key}>remove</button>
-                </td>
-              </tr>
-            <% end %>
-          </tbody>
-        </table>
-        <p class="muted">kill = external kill (recorded, not re-injected). crash child = sandbox SIGKILL (guard + re-injection).</p>
-      </section>
-
-      <section>
-        <h2>bindings</h2>
-        <table>
-          <thead><tr><th>key</th><th>value</th></tr></thead>
-          <tbody>
-            <%= for {key, value} <- @bindings do %>
-              <tr><td><code><%= inspect(key) %></code></td><td class="muted"><%= inspect(value) %></td></tr>
-            <% end %>
-          </tbody>
-        </table>
-      </section>
-
-      <section>
-        <h2>chat</h2>
-        <div class="chat">
-          <ul>
-            <%= for {role, content} <- @chat_log do %>
-              <li><strong><%= role %></strong>: <code><%= content %></code></li>
-            <% end %>
-            <%= if @chat_error do %>
-              <li><strong>error</strong>: <code><%= @chat_error %></code></li>
-            <% end %>
-            <%= if @chat_busy do %>
-              <li><strong>…</strong>: <code>thinking (model round-trip)</code></li>
-            <% end %>
-          </ul>
-        </div>
-        <form class="row" phx-submit="ask">
-          <input type="text" name="text" value={@chat_text} placeholder="run a task (drives the agent loop)" style="flex:1" disabled={@chat_busy} />
-          <button type="submit" disabled={@chat_busy}>ask</button>
-          <button type="button" phx-click="clear_chat">new conversation</button>
-        </form>
-      </section>
-
-      <section>
-        <h2>todo</h2>
-        <ul>
-          <%= if @todos == [] do %>
-            <li class="muted">no plan yet (the agent writes it via todo_write)</li>
-          <% end %>
-          <%= for todo <- @todos do %>
-            <li>
-              <span class={"pill state-#{todo_status_class(todo["status"])}"}><%= todo["status"] %></span>
-              <code><%= todo["content"] %></code>
-            </li>
-          <% end %>
-        </ul>
-      </section>
-
-      <section>
-        <h2>llm settings</h2>
-        <%= if @llm_config do %>
-          <form phx-submit="llm_apply">
-            <label class="muted">base_url</label>
-            <input type="text" name="base_url" value={@llm_config.base_url} />
-            <label class="muted">model</label>
-            <input type="text" name="model" value={@llm_config.model} />
-            <label class="muted">credential</label>
-            <select name="credential_mode">
-              <option value="env" selected={@credential_mode == "env"}>env</option>
-              <option value="literal" selected={@credential_mode == "literal"}>api key (literal)</option>
-            </select>
-            <input
-              type="text"
-              name="credential_value"
-              value={@credential_env}
-              placeholder={
-                if @credential_mode == "env",
-                  do: "env var name (e.g. DEEPSEEK_API_KEY)",
-                  else: "paste API key (blank keeps current)"
-              }
-            />
-            <button type="submit">apply</button>
-          </form>
-          <p class="muted">leave the credential field blank to keep the current key · result: <code><%= inspect(@llm_result) %></code></p>
-        <% else %>
-          <p class="muted">no :llm provider (seed the demo composition)</p>
-        <% end %>
-      </section>
-
-      <section>
-        <h2>creator / sandbox</h2>
-        <form phx-submit="define">
-          <select name="mode">
-            <option value="trusted" selected={@mode == "trusted"}>trusted (Creator, in-process)</option>
-            <option value="sandbox" selected={@mode == "sandbox"}>sandbox (child OS process)</option>
-          </select>
-          <textarea name="source"><%= @source %></textarea>
-          <button type="submit">define</button>
-          <button type="button" phx-click="export_plugin">export plugin (.exs)</button>
-        </form>
-        <p class="muted">result: <code><%= inspect(@result) %></code></p>
-      </section>
-
-      <section>
-        <h2>event feed</h2>
-        <div class="events">
-          <ul>
-            <%= for event <- @events do %>
-              <li><code><%= inspect(event) %></code></li>
-            <% end %>
-          </ul>
-        </div>
-      </section>
-
-      <section>
-        <h2>plugins</h2>
-        <%= for plugin <- @inventory do %>
-          <div style="border-top:1px solid #20262f; padding:6px 0">
-            <strong><%= plugin.name %></strong>
-            <span class={"pill state-#{if plugin.enabled, do: "active", else: "gone"}"}>
-              <%= if plugin.enabled, do: "enabled", else: "disabled" %>
-            </span>
-            <%= if plugin.settings != [] do %>
-              <form phx-submit="settings_save" class="row">
-                <input type="hidden" name="plugin" value={to_string(plugin.plugin)} />
-                <%= for setting <- plugin.settings do %>
-                  <label class="muted" title={setting.doc}><%= setting.name %></label>
-                  <input type="text" name={"settings[#{setting.name}]"} value={setting.display} />
-                <% end %>
-                <button type="submit">save</button>
-              </form>
-            <% end %>
-          </div>
-        <% end %>
-      </section>
+      <%= DshBeam.Ui.render_slot(:panels, assigns) %>
     </main>
     """
   end
@@ -581,10 +447,6 @@ defmodule DshBeamWeb.ConsoleLive do
 
   defp chat_entry(%{"role" => "error", "content" => content}), do: {"error", content}
   defp chat_entry(other), do: {"event", inspect(other)}
-
-  defp todo_status_class("completed"), do: "active"
-  defp todo_status_class("in_progress"), do: "reloading"
-  defp todo_status_class(_), do: "gone"
 
   defp module_name(source) do
     case Regex.run(~r/^\s*defmodule\s+([A-Z]\w*)/, source) do

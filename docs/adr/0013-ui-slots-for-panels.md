@@ -31,5 +31,8 @@ catalog contributions in `DshBeam.Ui.Registry`, and compose them with
 - A panel is a plugin: adding one is `use DshBeam.Plugin` + `ui_slot(...)`.
 - The registry is introspectable (like the tool registry), so the console can
   list *which* plugins contribute *which* panels.
-- The concrete console panels still need to be migrated out of the monolithic
-  LiveView into `ui_slot` plugins (in progress at the time of this record).
+- The console's built-in panels (composition, bindings, chat, todo, llm
+  settings, creator, event feed, plugins) are now `DshBeam.Ui.Panel.*` plugins,
+  and the console layout is a single `DshBeam.Ui.render_slot(:panels, assigns)`
+  call — adding or removing a panel is adding or removing a plugin, not editing
+  the layout.

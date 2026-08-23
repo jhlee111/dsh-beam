@@ -32,6 +32,7 @@ defmodule DshBeam.Ui do
       |> render_component(forwarded(assigns, name))
       |> Phoenix.HTML.Safe.to_iodata()
     end)
+    |> Phoenix.HTML.raw()
   end
 
   # single: the lowest-order occupant wins
