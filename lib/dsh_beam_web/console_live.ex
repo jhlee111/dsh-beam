@@ -75,6 +75,7 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:trajectory, [])
       |> assign(:settings_open, false)
       |> assign(:settings_section, :models)
+      |> assign(:view_tab, :chat)
       |> refresh()
 
     {:ok, socket}
@@ -316,6 +317,11 @@ defmodule DshBeamWeb.ConsoleLive do
     {:noreply, assign(socket, settings_open: false) |> refresh()}
   end
 
+  def handle_event("view_tab", %{"tab" => tab}, socket) do
+    view_tab = if tab == "trajectory", do: :trajectory, else: :chat
+    {:noreply, assign(socket, view_tab: view_tab) |> refresh()}
+  end
+
   def handle_event("settings_tab", %{"section" => section_key}, socket) do
     section = String.to_existing_atom(section_key)
     {:noreply, assign(socket, settings_section: section) |> refresh()}
@@ -401,20 +407,73 @@ defmodule DshBeamWeb.ConsoleLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="app">
-      <aside class="sidebar">
-        <div class="brand">dsh-beam</div>
-        <%= DshBeam.Ui.render_slot(:sidebar, assigns) %>
-      </aside>
-      <main class="main">
-        <header class="topbar">
-          <span class="muted">console</span>
-          <button phx-click="open_settings">settings</button>
-        </header>
-        <div class="content">
-          <%= DshBeam.Ui.render_slot(:main, assigns) %>
+    <div
+      class="frame"
+      style="grid-template-columns: 280px minmax(0, 1fr) 280px"
+    >
+      <div class="frame-sidebar">
+        <div class="sidebar-root">
+          <div class="logo-row">
+            <button class="brand" phx-click="open_settings">dsh-beam</button>
+            <button class="toggle" phx-click="open_settings">panel</button>
+          </div>
+          <div class="region">
+            <%= DshBeam.Ui.render_slot(:sidebar, assigns) %>
+          </div>
+          <div class="foot">
+            <button class="settings-trigger" phx-click="open_settings">settings</button>
+          </div>
         </div>
-      </main>
+      </div>
+
+      <div class="frame-center">
+        <div class="conv-root" data-phase="active">
+          <div class="conv-header">
+            <div class="title-row">
+              <div class="crumbs"><span class="crumb crumb-current">console</span></div>
+            </div>
+            <div class="tabs">
+              <button
+                class={"tab #{if @view_tab == :chat, do: "tab-active"}"}
+                phx-click="view_tab"
+                phx-value-tab="chat"
+              >
+                Chat
+              </button>
+              <button
+                class={"tab #{if @view_tab == :trajectory, do: "tab-active"}"}
+                phx-click="view_tab"
+                phx-value-tab="trajectory"
+              >
+                Trajectory
+              </button>
+            </div>
+          </div>
+          <div class="conv-scroll">
+            <%= DshBeam.Ui.render_slot(:conversation, assigns, key: @view_tab) %>
+            <div class="composer-seat">
+              <form class="composer" phx-submit="ask">
+                <input
+                  type="text"
+                  name="text"
+                  value={@chat_text}
+                  placeholder="run a task (drives the agent loop)"
+                  disabled={@chat_busy}
+                />
+                <button type="submit" disabled={@chat_busy}>ask</button>
+                <button type="button" phx-click="clear_chat">new conversation</button>
+              </form>
+              <%= if @chat_busy do %>
+                <div class="composer-status muted">thinking (model round-trip)…</div>
+              <% end %>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="frame-details">
+        <%= DshBeam.Ui.render_slot(:details, assigns) %>
+      </div>
     </div>
 
     <%= if @settings_open do %>

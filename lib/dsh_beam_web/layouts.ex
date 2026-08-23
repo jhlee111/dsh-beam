@@ -23,23 +23,124 @@ defmodule DshBeamWeb.Layouts do
             background: var(--dsw-static-neutral-bluish-950, #0f1115);
             color: var(--dsw-static-neutral-bluish-50, #d7dae0);
           }
-          /* Two-pane app: persistent sidebar (workspace) + main (chat). */
-          .app { display: flex; height: 100vh; }
-          aside.sidebar {
-            width: 280px; flex-shrink: 0; padding: 10px;
-            border-right: 1px solid var(--dsw-alias-border-l1, #232a36);
-            overflow-y: auto;
+          /* Three-column app frame (reference ui-layout AppFrame): sidebar |
+             center (conversation) | details. Track widths come from the inline
+             grid-template-columns on .frame. */
+          .frame {
+            position: relative;
+            display: grid;
+            grid-template-rows: 100%;
+            height: 100vh;
+            overflow: hidden;
+            background: var(--dsw-alias-bg-base);
           }
-          aside.sidebar .brand {
-            font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
-            margin: 0 0 10px; color: var(--dsw-static-blue-300, #8fa3bf);
+          .frame-sidebar {
+            min-width: 0; overflow: hidden;
+            background: var(--dsw-specific-sidebar-fill);
+            border-right: 1px solid var(--dsw-alias-border-l1);
           }
-          main.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-          .topbar {
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 8px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1, #232a36);
+          .frame-center { min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+          .frame-details { min-width: 0; overflow: hidden; border-left: 1px solid var(--dsw-alias-border-l2); }
+
+          /* Sidebar column shell (reference ui-sidebar SidebarRoot): brand row,
+             workspace browsing region, footer settings seat. */
+          .sidebar-root {
+            display: flex; flex-direction: column; height: 100%;
+            padding: 6px 12px; box-sizing: border-box;
+            background: var(--dsw-specific-sidebar-fill);
+            color: var(--dsw-alias-label-primary);
+            font-size: 14px;
           }
-          .content { flex: 1; padding: 12px; overflow-y: auto; }
+          .logo-row {
+            flex: none; display: flex; align-items: center; justify-content: flex-end;
+            gap: 8px; height: 60px; padding: 8px 0 8px 4px; margin-bottom: 8px;
+            box-sizing: border-box; overflow: hidden;
+          }
+          .brand {
+            flex: 1; min-width: 0; display: inline-flex; align-items: center;
+            overflow: hidden; padding: 0; border: none; background: transparent;
+            color: inherit; cursor: pointer; font-size: 17px; font-weight: 600;
+            letter-spacing: .02em; white-space: nowrap;
+          }
+          .toggle {
+            flex: none; display: inline-flex; align-items: center; justify-content: center;
+            width: 28px; height: 28px; border: none; border-radius: 50%; padding: 0;
+            background: transparent; cursor: pointer; color: var(--dsw-alias-label-secondary);
+          }
+          .toggle:hover { background: var(--dsw-alias-interactive-bg-hover); }
+          .region {
+            flex: 1; min-height: 0; display: flex; flex-direction: column;
+            margin-left: -4px; margin-right: -12px; padding-left: 4px; overflow: hidden;
+          }
+          .foot { flex: none; display: flex; flex-direction: column; }
+          .settings-trigger {
+            flex: none; display: flex; align-items: center; gap: 6px; width: 100%;
+            min-height: 32px; margin: 0 2px 8px; padding: 6px 10px; box-sizing: border-box;
+            border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px;
+            background: transparent; color: var(--dsw-alias-label-primary); cursor: pointer;
+            font-size: 14px; font-weight: 500; text-align: left;
+          }
+          .settings-trigger:hover { background: var(--dsw-alias-interactive-bg-hover); }
+
+          /* Conversation column root (reference ui-conversation ConversationRoot):
+             header (crumbs + tabs) over the scroll body + composer seat. */
+          .conv-root {
+            display: flex; flex-direction: column; height: 100%; min-width: 0;
+            background: var(--dsw-alias-bg-base);
+            overflow: hidden;
+            --dsh-chat-content-width: 748px;
+          }
+          .conv-header { position: relative; flex: none; padding: 12px 28px 0 20px; }
+          .conv-header::after {
+            content: ''; position: absolute; right: 0; bottom: 1px; left: 0; z-index: 0;
+            height: 1px; background: var(--dsw-alias-border-l2); pointer-events: none;
+          }
+          .title-row { display: flex; align-items: center; min-height: 32px; }
+          .crumbs {
+            display: flex; align-items: center; gap: 4px; min-width: 0;
+            overflow: hidden; white-space: nowrap;
+          }
+          .crumb {
+            max-width: 220px; overflow: hidden; padding: 4px 8px; border: none;
+            border-radius: 12px; background: transparent; font-size: 14px; line-height: 20px;
+            color: var(--dsw-alias-label-tertiary); text-overflow: ellipsis;
+            white-space: nowrap; cursor: pointer;
+          }
+          .crumb-current { font-weight: 500; color: var(--dsw-alias-label-primary); cursor: default; }
+          .tabs {
+            position: relative; z-index: 1; display: flex; gap: 36px;
+            margin-top: 4px; padding-left: 8px;
+          }
+          .tab {
+            position: relative; padding: 0 0 11px; border: none; background: transparent;
+            font-size: 13px; line-height: 16px; font-weight: 500;
+            color: var(--dsw-alias-label-tertiary); cursor: pointer;
+          }
+          .tab::after {
+            content: ''; position: absolute; right: 0; bottom: 1px; left: 0; height: 2px;
+            border-radius: 2px; background: transparent;
+          }
+          .tab-active { color: var(--dsw-alias-state-business-primary); }
+          .tab-active::after { background: var(--dsw-alias-state-business-primary); }
+          .conv-scroll {
+            display: flex; flex: 1; flex-direction: column; min-height: 0;
+            overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable;
+            align-items: center;
+          }
+          .chat-view, .conv-scroll > section {
+            width: 100%; max-width: var(--dsh-chat-content-width);
+            padding: 20px; box-sizing: border-box;
+          }
+          .composer-seat {
+            display: flex; flex: none; flex-direction: column;
+            position: sticky; bottom: 0; z-index: 7; margin-top: auto;
+            width: 100%; max-width: calc(var(--dsh-chat-content-width) + 32px);
+            padding: 8px 20px; box-sizing: border-box;
+            background: linear-gradient(180deg, color-mix(in srgb, var(--dsw-alias-bg-base) 0%, transparent) 0px, var(--dsw-alias-bg-base) 36px);
+          }
+          .composer { display: flex; gap: 6px; align-items: center; }
+          .composer input { flex: 1; }
+          .composer-status { margin: 4px 0 0; font-size: 12px; }
 
           /* Settings modal overlay. */
           .settings-overlay {
@@ -127,7 +228,7 @@ defmodule DshBeamWeb.Layouts do
           .provider-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
         </style>
       </head>
-      <body>
+      <body data-ds-dark-theme="">
         {@inner_content}
         <script src="/assets/phoenix.js"></script>
         <script src="/assets/phoenix_live_view.js"></script>

@@ -94,31 +94,28 @@ defmodule DshBeam.Ui.Panel do
     use DshBeam.Plugin
     import Phoenix.Component
 
-    ui_slot(:main, kind: :list, order: 10, component: {__MODULE__, :panel, []})
+    ui_slot(:conversation,
+      kind: :keyed,
+      order: 10,
+      key: :chat,
+      component: {__MODULE__, :panel, []}
+    )
 
     def panel(assigns) do
       ~H"""
-      <section>
-        <h2>chat</h2>
-        <div class="chat">
-          <ul>
-            <%= for {role, content} <- @chat_log do %>
-              <li><strong><%= role %></strong>: <code><%= content %></code></li>
-            <% end %>
-            <%= if @chat_error do %>
-              <li><strong>error</strong>: <code><%= @chat_error %></code></li>
-            <% end %>
-            <%= if @chat_busy do %>
-              <li><strong>…</strong>: <code>thinking (model round-trip)</code></li>
-            <% end %>
-          </ul>
-        </div>
-        <form class="row" phx-submit="ask">
-          <input type="text" name="text" value={@chat_text} placeholder="run a task (drives the agent loop)" style="flex:1" disabled={@chat_busy} />
-          <button type="submit" disabled={@chat_busy}>ask</button>
-          <button type="button" phx-click="clear_chat">new conversation</button>
-        </form>
-      </section>
+      <div class="chat-view">
+        <ul>
+          <%= for {role, content} <- @chat_log do %>
+            <li><strong><%= role %></strong>: <code><%= content %></code></li>
+          <% end %>
+          <%= if @chat_error do %>
+            <li><strong>error</strong>: <code><%= @chat_error %></code></li>
+          <% end %>
+          <%= if @chat_busy do %>
+            <li><strong>…</strong>: <code>thinking (model round-trip)</code></li>
+          <% end %>
+        </ul>
+      </div>
       """
     end
   end
@@ -128,7 +125,7 @@ defmodule DshBeam.Ui.Panel do
     use DshBeam.Plugin
     import Phoenix.Component
 
-    ui_slot(:main, kind: :list, order: 40, component: {__MODULE__, :panel, []})
+    ui_slot(:details, kind: :list, order: 40, component: {__MODULE__, :panel, []})
 
     def panel(assigns) do
       ~H"""

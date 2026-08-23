@@ -95,6 +95,7 @@ defmodule DshBeam.ConsoleWorkspaceTest do
     DshBeam.Session.append(session_pid, %{"role" => "user", "content" => "again"})
     DshBeam.Session.append(session_pid, %{"role" => "assistant", "content" => "ok"})
 
+    _ = open_tab(view, "trajectory")
     html = render(view)
     assert html =~ "turn 1"
     assert html =~ "turn 2"
@@ -140,6 +141,7 @@ defmodule DshBeam.ConsoleWorkspaceTest do
     # 3. chat task: drive the loop through the scripted model
     render_submit(view, "ask", %{"text" => "do the thing"})
     wait_until(fn -> render(view) =~ "final answer" end)
+    _ = open_tab(view, "trajectory")
 
     # 4. trajectory: the turn is grouped and visible
     html = render(view)
@@ -163,6 +165,8 @@ defmodule DshBeam.ConsoleWorkspaceTest do
   end
 
   defp encode(term), do: term |> :erlang.term_to_binary() |> Base.encode64()
+
+  defp open_tab(view, tab), do: render_click(view, "view_tab", %{"tab" => tab})
 
   defp wait_until(fun), do: wait_until(fun, 400)
 

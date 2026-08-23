@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Console shell — reference layout
+
+- The console now mirrors the reference three-column `AppFrame` grid
+  (sidebar | conversation | details), with the reference `ui-sidebar` and
+  `ui-conversation` geometry: a sidebar column (brand, workspace browsing
+  region, settings seat), a conversation column (crumbs + Chat/Trajectory tabs
+  over a scroll body + composer seat), and a details column. Chat and
+  Trajectory are tabbed views (`:conversation` keyed slot); Todo lives in the
+  details column. The design theme is scoped via `body[data-ds-dark-theme]`,
+  so the console renders on the reference's dark token palette.
+
 ### Models settings surface
 
 - The Models settings tab is now a provider card in the reference's shape:
