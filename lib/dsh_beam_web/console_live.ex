@@ -42,6 +42,31 @@ defmodule DshBeamWeb.ConsoleLive do
     %{id: :panel_trajectory, plugin: DshBeam.Ui.Panel.Trajectory, config: [], disabled: false}
   ]
 
+  # The entries a seed/preset-apply swaps out of a composition: the agent core
+  # plus the fixed UI panels. Everything else (the console itself, creator-made
+  # plugins) is preserved.
+  @reseed_ids [
+    :session,
+    :workspace,
+    :llm,
+    :adapter,
+    :shell,
+    :bash,
+    :fs,
+    :todo,
+    :loop,
+    :panel_composition,
+    :panel_bindings,
+    :panel_chat,
+    :panel_todo,
+    :panel_llm,
+    :panel_creator,
+    :panel_events,
+    :panel_plugins,
+    :panel_workspace,
+    :panel_trajectory
+  ]
+
   @impl true
   def mount(_params, session, socket) do
     %{runtime: runtime, ctx: ctx} = refs(session)
@@ -79,6 +104,8 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:plugin_open, MapSet.new())
       |> assign(:plugin_drafts, %{})
       |> assign(:plugins_result, nil)
+      |> assign(:custom_presets, [])
+      |> assign(:presets_result, nil)
       |> refresh()
 
     {:ok, socket}
@@ -353,6 +380,39 @@ defmodule DshBeamWeb.ConsoleLive do
     {:noreply, assign(socket, plugin_drafts: drafts) |> refresh()}
   end
 
+  def handle_event("preset_default", %{"preset" => id}, socket) do
+    store = DshBeam.Runtime.settings(socket.assigns.runtime)
+    :ok = DshBeam.Settings.put(store, DshBeam.Ui.Panel.General, :default_preset, id)
+    {:noreply, socket |> assign(presets_result: "default = #{id}") |> refresh()}
+  end
+
+  def handle_event("preset_apply", %{"preset" => id}, socket) do
+    entries = preset_entries_for(id, socket.assigns.custom_presets)
+    specs = socket.assigns.runtime |> current_specs() |> Enum.reject(&(&1.id in @reseed_ids))
+
+    result = DshBeam.Runtime.reconcile(socket.assigns.runtime, specs ++ entries)
+
+    {:noreply,
+     socket |> assign(presets_result: "applied #{id} · #{inspect(result)}") |> refresh()}
+  end
+
+  def handle_event("preset_copy", %{"preset" => id, "name" => name}, socket) do
+    name = name |> to_string() |> String.trim()
+    new_id = if name == "", do: id <> "-copy", else: name
+    entries = preset_entries_for(id, socket.assigns.custom_presets)
+
+    custom =
+      socket.assigns.custom_presets ++
+        [%{id: new_id, name: name, desc: "copy of #{id}", entries: entries}]
+
+    {:noreply, assign(socket, custom_presets: custom) |> refresh()}
+  end
+
+  def handle_event("preset_delete", %{"preset" => id}, socket) do
+    custom = Enum.reject(socket.assigns.custom_presets, &(&1.id == id))
+    {:noreply, assign(socket, custom_presets: custom) |> refresh()}
+  end
+
   def handle_event("settings_tab", %{"section" => section_key}, socket) do
     section = String.to_existing_atom(section_key)
     {:noreply, assign(socket, settings_section: section) |> refresh()}
@@ -618,6 +678,9 @@ defmodule DshBeamWeb.ConsoleLive do
         _ -> {"env", "DEEPSEEK_API_KEY"}
       end
 
+    store = DshBeam.Runtime.settings(runtime)
+    default_preset = resolve_default_preset(store)
+
     assign(socket,
       rows: rows,
       bindings: bindings,
@@ -635,6 +698,9 @@ defmodule DshBeamWeb.ConsoleLive do
           socket.assigns.plugin_open,
           socket.assigns.plugin_drafts
         ),
+      presets: roster(socket.assigns.custom_presets, default_preset),
+      default_preset: default_preset,
+      workspace_default_root: resolve_workspace_root(store),
       settings_sections: settings_sections()
     )
   end
@@ -761,6 +827,8 @@ defmodule DshBeamWeb.ConsoleLive do
   # carry a `key` and the shell maps it here).
   defp settings_sections do
     labels = %{
+      general: "General",
+      presets: "Agent presets",
       models: "Models",
       plugins: "Plugins",
       composition: "Composition",
@@ -774,6 +842,71 @@ defmodule DshBeamWeb.ConsoleLive do
     |> Enum.map(fn entry ->
       %{key: entry.key, label: Map.get(labels, entry.key, inspect(entry.key))}
     end)
+  end
+
+  # -- agent presets (reference ui-agent-preset) --
+
+  defp panel_entries do
+    Enum.filter(@demo_entries, &String.starts_with?(to_string(&1.id), "panel_"))
+  end
+
+  defp core_entries(ids) do
+    Enum.filter(@demo_entries, &(&1.id in ids))
+  end
+
+  defp builtin_presets do
+    [
+      %{
+        id: "demo",
+        name: "Demo",
+        desc: "Full console: session, workspace, llm, shell, tools, loop",
+        entries: @demo_entries
+      },
+      %{
+        id: "agent",
+        name: "Agent",
+        desc: "Session + llm + adapter + shell + bash + loop",
+        entries: panel_entries() ++ core_entries([:session, :llm, :adapter, :shell, :bash, :loop])
+      },
+      %{
+        id: "chat",
+        name: "Chat",
+        desc: "Session + llm + adapter + loop (no tools)",
+        entries: panel_entries() ++ core_entries([:session, :llm, :adapter, :loop])
+      }
+    ]
+  end
+
+  defp roster(custom_presets, default_preset) do
+    builtin = Enum.map(builtin_presets(), &Map.put(&1, :builtin, true))
+    custom = Enum.map(custom_presets, &Map.put(&1, :builtin, false))
+
+    (builtin ++ custom)
+    |> Enum.map(&Map.put(&1, :default, &1.id == default_preset))
+  end
+
+  defp preset_entries_for(id, custom_presets) do
+    case Enum.find(custom_presets, &(&1.id == id)) do
+      nil ->
+        Enum.find_value(builtin_presets(), fn p -> if p.id == id, do: p.entries end) || []
+
+      preset ->
+        preset.entries
+    end
+  end
+
+  defp resolve_default_preset(store) do
+    case DshBeam.Settings.get(store, DshBeam.Ui.Panel.General, :default_preset) do
+      {:ok, value} -> to_string(value)
+      _ -> "demo"
+    end
+  end
+
+  defp resolve_workspace_root(store) do
+    case DshBeam.Settings.get(store, DshBeam.Ui.Panel.General, :workspace_default_root) do
+      {:ok, value} -> to_string(value)
+      _ -> "."
+    end
   end
 
   defp module_name(source) do

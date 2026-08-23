@@ -231,6 +231,21 @@ defmodule DshBeamWeb.Layouts do
           .plugin-actions { display: flex; gap: 8px; margin-top: 10px; }
           .pill.unsaved { color: var(--dsw-static-amber-400); border-color: var(--dsw-static-amber-400); }
 
+          /* Agent presets (reference ui-agent-preset) + General settings form. */
+          .preset-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+          .preset-card {
+            border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px;
+            padding: 8px 10px; background: var(--dsw-alias-bg-layer-1, #1a1f27);
+          }
+          .preset-card.preset-default { border-color: var(--dsw-alias-state-business-primary); }
+          .preset-head { display: flex; align-items: center; gap: 8px; }
+          .preset-name { font-weight: 600; }
+          .preset-id { font-size: 11px; }
+          .preset-actions { display: flex; gap: 8px; margin-top: 8px; }
+          .general-form label { display: block; margin: 8px 0 2px; }
+          .general-form input, .general-form select { width: 100%; box-sizing: border-box; }
+          .general-form button { margin-top: 10px; }
+
           /* Models provider card (mirrors the reference models section). */
           .provider-card {
             border: 1px solid var(--dsw-alias-border-l3, #2b3442);

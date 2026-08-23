@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### General + Agent presets settings
+
+- A **General** tab persists app preferences (`default_preset`, workspace
+  default root) through the settings store, keyed by `DshBeam.Ui.Panel.General`.
+- An **Agent presets** tab (reference `ui-agent-preset`) lists built-in
+  compositions (Demo / Agent / Chat) as cards with a default marker and
+  built-in/custom badge. A preset can be set default (persisted), applied
+  (reconciles the runtime composition to its entries), duplicated into a
+  custom preset, and deleted (custom only).
+
 ### Plugins settings surface — configurable cards
 
 - The Plugins tab now renders each plugin as an accordion card (reference

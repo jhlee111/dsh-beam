@@ -339,6 +339,80 @@ defmodule DshBeam.ConsoleTest do
     assert {:ok, 9} = DshBeam.Settings.get(store, ConsoleSettingsPlugin, :answer_limit)
   end
 
+  test "the general tab persists app preferences", %{session: session, runtime: runtime} do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    _ = open_settings(view)
+    _ = open_section(view, :general)
+
+    html = render(view)
+    assert html =~ "general"
+    assert html =~ "default preset"
+    assert html =~ "workspace default root"
+
+    html =
+      render_submit(view, "settings_save", %{
+        "plugin" => to_string(DshBeam.Ui.Panel.General),
+        "settings" => %{"default_preset" => "chat", "workspace_default_root" => "/tmp"}
+      })
+
+    assert html =~ "saved"
+    store = DshBeam.Runtime.settings(runtime)
+    assert {:ok, "chat"} = DshBeam.Settings.get(store, DshBeam.Ui.Panel.General, :default_preset)
+
+    assert {:ok, "/tmp"} =
+             DshBeam.Settings.get(store, DshBeam.Ui.Panel.General, :workspace_default_root)
+  end
+
+  test "the agent presets tab lists presets, sets a default, and applies one",
+       %{session: session, runtime: runtime} do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    _ = open_settings(view)
+    _ = open_section(view, :presets)
+
+    html = render(view)
+    assert html =~ "Demo"
+    assert html =~ "Agent"
+    assert html =~ "Chat"
+    assert html =~ "built-in"
+
+    # set default writes the General setting
+    html = render_click(view, "preset_default", %{"preset" => "agent"})
+    assert html =~ "default = agent"
+
+    store = DshBeam.Runtime.settings(runtime)
+    assert {:ok, "agent"} = DshBeam.Settings.get(store, DshBeam.Ui.Panel.General, :default_preset)
+
+    # apply reconciles the composition to the preset's entries
+    render_click(view, "preset_apply", %{"preset" => "agent"})
+    ids = Map.keys(DshBeam.Runtime.entries(runtime))
+    assert :session in ids
+    assert :llm in ids
+    assert :adapter in ids
+    assert :loop in ids
+    # agent keeps the shell, drops the workspace/fs/todo of the demo preset
+    assert :shell in ids
+    refute :workspace in ids
+    refute :fs in ids
+    refute :todo in ids
+  end
+
+  test "agent presets can be duplicated into a custom preset and deleted", %{
+    session: session
+  } do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    _ = open_settings(view)
+    _ = open_section(view, :presets)
+
+    # duplicate a built-in preset into a custom one
+    html = render_submit(view, "preset_copy", %{"preset" => "agent", "name" => "My Agent"})
+    assert html =~ "My Agent"
+    assert html =~ "custom"
+
+    # delete it
+    html = render_click(view, "preset_delete", %{"preset" => "My Agent"})
+    refute html =~ "My Agent"
+  end
+
   test "the sandbox form defines a plugin outside the host BEAM", %{session: session, ctx: ctx} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
     _ = open_settings(view)

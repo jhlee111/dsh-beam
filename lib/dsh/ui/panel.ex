@@ -364,4 +364,109 @@ defmodule DshBeam.Ui.Panel do
       """
     end
   end
+
+  defmodule General do
+    @moduledoc false
+    use DshBeam.Plugin
+    import Phoenix.Component
+
+    setting(:default_preset,
+      type: :string,
+      default: "demo",
+      doc: "Agent preset new sessions start from"
+    )
+
+    setting(:workspace_default_root,
+      type: :string,
+      default: ".",
+      doc: "Default repository root for new session worktrees"
+    )
+
+    ui_slot(:settings_section,
+      kind: :keyed,
+      order: 5,
+      key: :general,
+      component: {__MODULE__, :panel, []}
+    )
+
+    def panel(assigns) do
+      ~H"""
+      <section>
+        <h2>general</h2>
+        <form class="general-form" phx-submit="settings_save">
+          <input type="hidden" name="plugin" value={to_string(DshBeam.Ui.Panel.General)} />
+          <label class="muted">default preset</label>
+          <select name="settings[default_preset]">
+            <%= for p <- @presets do %>
+              <option value={p.id} selected={p.default}><%= p.name %></option>
+            <% end %>
+          </select>
+          <label class="muted">workspace default root</label>
+          <input type="text" name="settings[workspace_default_root]" value={@workspace_default_root} />
+          <button type="submit">save</button>
+        </form>
+        <%= if @plugins_result do %>
+          <p class="muted"><%= @plugins_result %></p>
+        <% end %>
+      </section>
+      """
+    end
+  end
+
+  defmodule Presets do
+    @moduledoc false
+    use DshBeam.Plugin
+    import Phoenix.Component
+
+    ui_slot(:settings_section,
+      kind: :keyed,
+      order: 6,
+      key: :presets,
+      component: {__MODULE__, :panel, []}
+    )
+
+    def panel(assigns) do
+      ~H"""
+      <section>
+        <h2>agent presets</h2>
+        <%= if @presets_result do %>
+          <p class="muted"><%= @presets_result %></p>
+        <% end %>
+        <form class="row" phx-submit="preset_copy">
+          <select name="preset">
+            <%= for p <- @presets do %>
+              <option value={p.id}><%= p.name %></option>
+            <% end %>
+          </select>
+          <input type="text" name="name" placeholder="new preset name" />
+          <button type="submit">duplicate</button>
+        </form>
+        <div class="preset-list">
+          <%= for p <- @presets do %>
+            <div class={"preset-card #{if p.default, do: "preset-default"}"}>
+              <div class="preset-head">
+                <span class="preset-name"><%= p.name %></span>
+                <span class="pill"><%= if p.builtin, do: "built-in", else: "custom" %></span>
+                <%= if p.default do %>
+                  <span class="pill state-active">default</span>
+                <% end %>
+              </div>
+              <p class="muted"><%= p.desc %></p>
+              <code class="preset-id"><%= p.id %></code>
+              <div class="preset-actions">
+                <button phx-click="preset_default" phx-value-preset={p.id} disabled={p.default}>
+                  set default
+                </button>
+                <button phx-click="preset_apply" phx-value-preset={p.id}>apply</button>
+                <%= if not p.builtin do %>
+                  <button phx-click="preset_delete" phx-value-preset={p.id}>delete</button>
+                <% end %>
+              </div>
+            </div>
+          <% end %>
+        </div>
+      </section>
+      """
+    end
+  end
 end
