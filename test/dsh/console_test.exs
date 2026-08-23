@@ -83,7 +83,8 @@ defmodule DshBeam.ConsoleTest do
 
     entries = [
       %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
-      %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [adapter: ConsolePlanLlm], disabled: false},
+      %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [], disabled: false},
+      %{id: :adapter, plugin: ConsolePlanLlm, config: [], disabled: false},
       %{id: :todo, plugin: DshBeam.Tool.Todo, config: [], disabled: false},
       %{id: :tool, plugin: ConsoleEchoTool, config: [], disabled: false},
       %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false}
@@ -134,9 +135,10 @@ defmodule DshBeam.ConsoleTest do
       %{
         id: :llm,
         plugin: DshBeam.Llm.Plugin,
-        config: [adapter: ConsoleLoopLlm],
+        config: [],
         disabled: false
       },
+      %{id: :adapter, plugin: ConsoleLoopLlm, config: [], disabled: false},
       %{id: :tool, plugin: ConsoleEchoTool, config: [], disabled: false},
       %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false}
     ]
@@ -158,7 +160,8 @@ defmodule DshBeam.ConsoleTest do
 
     entries = [
       %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
-      %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [adapter: ConsoleLoopLlm], disabled: false},
+      %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [], disabled: false},
+      %{id: :adapter, plugin: ConsoleLoopLlm, config: [], disabled: false},
       %{id: :tool, plugin: ConsoleEchoTool, config: [], disabled: false},
       %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false}
     ]
@@ -396,18 +399,19 @@ end
 
 defmodule ConsoleLoopLlm do
   @moduledoc false
-  @behaviour DshBeam.Llm.Adapter
+  use DshBeam.Llm.Adapter
 
   @impl true
   def complete(_config, messages, _opts) do
     if Enum.any?(messages, &(&1["role"] == "tool")) do
-      {:ok, %{content: "final answer", tool_calls: [], finish_reason: :stop}}
+      {:ok, %{content: "final answer", tool_calls: [], finish_reason: :stop, usage: nil}}
     else
       {:ok,
        %{
          content: nil,
          tool_calls: [%{id: "c1", name: "console_echo", arguments: ~s({"text":"hi"})}],
-         finish_reason: :tool_calls
+         finish_reason: :tool_calls,
+         usage: nil
        }}
     end
   end
@@ -415,12 +419,12 @@ end
 
 defmodule ConsolePlanLlm do
   @moduledoc false
-  @behaviour DshBeam.Llm.Adapter
+  use DshBeam.Llm.Adapter
 
   @impl true
   def complete(_config, messages, _opts) do
     if Enum.any?(messages, &(&1["role"] == "tool")) do
-      {:ok, %{content: "final answer", tool_calls: [], finish_reason: :stop}}
+      {:ok, %{content: "final answer", tool_calls: [], finish_reason: :stop, usage: nil}}
     else
       {:ok,
        %{
@@ -434,7 +438,8 @@ defmodule ConsolePlanLlm do
            },
            %{id: "echo_1", name: "console_echo", arguments: ~s({"text":"hi"})}
          ],
-         finish_reason: :tool_calls
+         finish_reason: :tool_calls,
+         usage: nil
        }}
     end
   end

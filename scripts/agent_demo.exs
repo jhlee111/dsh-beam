@@ -5,7 +5,7 @@
 # instead (the Req adapter already carries tools/tool_calls).
 
 defmodule DemoLlmAdapter do
-  @behaviour DshBeam.Llm.Adapter
+  use DshBeam.Llm.Adapter
 
   @impl true
   def complete(_config, messages, _opts) do
@@ -16,19 +16,28 @@ defmodule DemoLlmAdapter do
          %{
            content: nil,
            tool_calls: [%{id: "call_1", name: "bash", arguments: ~s({"command":"ls -1"})}],
-           finish_reason: :tool_calls
+           finish_reason: :tool_calls,
+           usage: nil
          }}
 
       tool_message ->
         IO.puts("  [llm] sees the tool result and answers")
-        {:ok, %{content: "Here is the listing:\n" <> tool_message["content"], tool_calls: [], finish_reason: :stop}}
+
+        {:ok,
+         %{
+           content: "Here is the listing:\n" <> tool_message["content"],
+           tool_calls: [],
+           finish_reason: :stop,
+           usage: nil
+         }}
     end
   end
 end
 
 entries = [
   %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
-  %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [adapter: DemoLlmAdapter], disabled: false},
+  %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [], disabled: false},
+  %{id: :adapter, plugin: DemoLlmAdapter, config: [], disabled: false},
   %{id: :shell, plugin: DshBeam.Shell.Plugin, config: [], disabled: false},
   %{id: :bash, plugin: DshBeam.Tool.Bash, config: [], disabled: false},
   %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false}

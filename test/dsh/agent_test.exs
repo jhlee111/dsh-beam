@@ -8,9 +8,13 @@ defmodule DshBeam.AgentTest do
     %{
       id: :llm,
       plugin: DshBeam.Llm.Plugin,
-      config: [adapter: LoopLlmAdapter, adapter_config: %{parent: self()}],
+      config: [adapter_config: %{parent: self()}],
       disabled: false
     }
+  end
+
+  defp adapter_entry do
+    %{id: :adapter, plugin: LoopLlmAdapter, config: [parent: self()], disabled: false}
   end
 
   defp tool_entry, do: %{id: :echo, plugin: LoopEchoTool, config: [], disabled: false}
@@ -19,7 +23,10 @@ defmodule DshBeam.AgentTest do
 
   test "the loop dispatches a tool call and answers" do
     {:ok, runtime} =
-      DshBeam.Runtime.start_link([session_entry(), llm_entry(), tool_entry(), loop_entry()], [])
+      DshBeam.Runtime.start_link(
+        [session_entry(), llm_entry(), adapter_entry(), tool_entry(), loop_entry()],
+        []
+      )
 
     ctx = DshBeam.Runtime.context(runtime)
 
@@ -54,7 +61,10 @@ defmodule DshBeam.AgentTest do
 
   test "run_trace/2 returns the loop's step trace" do
     {:ok, runtime} =
-      DshBeam.Runtime.start_link([session_entry(), llm_entry(), tool_entry(), loop_entry()], [])
+      DshBeam.Runtime.start_link(
+        [session_entry(), llm_entry(), adapter_entry(), tool_entry(), loop_entry()],
+        []
+      )
 
     %{loop: %{pid: loop}} = DshBeam.Runtime.entries(runtime)
 
@@ -68,7 +78,10 @@ defmodule DshBeam.AgentTest do
 
   test "the loop is multi-turn: prior turns replay into the model context" do
     {:ok, runtime} =
-      DshBeam.Runtime.start_link([session_entry(), llm_entry(), tool_entry(), loop_entry()], [])
+      DshBeam.Runtime.start_link(
+        [session_entry(), llm_entry(), adapter_entry(), tool_entry(), loop_entry()],
+        []
+      )
 
     %{loop: %{pid: loop}} = DshBeam.Runtime.entries(runtime)
 
@@ -115,20 +128,21 @@ end
 
 defmodule LoopLlmAdapter do
   @moduledoc false
-  @behaviour DshBeam.Llm.Adapter
+  use DshBeam.Llm.Adapter
 
   @impl true
   def complete(config, messages, opts) do
     send(Map.get(config, :parent, self()), {:loop_call, messages, opts})
 
     if Enum.any?(messages, &(&1["role"] == "tool")) do
-      {:ok, %{content: "final answer", tool_calls: [], finish_reason: :stop}}
+      {:ok, %{content: "final answer", tool_calls: [], finish_reason: :stop, usage: nil}}
     else
       {:ok,
        %{
          content: nil,
          tool_calls: [%{id: "call_1", name: "loop_echo", arguments: ~s({"text":"from-loop"})}],
-         finish_reason: :tool_calls
+         finish_reason: :tool_calls,
+         usage: nil
        }}
     end
   end

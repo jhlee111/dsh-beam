@@ -1,12 +1,15 @@
 defmodule DshBeam.Llm.Adapter.Req do
   @moduledoc """
-  A minimal OpenAI-compatible adapter: POST /chat/completions (non-streaming).
-  The LLM provider is an EXAMPLE of the "everything is a plugin" design, not a
-  client framework, so this adapter stays thin: it forwards `tools` and parses
-  content, tool_calls, and finish_reason — the vocabulary an agent loop needs.
+  A minimal OpenAI-compatible adapter plugin: POST /chat/completions
+  (non-streaming). It owns the transport and the wire parsing — content,
+  tool_calls, finish_reason, and usage — and PROVIDES the adapter capability
+  (`:llm_adapter`) the `DshBeam.Llm.Plugin` provider resolves.
+
+  `use DshBeam.Llm.Adapter` makes this module both a plugin (providing
+  `:llm_adapter`) and the transport contract's implementation (ADR-0015).
   """
 
-  @behaviour DshBeam.Llm.Adapter
+  use DshBeam.Llm.Adapter
 
   @impl true
   def complete(config, messages, opts) do
@@ -41,14 +44,15 @@ defmodule DshBeam.Llm.Adapter.Req do
     end
   end
 
-  defp parse(%{"choices" => [choice | _]}) do
+  defp parse(%{"choices" => [choice | _]} = response) do
     message = choice["message"] || %{}
 
     {:ok,
      %{
        content: message["content"],
        tool_calls: parse_tool_calls(message["tool_calls"]),
-       finish_reason: map_finish_reason(choice["finish_reason"])
+       finish_reason: map_finish_reason(choice["finish_reason"]),
+       usage: map_usage(response["usage"])
      }}
   end
 
@@ -68,4 +72,26 @@ defmodule DshBeam.Llm.Adapter.Req do
   defp map_finish_reason("tool_calls"), do: :tool_calls
   defp map_finish_reason("length"), do: :max_tokens
   defp map_finish_reason(other), do: {:error, String.upcase(other)}
+
+  # Disjoint usage counts (ADR-0014): DeepSeek's prompt_tokens INCLUDES cache
+  # hits, so cache reads are subtracted out of inputTokens; the harness
+  # convention reports them separately.
+  defp map_usage(nil), do: nil
+
+  defp map_usage(usage) when is_map(usage) do
+    cache_read =
+      get_in(usage, ["prompt_tokens_details", "cached_tokens"]) ||
+        usage["prompt_cache_hit_tokens"]
+
+    reasoning = get_in(usage, ["completion_tokens_details", "reasoning_tokens"])
+    prompt = usage["prompt_tokens"] || 0
+
+    %{
+      input_tokens: prompt - (cache_read || 0),
+      output_tokens: usage["completion_tokens"] || 0,
+      cache_read_tokens: cache_read,
+      cache_write_tokens: usage["prompt_cache_miss_tokens"],
+      reasoning_tokens: reasoning
+    }
+  end
 end

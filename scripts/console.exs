@@ -11,6 +11,7 @@ entries = [
   %{id: :console, plugin: DshBeam.Console, config: [server: true], disabled: false},
   %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
   %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [], disabled: false},
+  %{id: :adapter, plugin: DshBeam.Llm.Adapter.Req, config: [], disabled: false},
   %{id: :shell, plugin: DshBeam.Shell.Plugin, config: [], disabled: false},
   %{id: :bash, plugin: DshBeam.Tool.Bash, config: [], disabled: false},
   %{id: :fs, plugin: DshBeam.Tool.Fs, config: [root: File.cwd!()], disabled: false},
