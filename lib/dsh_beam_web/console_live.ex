@@ -242,21 +242,34 @@ defmodule DshBeamWeb.ConsoleLive do
   end
 
   def handle_event("llm_apply", params, socket) do
+    # The Models surface. A blank credential field keeps the current key (as
+    # before). Model/base_url/credential are also persisted to the settings
+    # store so they survive a restart. The running provider is re-armed
+    # in-memory via configure/2 (dynamic reconfiguration — no re-mount), while
+    # the store carries the value to the next boot.
+    base_url = params["base_url"] || "https://api.deepseek.com"
+    model = params["model"] || "deepseek-chat"
+
+    credential =
+      case {params["credential_mode"], params["credential_value"]} do
+        {_mode, ""} -> nil
+        {"literal", value} -> {:literal, value}
+        {_mode, value} -> {:env, value}
+      end
+
     result =
       case DshBeam.Context.get(socket.assigns.ctx, :llm) do
         {:ok, llm} ->
-          opts = [base_url: params["base_url"], model: params["model"]]
+          opts = [base_url: base_url, model: model]
+          opts = if credential, do: Keyword.put(opts, :credential, credential), else: opts
+          configure_result = DshBeam.Llm.configure(llm, opts)
+          persisted = persist_llm(socket.assigns.runtime, base_url, model, credential)
 
-          # a blank credential field keeps the current key (the harness's
-          # "leave blank to keep the current key")
-          opts =
-            case {params["credential_mode"], params["credential_value"]} do
-              {_mode, ""} -> opts
-              {"literal", value} -> Keyword.put(opts, :credential, {:literal, value})
-              {_mode, value} -> Keyword.put(opts, :credential, {:env, value})
-            end
-
-          DshBeam.Llm.configure(llm, opts)
+          case {configure_result, persisted} do
+            {:ok, true} -> {:ok, "saved + persisted (next boot applies the stored config)"}
+            {:ok, false} -> {:error, :persist_failed}
+            other -> other
+          end
 
         :not_found ->
           {:error, :no_llm_plugin}
@@ -400,6 +413,15 @@ defmodule DshBeamWeb.ConsoleLive do
       {:ok, workspace} when is_pid(workspace) -> {:ok, workspace}
       _ -> :not_found
     end
+  end
+
+  defp persist_llm(runtime, base_url, model, credential) do
+    store = DshBeam.Runtime.settings(runtime)
+
+    :ok == DshBeam.Settings.put(store, DshBeam.Llm.Plugin, :base_url, base_url) and
+      :ok == DshBeam.Settings.put(store, DshBeam.Llm.Plugin, :model, model) and
+      (is_nil(credential) or
+         :ok == DshBeam.Settings.put(store, DshBeam.Llm.Plugin, :credential, credential))
   end
 
   defp loop_pid(runtime) do

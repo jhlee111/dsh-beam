@@ -33,7 +33,14 @@ defmodule DshBeam.Runtime do
   @type entry :: %{id: term(), plugin: module(), config: keyword(), disabled: boolean()}
 
   def start_link(entries, opts) do
-    GenServer.start_link(__MODULE__, entries, opts)
+    # :settings_path is a dsh-beam option, not a GenServer option: thread it
+    # into the init data so the settings store can persist overrides to disk.
+    # When absent (the default, and what tests use) the store stays in-memory.
+    GenServer.start_link(
+      __MODULE__,
+      {entries, Keyword.get(opts, :settings_path)},
+      Keyword.drop(opts, [:settings_path])
+    )
   end
 
   def context(runtime), do: GenServer.call(runtime, :context)
@@ -64,10 +71,10 @@ defmodule DshBeam.Runtime do
   def subscribe(runtime), do: GenServer.call(runtime, :subscribe)
 
   @impl true
-  def init(entries) do
+  def init({entries, settings_path}) do
     {:ok, ctx} = DshBeam.Context.start_link([])
     {:ok, sup} = DynamicSupervisor.start_link(strategy: :one_for_one)
-    {:ok, settings} = DshBeam.Settings.start_link()
+    {:ok, settings} = DshBeam.Settings.start_link(path: settings_path)
     state = %{ctx: ctx, sup: sup, settings: settings, entries: %{}, subscribers: %{}}
     {:ok, state, {:continue, {:apply, entries}}}
   end

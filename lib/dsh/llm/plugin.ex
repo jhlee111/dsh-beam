@@ -27,6 +27,28 @@ defmodule DshBeam.Llm.Plugin do
 
   need(:llm_adapter)
 
+  # Typed settings: persisted in the settings store, so the model/endpoint/
+  # credential the Models surface saves are durable across restarts. The
+  # runtime layers these overrides under the entry config at mount, and
+  # configure/2 still re-arms them in-memory for the next request.
+  setting(:model,
+    type: :string,
+    default: "deepseek-chat",
+    doc: "The chat model (e.g. deepseek-chat, deepseek-reasoner)"
+  )
+
+  setting(:base_url,
+    type: :string,
+    default: "https://api.deepseek.com",
+    doc: "The OpenAI-compatible chat/completions endpoint origin"
+  )
+
+  setting(:credential,
+    type: :credential,
+    default: {:env, "DEEPSEEK_API_KEY"},
+    doc: "The credential reference: env:VAR_NAME or literal:the-key"
+  )
+
   @impl DshBeam.Plugin
   def mount(_ctx, opts) do
     {:ok, [:llm_adapter], %{llm: self()}, %{config: default_config(opts)}}

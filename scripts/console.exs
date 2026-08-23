@@ -30,6 +30,13 @@ entries = [
   %{id: :panel_trajectory, plugin: DshBeam.Ui.Panel.Trajectory, config: [], disabled: false}
 ]
 
-{:ok, runtime} = DshBeam.Runtime.start_link(entries, [])
+# Persist the settings store (model/credential overrides) to disk, so a saved
+# model/API key survives a console restart. Without this the store is in-memory.
+settings_path = Path.join([File.cwd!(), ".dsh", "settings.json"])
+
+{:ok, runtime} =
+  DshBeam.Runtime.start_link(entries, settings_path: settings_path)
+
 IO.puts("dsh-beam console: http://127.0.0.1:4001 (runtime #{inspect(runtime)})")
+IO.puts("settings: #{settings_path}")
 Process.sleep(:infinity)

@@ -29,3 +29,8 @@ dsh-*.tar
 
 # Local hex package cache (sandboxed fetch keeps it inside the workspace).
 /.hex/
+
+# Persisted runtime settings (model/credential overrides written by the
+# console's settings store). Never commit these.
+/.dsh/
+/dsh.settings.json
