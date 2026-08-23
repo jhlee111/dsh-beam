@@ -30,6 +30,7 @@ platform* and *how the UI is built* — and everything else hangs off them.
 | [0013](0013-ui-slots-for-panels.md) | UI slots: a UI panel is a plugin | accepted |
 | [0014](0014-session-surface-and-kv-cache.md) | Session history as an append-only log with a derived model surface (KV-cache reuse) | accepted |
 | [0015](0015-llm-adapter-is-a-plugin.md) | LLM adapters are plugins, not behaviour values | accepted |
+| [0016](0016-workspace-session-worktree.md) | Session = git worktree: per-session isolation over one repository | accepted |
 
 ## How to add an ADR
 

@@ -409,7 +409,7 @@ hacks.
   ("plugin"), not "asset".
 - 114 tests.
 
-## 25. Milestone 14 — v0.1.0: a usable agent harness (in progress)
+## 25. Milestone 14 — v0.1.0: a usable agent harness (complete)
 
 **Goal** (tracked as a same-session goal): make dsh-beam usable like Claude
 Code/Codex — workspaces, chat, trajectory, settings — as plugins, verified
@@ -429,23 +429,36 @@ end-to-end from the console.
   minimal port of the reference `agent-team` peer mailbox.
 - 126 tests.
 
-### Next (the roadmap to complete v0.1.0)
+### Done (round 2 — v0.1.0 complete)
 
-1. **Wire worktree sessions together** — `Workspace` should create a session by
-   `git worktree add` (a session owns its checkout; `open_session/2`), and
-   close it with `git worktree remove`. `Tool.Bash`/`Tool.Fs` should run in the
-   current session's `cwd`.
-2. **Console: workspace sidebar** — a `WorkspacePanel` listing workspaces and
-   their sessions, with create/switch/close; the chat/todo panels bind to the
-   *current* session (multi-session, not the single-session console today).
-3. **Trajectory view** — a separate panel grouping session events by turn
-   (user/tool_call/tool_result/assistant), distinct from the chat pane
-   (reference `ui-trajectory`).
-4. **Settings surface** — model selection + plugin inventory + general settings
-   as a settings section (already partly present as llm-settings + plugins).
-5. **End-to-end verification** — workspace → session → chat task → trajectory →
-   settings, from the console; ADR for the workspace/session/worktree model;
-   v0.1.0 release notes.
+1. **Worktree sessions** — `Workspace.open_session/2` resolves the repo root,
+   checks out a `session/<id>` worktree, and starts the session log in it
+   (`header.cwd` = the checkout); `close_session/2` runs `git worktree remove`
+   and stops the log. `DshBeam.Git` runs `git(1)` unlinked so a trapping fiber
+   survives the subprocess exit. `Tool.Bash`/`Tool.Fs` now `need(:session)` and
+   run in the current session's `cwd` (session header), falling back to the fs
+   config root only when no session is present. ADR-0016.
+2. **Workspace sidebar** — `DshBeam.Ui.Panel.Workspace` lists sessions, creates
+   one over a repository, and switches/closes. Switching re-points `:session`
+   by reconfiguring the session entry (`config: [session: pid]`) and
+   reconciling — the substrate's provider-swap path (the guard deactivates
+   dependents first, then the new session mounts). The chat/todo/trajectory
+   panes bind to the *current* session automatically.
+3. **Trajectory view** — `DshBeam.Ui.Panel.Trajectory` projects the session log
+   grouped by turn (a `user` event opens a turn; tool calls, results, and the
+   answer follow) — the reference `ui-trajectory`, as a plugin.
+4. **Settings surface** — model selection (llm settings) + the plugin inventory
+   + per-plugin typed settings (shell limits, loop budget, workspace
+   `default_root`) are editable from the console, layered over defaults via
+   `DshBeam.Settings`.
+5. **End-to-end verification** — a console test drives the full flow: create a
+   workspace session → switch to it → run a scripted chat task → assert the
+   trajectory turn → save a setting override. Plus ADR-0016 and
+   `CHANGELOG.md` v0.1.0 release notes.
+- Also fixed: the plugin inventory no longer depends on `:code.all_loaded()`
+  order (it enumerates the app's modules + runtime-loaded creator plugins), so
+  a bare console renders its panels deterministically.
+- 140 tests.
 
 ### Design decisions to record (when implemented)
 
