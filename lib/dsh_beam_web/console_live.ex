@@ -189,7 +189,20 @@ defmodule DshBeamWeb.ConsoleLive do
       end
     end)
 
+    # Re-mount the plugin so the resolved (now-overridden) settings reach its
+    # live config — a saved :max_steps takes effect immediately.
+    case entry_id_for_plugin(socket.assigns.runtime, plugin) do
+      nil -> :ok
+      id -> DshBeam.Runtime.restart(socket.assigns.runtime, id)
+    end
+
     {:noreply, refresh(socket)}
+  end
+
+  defp entry_id_for_plugin(runtime, plugin) do
+    runtime
+    |> DshBeam.Runtime.entries()
+    |> Enum.find_value(fn {id, rec} -> if rec.spec.plugin == plugin, do: id end)
   end
 
   defp parse_setting(%{type: :integer}, raw) do

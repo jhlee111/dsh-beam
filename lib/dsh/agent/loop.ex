@@ -17,7 +17,7 @@ defmodule DshBeam.Agent.Loop do
   need(:llm)
   need(:session)
 
-  setting(:max_steps, type: :integer, default: 5, doc: "Max model↔tool round-trips")
+  setting(:max_steps, type: :integer, default: 20, doc: "Max model↔tool round-trips")
 
   @typedoc "One loop step: a tool call or its result."
   @type step ::
@@ -48,7 +48,7 @@ defmodule DshBeam.Agent.Loop do
   defp run_loop(data, task) do
     case DshBeam.Context.resolve(data.ctx) do
       {:active, view} ->
-        max_steps = Keyword.get(data.config, :max_steps, 5)
+        max_steps = Keyword.get(data.config, :max_steps, 20)
 
         system = %{
           "role" => "system",

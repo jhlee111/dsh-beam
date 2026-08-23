@@ -47,6 +47,15 @@ defmodule DshBeam.Runtime do
   end
 
   @doc """
+  Re-mount one entry with its current config. A settings save changes the
+  resolved config (typed-settings overrides are merged at mount), so this
+  forces the running plugin to pick up the new value without a full reconcile.
+  """
+  def restart(runtime, id) do
+    GenServer.call(runtime, {:restart, id})
+  end
+
+  @doc """
   Subscribe the calling process to entry changes. Every change to the entry
   map (start, stop, crash, re-injection, crash loop) is fanned out as
   {:dsh_runtime_event, {id, record_or_removed}}. The subscription is removed
@@ -97,6 +106,20 @@ defmodule DshBeam.Runtime do
 
     reply = if errors == [], do: :ok, else: {:error, errors}
     {:reply, reply, state}
+  end
+
+  def handle_call({:restart, id}, _from, state) do
+    case Map.get(state.entries, id) do
+      %{spec: spec, pid: pid} when is_pid(pid) ->
+        state = stop_entry(state, id)
+        {state, errors} = start_and_collect(state, spec, [])
+
+        reply = if errors == [], do: :ok, else: {:error, errors}
+        {:reply, reply, state}
+
+      _ ->
+        {:reply, :not_found, state}
+    end
   end
 
   @impl true
@@ -262,8 +285,13 @@ defmodule DshBeam.Runtime do
   defp start_entry(state, %{disabled: true}, _restarts), do: {state, :ok}
 
   defp start_entry(state, entry, restarts) do
+    # Lay the typed-settings overrides (resolved defaults + any saved
+    # override) under the entry config, so a setting saved through the
+    # console actually reaches the running plugin's mount config while an
+    # explicit entry config still wins.
     config =
-      entry.config
+      settings_overrides(state.settings, entry.plugin)
+      |> Keyword.merge(entry.config)
       |> Keyword.put_new(:id, entry.id)
       |> Keyword.put_new(:runtime, self())
 
@@ -347,5 +375,14 @@ defmodule DshBeam.Runtime do
     end)
 
     state
+  end
+
+  # Resolve every declared setting of a plugin from the settings store; the
+  # resolved values become mount config overrides (entry config already wins).
+  defp settings_overrides(store, plugin) do
+    for setting <- DshBeam.Plugin.settings(plugin),
+        {:ok, value} <- [DshBeam.Settings.get(store, plugin, setting.name)],
+        into: [],
+        do: {setting.name, value}
   end
 end
