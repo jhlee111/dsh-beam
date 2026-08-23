@@ -233,3 +233,12 @@ visible in the inventory/settings panel — and run/3 executes in a subprocess
 with a timeout and output cap. DshBeam.Shell.Consumer declares :shell and
 deactivates first when the provider withdraws (the guard across a non-LLM
 capability). 77 tests.
+
+## 17. Milestone 7 — the MVP: tools are plugins, the loop is a plugin (complete)
+
+The harness "runs" when the model↔tool loop works on the substrate. A tool is
+a plugin (`tool` DSL → default mount binds the name; handle_dsh_tool_call
+answers {:tool_call, ...}); the agent loop is a plugin (`need :llm, :session`)
+that discovers tools from the registry, dispatches their calls, and answers.
+tool-bash (needs :shell) and tool-fs (workspace root, path containment) are the
+first tools. The LLM result now carries tool_calls + finish_reason. 85 tests.

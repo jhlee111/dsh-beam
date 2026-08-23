@@ -288,3 +288,16 @@ or timeout). The dependent survives, becomes :inactive, and can be reactivated.
 - Fixed a latent teardown race (context dies between alive? check and the
   unload call on the runtime exit cascade) — the injected terminate/3 now
   swallows that exit.
+
+## Milestone 7 — the MVP (tool DSL → agent loop) (complete)
+
+- A tool is a plugin; the agent loop is a plugin. The loop discovers tools via
+  DshBeam.Tool.Registry filtered to mounted bindings and dispatches through
+  handle_dsh_tool_call. tool-bash reuses :shell (guard across a tool), tool-fs
+  contains paths to a workspace root (§6.1 boundary effects observed).
+- The LLM adapter/result widened minimally to tool_calls + finish_reason (the
+  vocabulary a loop needs), keeping chat/2's content-string shape.
+- The directory layout now mirrors the harness: lib/dsh/cordis/ (the substrate
+  = vendor/cordis) vs lib/dsh/* (the plugins = packages/*).
+- 85 tests. (A type-checker "never match" warning on a test helper's dynamic
+  notify delegation is benign and test-only.)
