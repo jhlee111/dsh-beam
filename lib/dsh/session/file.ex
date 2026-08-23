@@ -29,7 +29,12 @@ defmodule DshBeam.Session.File do
         []
       end
 
-    {:ok, %{path: path, seq: length(events), subscribers: %{}}}
+    header = %{
+      title: Keyword.get(opts, :title, "untitled session"),
+      cwd: Keyword.get(opts, :cwd)
+    }
+
+    {:ok, %{path: path, seq: length(events), header: header, subscribers: %{}}}
   end
 
   @impl true
@@ -55,6 +60,16 @@ defmodule DshBeam.Session.File do
   def handle_call(:clear, _from, state) do
     File.write!(state.path, "")
     {:reply, :ok, %{state | seq: 0}}
+  end
+
+  @impl true
+  def handle_call(:header, _from, state) do
+    {:reply, state.header, state}
+  end
+
+  @impl true
+  def handle_call({:set_header, header}, _from, state) do
+    {:reply, :ok, %{state | header: Map.merge(state.header, header)}}
   end
 
   @impl true

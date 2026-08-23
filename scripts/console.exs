@@ -10,7 +10,9 @@
 entries = [
   %{id: :console, plugin: DshBeam.Console, config: [server: true], disabled: false},
   %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
+  %{id: :workspace, plugin: DshBeam.Workspace, config: [], disabled: false},
   %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [], disabled: false},
+  %{id: :adapter, plugin: DshBeam.Llm.Adapter.Req, config: [], disabled: false},
   %{id: :shell, plugin: DshBeam.Shell.Plugin, config: [], disabled: false},
   %{id: :bash, plugin: DshBeam.Tool.Bash, config: [], disabled: false},
   %{id: :fs, plugin: DshBeam.Tool.Fs, config: [root: File.cwd!()], disabled: false},
@@ -23,9 +25,18 @@ entries = [
   %{id: :panel_llm, plugin: DshBeam.Ui.Panel.LlmSettings, config: [], disabled: false},
   %{id: :panel_creator, plugin: DshBeam.Ui.Panel.Creator, config: [], disabled: false},
   %{id: :panel_events, plugin: DshBeam.Ui.Panel.EventFeed, config: [], disabled: false},
-  %{id: :panel_plugins, plugin: DshBeam.Ui.Panel.Plugins, config: [], disabled: false}
+  %{id: :panel_plugins, plugin: DshBeam.Ui.Panel.Plugins, config: [], disabled: false},
+  %{id: :panel_workspace, plugin: DshBeam.Ui.Panel.Workspace, config: [], disabled: false},
+  %{id: :panel_trajectory, plugin: DshBeam.Ui.Panel.Trajectory, config: [], disabled: false}
 ]
 
-{:ok, runtime} = DshBeam.Runtime.start_link(entries, [])
+# Persist the settings store (model/credential overrides) to disk, so a saved
+# model/API key survives a console restart. Without this the store is in-memory.
+settings_path = Path.join([File.cwd!(), ".dsh", "settings.json"])
+
+{:ok, runtime} =
+  DshBeam.Runtime.start_link(entries, settings_path: settings_path)
+
 IO.puts("dsh-beam console: http://127.0.0.1:4001 (runtime #{inspect(runtime)})")
+IO.puts("settings: #{settings_path}")
 Process.sleep(:infinity)

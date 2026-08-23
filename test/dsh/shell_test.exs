@@ -27,6 +27,22 @@ defmodule DshBeam.ShellTest do
     assert {:ok, "second\n"} = DshBeam.Shell.Plugin.run(shell, "echo", ["second"])
   end
 
+  test "run_in/4 executes in the given working directory" do
+    {:ok, runtime} = DshBeam.Runtime.start_link([shell_entry([])], [])
+    ctx = DshBeam.Runtime.context(runtime)
+
+    {:ok, shell} = DshBeam.Context.get(ctx, :shell)
+
+    dir = Path.join(System.tmp_dir!(), "dsh_shell_cwd_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    # Instead of comparing a `pwd` string (symlink/canonical-form noise), observe
+    # the effect: a file written by the command lands in the session's cwd.
+    assert {:ok, _} = DshBeam.Shell.Plugin.run_in(shell, dir, "touch", ["marker.txt"])
+    assert File.exists?(Path.join(dir, "marker.txt"))
+  end
+
   test "output is capped at the configured limit" do
     {:ok, runtime} = DshBeam.Runtime.start_link([shell_entry(output_cap_bytes: 3)], [])
     ctx = DshBeam.Runtime.context(runtime)

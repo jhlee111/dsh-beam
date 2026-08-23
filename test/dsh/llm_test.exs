@@ -5,6 +5,10 @@ defmodule DshBeam.LlmTest do
     %{id: :llm, plugin: DshBeam.Llm.Plugin, config: opts, disabled: false}
   end
 
+  defp adapter_entry(module, config \\ []) do
+    %{id: :adapter, plugin: module, config: config, disabled: false}
+  end
+
   defp session_entry do
     %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false}
   end
@@ -13,9 +17,15 @@ defmodule DshBeam.LlmTest do
     %{id: :chat, plugin: DshBeam.Llm.Chat, config: [], disabled: false}
   end
 
-  test "the llm plugin provides :llm and completes through the configured adapter" do
-    config = [adapter: StubLlmAdapter, model: "stub-model", adapter_config: %{parent: self()}]
-    {:ok, runtime} = DshBeam.Runtime.start_link([llm_entry(config)], [])
+  test "the llm plugin provides :llm and completes through the mounted adapter" do
+    config = [model: "stub-model", adapter_config: %{parent: self()}]
+
+    {:ok, runtime} =
+      DshBeam.Runtime.start_link(
+        [llm_entry(config), adapter_entry(StubLlmAdapter, parent: self())],
+        []
+      )
+
     ctx = DshBeam.Runtime.context(runtime)
 
     assert {:ok, llm} = DshBeam.Context.get(ctx, :llm)
@@ -32,10 +42,13 @@ defmodule DshBeam.LlmTest do
   end
 
   test "the chat consumer appends user and assistant turns to the session" do
-    llm = llm_entry(adapter: StubLlmAdapter, adapter_config: %{parent: self()})
+    llm = llm_entry(model: "stub-model", adapter_config: %{parent: self()})
 
     {:ok, runtime} =
-      DshBeam.Runtime.start_link([session_entry(), llm, chat_entry()], [])
+      DshBeam.Runtime.start_link(
+        [session_entry(), llm, adapter_entry(StubLlmAdapter, parent: self()), chat_entry()],
+        []
+      )
 
     ctx = DshBeam.Runtime.context(runtime)
 
@@ -69,16 +82,25 @@ defmodule DshBeam.LlmTest do
   end
 
   test "removing the llm provider deactivates the chat consumer first" do
-    llm = llm_entry(adapter: StubLlmAdapter, adapter_config: %{parent: self()})
+    llm = llm_entry(model: "stub-model", adapter_config: %{parent: self()})
 
     {:ok, runtime} =
-      DshBeam.Runtime.start_link([session_entry(), llm, chat_entry()], [])
+      DshBeam.Runtime.start_link(
+        [session_entry(), llm, adapter_entry(StubLlmAdapter, parent: self()), chat_entry()],
+        []
+      )
 
     ctx = DshBeam.Runtime.context(runtime)
     wait_until(fn -> match?({:ok, _}, DshBeam.Context.get(ctx, :chat)) end)
     {:ok, chat} = DshBeam.Context.get(ctx, :chat)
 
-    :ok = DshBeam.Runtime.reconcile(runtime, [session_entry(), chat_entry()])
+    # keep the adapter mounted; remove only the llm provider
+    :ok =
+      DshBeam.Runtime.reconcile(runtime, [
+        session_entry(),
+        adapter_entry(StubLlmAdapter, parent: self()),
+        chat_entry()
+      ])
 
     history = DshBeam.Context.history(ctx)
     deactivated = Enum.find_index(history, &match?({:deactivated, pid} when pid == chat, &1))
@@ -102,11 +124,15 @@ defmodule DshBeam.LlmTest do
     config = [
       base_url: "https://api.deepseek.com",
       credential: {:literal, "test-key"},
-      model: "deepseek-chat",
-      adapter_config: %{plug: plug}
+      model: "deepseek-chat"
     ]
 
-    {:ok, runtime} = DshBeam.Runtime.start_link([llm_entry(config)], [])
+    {:ok, runtime} =
+      DshBeam.Runtime.start_link(
+        [llm_entry(config), adapter_entry(DshBeam.Llm.Adapter.Req, plug: plug)],
+        []
+      )
+
     ctx = DshBeam.Runtime.context(runtime)
 
     {:ok, llm} = DshBeam.Context.get(ctx, :llm)
@@ -115,6 +141,47 @@ defmodule DshBeam.LlmTest do
     # the credential reference was resolved into a bearer header per request
     assert_receive {:auth, headers}, 1000
     assert {"authorization", "Bearer test-key"} in headers
+  end
+
+  test "the Req adapter maps DeepSeek cache usage to disjoint counts" do
+    # DeepSeek's prompt_tokens INCLUDES cache hits; the adapter must subtract
+    # them so inputTokens + cacheReadTokens is the billed prompt (ADR-0014).
+    plug = fn conn ->
+      Req.Test.json(conn, %{
+        "choices" => [%{"message" => %{"content" => "hi"}}],
+        "usage" => %{
+          "prompt_tokens" => 1000,
+          "prompt_cache_hit_tokens" => 800,
+          "prompt_cache_miss_tokens" => 200,
+          "completion_tokens" => 50,
+          "completion_tokens_details" => %{"reasoning_tokens" => 10}
+        }
+      })
+    end
+
+    config = [
+      base_url: "https://api.deepseek.com",
+      credential: {:literal, "test-key"},
+      model: "deepseek-chat"
+    ]
+
+    {:ok, runtime} =
+      DshBeam.Runtime.start_link(
+        [llm_entry(config), adapter_entry(DshBeam.Llm.Adapter.Req, plug: plug)],
+        []
+      )
+
+    ctx = DshBeam.Runtime.context(runtime)
+    {:ok, llm} = DshBeam.Context.get(ctx, :llm)
+
+    assert {:ok, %{usage: usage}} =
+             DshBeam.Llm.chat(llm, [%{"role" => "user", "content" => "hi"}], [])
+
+    assert usage.input_tokens == 200
+    assert usage.cache_read_tokens == 800
+    assert usage.cache_write_tokens == 200
+    assert usage.output_tokens == 50
+    assert usage.reasoning_tokens == 10
   end
 
   test "the Req adapter forwards tools without crashing on the keyword opts" do
@@ -130,11 +197,15 @@ defmodule DshBeam.LlmTest do
     config = [
       base_url: "https://api.deepseek.com",
       credential: {:literal, "test-key"},
-      model: "deepseek-chat",
-      adapter_config: %{plug: plug}
+      model: "deepseek-chat"
     ]
 
-    {:ok, runtime} = DshBeam.Runtime.start_link([llm_entry(config)], [])
+    {:ok, runtime} =
+      DshBeam.Runtime.start_link(
+        [llm_entry(config), adapter_entry(DshBeam.Llm.Adapter.Req, plug: plug)],
+        []
+      )
+
     ctx = DshBeam.Runtime.context(runtime)
 
     {:ok, llm} = DshBeam.Context.get(ctx, :llm)
@@ -148,8 +219,14 @@ defmodule DshBeam.LlmTest do
   end
 
   test "configure/2 changes connection facts for the next request without re-mounting" do
-    config = [adapter: StubLlmAdapter, model: "stub-model", adapter_config: %{parent: self()}]
-    {:ok, runtime} = DshBeam.Runtime.start_link([llm_entry(config)], [])
+    config = [model: "stub-model", adapter_config: %{parent: self()}]
+
+    {:ok, runtime} =
+      DshBeam.Runtime.start_link(
+        [llm_entry(config), adapter_entry(StubLlmAdapter, parent: self())],
+        []
+      )
+
     ctx = DshBeam.Runtime.context(runtime)
 
     {:ok, llm} = DshBeam.Context.get(ctx, :llm)
@@ -173,11 +250,15 @@ defmodule DshBeam.LlmTest do
     end
 
     config = [
-      credential: {:env, "DSH_LLM_DEFINITELY_MISSING"},
-      adapter_config: %{plug: plug}
+      credential: {:env, "DSH_LLM_DEFINITELY_MISSING"}
     ]
 
-    {:ok, runtime} = DshBeam.Runtime.start_link([llm_entry(config)], [])
+    {:ok, runtime} =
+      DshBeam.Runtime.start_link(
+        [llm_entry(config), adapter_entry(DshBeam.Llm.Adapter.Req, plug: plug)],
+        []
+      )
+
     ctx = DshBeam.Runtime.context(runtime)
 
     {:ok, llm} = DshBeam.Context.get(ctx, :llm)
@@ -207,7 +288,7 @@ end
 
 defmodule StubLlmAdapter do
   @moduledoc false
-  @behaviour DshBeam.Llm.Adapter
+  use DshBeam.Llm.Adapter
 
   @impl true
   def complete(config, messages, _opts) do
@@ -218,7 +299,8 @@ defmodule StubLlmAdapter do
      %{
        content: "stub reply: " <> List.last(messages)["content"],
        tool_calls: [],
-       finish_reason: :stop
+       finish_reason: :stop,
+       usage: nil
      }}
   end
 end

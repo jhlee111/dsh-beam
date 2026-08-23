@@ -34,10 +34,29 @@ defmodule DshBeam.ConsoleTest do
     %{runtime: runtime, ctx: ctx, session: session}
   end
 
+  # The composition/plugins/models/creator panels live in the settings modal.
+  defp open_settings(view), do: render_click(view, "open_settings", %{})
+
+  defp open_section(view, section),
+    do: render_click(view, "settings_tab", %{"section" => to_string(section)})
+
+  # The chat pane renders only while a workspace session is current. Open an
+  # in-place session over a temp dir and switch to it.
+  defp open_chat_session(view, ctx) do
+    render_submit(view, "workspace_create", %{"repo" => System.tmp_dir!(), "title" => "chat"})
+    {:ok, workspace} = DshBeam.Context.get(ctx, :workspace)
+    [ws] = Map.keys(DshBeam.Workspace.all_sessions(workspace))
+    render_click(view, "workspace_switch", %{"session" => encode(ws)})
+    wait_until(fn -> DshBeam.Context.get(ctx, :session) == {:ok, ws} end)
+  end
+
   test "renders the composition with live fiber states and seeds the demo", %{session: session} do
     {:ok, view, html} = live(build_conn(), "/", session: session)
-
     assert html =~ "dsh-beam console"
+    _ = open_settings(view)
+    _ = open_section(view, :composition)
+
+    html = render(view)
     assert html =~ ":console"
     assert html =~ "DshBeam.Console"
     # the console's own fiber is active
@@ -83,13 +102,16 @@ defmodule DshBeam.ConsoleTest do
 
     entries = [
       %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
-      %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [adapter: ConsolePlanLlm], disabled: false},
+      %{id: :workspace, plugin: DshBeam.Workspace, config: [], disabled: false},
+      %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [], disabled: false},
+      %{id: :adapter, plugin: ConsolePlanLlm, config: [], disabled: false},
       %{id: :todo, plugin: DshBeam.Tool.Todo, config: [], disabled: false},
       %{id: :tool, plugin: ConsoleEchoTool, config: [], disabled: false},
       %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false}
     ]
 
     :ok = DshBeam.Runtime.reconcile(runtime, entries)
+    open_chat_session(view, ctx)
 
     # the scripted model first writes a todo plan AND calls console_echo, then
     # answers on the second round-trip
@@ -113,9 +135,10 @@ defmodule DshBeam.ConsoleTest do
     assert Enum.any?(DshBeam.Session.all(session_pid), &(&1["role"] == "assistant"))
   end
 
-  test "the chat pane reports a missing credential honestly", %{session: session} do
+  test "the chat pane reports a missing credential honestly", %{session: session, ctx: ctx} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
     render_submit(view, "seed", %{})
+    open_chat_session(view, ctx)
 
     # no DEEPSEEK_API_KEY -> the real Req adapter fails the credential
     # resolution, and the chat pane surfaces the error instead of a fake reply.
@@ -126,22 +149,29 @@ defmodule DshBeam.ConsoleTest do
     assert render(view) =~ "missing_env"
   end
 
-  test "the chat pane renders the loop's tool trace", %{session: session, runtime: runtime} do
+  test "the chat pane renders the loop's tool trace", %{
+    session: session,
+    runtime: runtime,
+    ctx: ctx
+  } do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
 
     entries = [
       %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
+      %{id: :workspace, plugin: DshBeam.Workspace, config: [], disabled: false},
       %{
         id: :llm,
         plugin: DshBeam.Llm.Plugin,
-        config: [adapter: ConsoleLoopLlm],
+        config: [],
         disabled: false
       },
+      %{id: :adapter, plugin: ConsoleLoopLlm, config: [], disabled: false},
       %{id: :tool, plugin: ConsoleEchoTool, config: [], disabled: false},
       %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false}
     ]
 
     :ok = DshBeam.Runtime.reconcile(runtime, entries)
+    open_chat_session(view, ctx)
 
     html = render_submit(view, "ask", %{"text" => "run"})
     wait_until(fn -> render(view) =~ "final answer" end)
@@ -158,12 +188,15 @@ defmodule DshBeam.ConsoleTest do
 
     entries = [
       %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
-      %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [adapter: ConsoleLoopLlm], disabled: false},
+      %{id: :workspace, plugin: DshBeam.Workspace, config: [], disabled: false},
+      %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [], disabled: false},
+      %{id: :adapter, plugin: ConsoleLoopLlm, config: [], disabled: false},
       %{id: :tool, plugin: ConsoleEchoTool, config: [], disabled: false},
       %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false}
     ]
 
     :ok = DshBeam.Runtime.reconcile(runtime, entries)
+    open_chat_session(view, ctx)
 
     render_submit(view, "ask", %{"text" => "run"})
     wait_until(fn -> render(view) =~ "final answer" end)
@@ -192,6 +225,8 @@ defmodule DshBeam.ConsoleTest do
 
   test "the creator form defines a plugin in-process", %{session: session, ctx: ctx} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
+    _ = open_settings(view)
+    _ = open_section(view, :creator)
 
     source = """
     defmodule FormMade do
@@ -209,6 +244,8 @@ defmodule DshBeam.ConsoleTest do
        %{session: session, ctx: ctx, runtime: runtime} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
     render_submit(view, "seed", %{})
+    _ = open_settings(view)
+    _ = open_section(view, :models)
 
     {:ok, llm} = DshBeam.Context.get(ctx, :llm)
     %{llm: %{pid: pid_before}} = DshBeam.Runtime.entries(runtime)
@@ -258,8 +295,11 @@ defmodule DshBeam.ConsoleTest do
 
   test "the plugins panel lists the inventory and saves a setting override",
        %{session: session, runtime: runtime} do
-    {:ok, view, html} = live(build_conn(), "/", session: session)
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    _ = open_settings(view)
+    _ = open_section(view, :plugins)
 
+    html = render(view)
     assert html =~ "ConsoleSettingsPlugin"
     assert html =~ "enabled"
 
@@ -275,8 +315,129 @@ defmodule DshBeam.ConsoleTest do
     assert html =~ "9"
   end
 
+  test "the plugins tab shows configurable cards with staged edits", %{
+    session: session,
+    runtime: runtime
+  } do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    _ = open_settings(view)
+    _ = open_section(view, :plugins)
+
+    # every plugin renders as a card, with its name and an enabled pill
+    html = render(view)
+    assert html =~ "plugin-card"
+    assert html =~ "ConsoleSettingsPlugin"
+    assert html =~ "enabled"
+
+    # expanding a configurable card discloses its fields
+    html = render_click(view, "plugin_toggle", %{"plugin" => to_string(ConsoleSettingsPlugin)})
+    assert html =~ "answer_limit"
+
+    # staging an edit marks the card unsaved
+    html =
+      render_change(view, "plugin_edit", %{
+        "plugin" => to_string(ConsoleSettingsPlugin),
+        "settings" => %{"answer_limit" => "7"}
+      })
+
+    assert html =~ "unsaved"
+
+    # discard drops the staged edit without writing; the default is intact
+    html = render_click(view, "plugin_discard", %{"plugin" => to_string(ConsoleSettingsPlugin)})
+    refute html =~ "unsaved"
+
+    store = DshBeam.Runtime.settings(runtime)
+    assert {:ok, 3} = DshBeam.Settings.get(store, ConsoleSettingsPlugin, :answer_limit)
+
+    # save writes the staged value and reports the save
+    html =
+      render_submit(view, "settings_save", %{
+        "plugin" => to_string(ConsoleSettingsPlugin),
+        "settings" => %{"answer_limit" => "9"}
+      })
+
+    assert html =~ "saved"
+    assert {:ok, 9} = DshBeam.Settings.get(store, ConsoleSettingsPlugin, :answer_limit)
+  end
+
+  test "the general tab persists app preferences", %{session: session, runtime: runtime} do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    _ = open_settings(view)
+    _ = open_section(view, :general)
+
+    html = render(view)
+    assert html =~ "general"
+    assert html =~ "default preset"
+    assert html =~ "workspace default root"
+
+    html =
+      render_submit(view, "settings_save", %{
+        "plugin" => to_string(DshBeam.Ui.Panel.General),
+        "settings" => %{"default_preset" => "chat", "workspace_default_root" => "/tmp"}
+      })
+
+    assert html =~ "saved"
+    store = DshBeam.Runtime.settings(runtime)
+    assert {:ok, "chat"} = DshBeam.Settings.get(store, DshBeam.Ui.Panel.General, :default_preset)
+
+    assert {:ok, "/tmp"} =
+             DshBeam.Settings.get(store, DshBeam.Ui.Panel.General, :workspace_default_root)
+  end
+
+  test "the agent presets tab lists presets, sets a default, and applies one",
+       %{session: session, runtime: runtime} do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    _ = open_settings(view)
+    _ = open_section(view, :presets)
+
+    html = render(view)
+    assert html =~ "Demo"
+    assert html =~ "Agent"
+    assert html =~ "Chat"
+    assert html =~ "built-in"
+
+    # set default writes the General setting
+    html = render_click(view, "preset_default", %{"preset" => "agent"})
+    assert html =~ "default = agent"
+
+    store = DshBeam.Runtime.settings(runtime)
+    assert {:ok, "agent"} = DshBeam.Settings.get(store, DshBeam.Ui.Panel.General, :default_preset)
+
+    # apply reconciles the composition to the preset's entries
+    render_click(view, "preset_apply", %{"preset" => "agent"})
+    ids = Map.keys(DshBeam.Runtime.entries(runtime))
+    assert :session in ids
+    assert :llm in ids
+    assert :adapter in ids
+    assert :loop in ids
+    # agent keeps the shell, drops the workspace/fs/todo of the demo preset
+    assert :shell in ids
+    refute :workspace in ids
+    refute :fs in ids
+    refute :todo in ids
+  end
+
+  test "agent presets can be duplicated into a custom preset and deleted", %{
+    session: session
+  } do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    _ = open_settings(view)
+    _ = open_section(view, :presets)
+
+    # duplicate a built-in preset into a custom one
+    html = render_submit(view, "preset_copy", %{"preset" => "agent", "name" => "My Agent"})
+    assert html =~ "My Agent"
+    assert html =~ "custom"
+
+    # delete it
+    html = render_click(view, "preset_delete", %{"preset" => "My Agent"})
+    refute html =~ "My Agent"
+  end
+
   test "the sandbox form defines a plugin outside the host BEAM", %{session: session, ctx: ctx} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
+    _ = open_settings(view)
+    _ = open_section(view, :composition)
 
     source = """
     defmodule SbxConsoleMade do
@@ -297,6 +458,8 @@ defmodule DshBeam.ConsoleTest do
   test "a kill updates the view through the runtime event stream", %{session: session} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
     render_submit(view, "seed", %{})
+    _ = open_settings(view)
+    _ = open_section(view, :composition)
 
     key = encode(:session)
     render_click(view, "kill", %{"id" => key})
@@ -396,18 +559,19 @@ end
 
 defmodule ConsoleLoopLlm do
   @moduledoc false
-  @behaviour DshBeam.Llm.Adapter
+  use DshBeam.Llm.Adapter
 
   @impl true
   def complete(_config, messages, _opts) do
     if Enum.any?(messages, &(&1["role"] == "tool")) do
-      {:ok, %{content: "final answer", tool_calls: [], finish_reason: :stop}}
+      {:ok, %{content: "final answer", tool_calls: [], finish_reason: :stop, usage: nil}}
     else
       {:ok,
        %{
          content: nil,
          tool_calls: [%{id: "c1", name: "console_echo", arguments: ~s({"text":"hi"})}],
-         finish_reason: :tool_calls
+         finish_reason: :tool_calls,
+         usage: nil
        }}
     end
   end
@@ -415,12 +579,12 @@ end
 
 defmodule ConsolePlanLlm do
   @moduledoc false
-  @behaviour DshBeam.Llm.Adapter
+  use DshBeam.Llm.Adapter
 
   @impl true
   def complete(_config, messages, _opts) do
     if Enum.any?(messages, &(&1["role"] == "tool")) do
-      {:ok, %{content: "final answer", tool_calls: [], finish_reason: :stop}}
+      {:ok, %{content: "final answer", tool_calls: [], finish_reason: :stop, usage: nil}}
     else
       {:ok,
        %{
@@ -434,7 +598,8 @@ defmodule ConsolePlanLlm do
            },
            %{id: "echo_1", name: "console_echo", arguments: ~s({"text":"hi"})}
          ],
-         finish_reason: :tool_calls
+         finish_reason: :tool_calls,
+         usage: nil
        }}
     end
   end

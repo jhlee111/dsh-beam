@@ -1,7 +1,9 @@
 defmodule DshBeam.Session.Memory do
   @moduledoc """
   Session provider: an ETS-backed append-only log. Seq is assigned by the
-  provider; all/1 reads events back in append order.
+  provider; all/1 reads events back in append order. Also carries a header
+  (title/cwd) — the session's identity and its working directory, so a
+  workspace can group sessions and each session can address its peers.
   """
 
   use GenServer
@@ -17,9 +19,15 @@ defmodule DshBeam.Session.Memory do
   end
 
   @impl true
-  def init(_opts) do
+  def init(opts) do
     tid = :ets.new(:dsh_session_memory, [:ordered_set, :public])
-    {:ok, %{tid: tid, seq: 0, subscribers: %{}}}
+
+    header = %{
+      title: Keyword.get(opts, :title, "untitled session"),
+      cwd: Keyword.get(opts, :cwd)
+    }
+
+    {:ok, %{tid: tid, seq: 0, header: header, subscribers: %{}}}
   end
 
   @impl true
@@ -45,6 +53,16 @@ defmodule DshBeam.Session.Memory do
   def handle_call(:clear, _from, state) do
     :ets.delete_all_objects(state.tid)
     {:reply, :ok, %{state | seq: 0}}
+  end
+
+  @impl true
+  def handle_call(:header, _from, state) do
+    {:reply, state.header, state}
+  end
+
+  @impl true
+  def handle_call({:set_header, header}, _from, state) do
+    {:reply, :ok, %{state | header: Map.merge(state.header, header)}}
   end
 
   @impl true

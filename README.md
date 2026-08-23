@@ -12,7 +12,7 @@ capability — and the substrate makes them compose, swap, and roll back.
 ```bash
 git submodule update --init
 mix deps.get
-mix test                              # 120+ tests, one per paper guarantee
+mix test                              # 140 tests, one per paper guarantee
 
 DEEPSEEK_API_KEY=sk-... mix run scripts/console.exs   # http://127.0.0.1:4001
 ```
@@ -52,11 +52,12 @@ reference/          the TS harness as a git submodule (porting source)
 ## The console
 
 One page shows the whole harness: the composition (fiber states, restarts,
-kill/crash), bindings, the event feed, the chat pane (agent loop, multi-turn,
-real-time tool trace), the todo panel (the agent's plan as a session
-projection), the llm settings, the plugin inventory, and a creator/sandbox
-editor with **export plugin (.exs)** — an edited plugin becomes a deployable
-script.
+kill/crash), bindings, the event feed, the workspace sidebar (list/create/
+switch/close git-worktree sessions), the chat pane (agent loop, multi-turn,
+real-time tool trace), the trajectory panel (session events grouped by turn),
+the todo panel (the agent's plan as a session projection), the llm settings,
+the plugin inventory, and a creator/sandbox editor with **export plugin
+(.exs)** — an edited plugin becomes a deployable script.
 
 ## reference/ submodule
 

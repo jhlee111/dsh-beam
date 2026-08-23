@@ -22,7 +22,9 @@ defmodule DshBeamWeb.ConsoleLive do
 
   @demo_entries [
     %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
+    %{id: :workspace, plugin: DshBeam.Workspace, config: [], disabled: false},
     %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [], disabled: false},
+    %{id: :adapter, plugin: DshBeam.Llm.Adapter.Req, config: [], disabled: false},
     %{id: :shell, plugin: DshBeam.Shell.Plugin, config: [], disabled: false},
     %{id: :bash, plugin: DshBeam.Tool.Bash, config: [], disabled: false},
     %{id: :fs, plugin: DshBeam.Tool.Fs, config: [root: "."], disabled: false},
@@ -35,7 +37,34 @@ defmodule DshBeamWeb.ConsoleLive do
     %{id: :panel_llm, plugin: DshBeam.Ui.Panel.LlmSettings, config: [], disabled: false},
     %{id: :panel_creator, plugin: DshBeam.Ui.Panel.Creator, config: [], disabled: false},
     %{id: :panel_events, plugin: DshBeam.Ui.Panel.EventFeed, config: [], disabled: false},
-    %{id: :panel_plugins, plugin: DshBeam.Ui.Panel.Plugins, config: [], disabled: false}
+    %{id: :panel_plugins, plugin: DshBeam.Ui.Panel.Plugins, config: [], disabled: false},
+    %{id: :panel_workspace, plugin: DshBeam.Ui.Panel.Workspace, config: [], disabled: false},
+    %{id: :panel_trajectory, plugin: DshBeam.Ui.Panel.Trajectory, config: [], disabled: false}
+  ]
+
+  # The entries a seed/preset-apply swaps out of a composition: the agent core
+  # plus the fixed UI panels. Everything else (the console itself, creator-made
+  # plugins) is preserved.
+  @reseed_ids [
+    :session,
+    :workspace,
+    :llm,
+    :adapter,
+    :shell,
+    :bash,
+    :fs,
+    :todo,
+    :loop,
+    :panel_composition,
+    :panel_bindings,
+    :panel_chat,
+    :panel_todo,
+    :panel_llm,
+    :panel_creator,
+    :panel_events,
+    :panel_plugins,
+    :panel_workspace,
+    :panel_trajectory
   ]
 
   @impl true
@@ -55,6 +84,8 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:chat_text, "")
       |> assign(:chat_log, [])
       |> assign(:chat_busy, false)
+      |> assign(:chat_task, nil)
+      |> assign(:chat_started_at, nil)
       |> assign(:chat_error, nil)
       |> assign(:todos, [])
       |> assign(:events, [])
@@ -65,6 +96,22 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:credential_mode, "env")
       |> assign(:credential_env, "DEEPSEEK_API_KEY")
       |> assign(:inventory, [])
+      |> assign(:workspace_sessions, [])
+      |> assign(:workspace_repo, ".")
+      |> assign(:workspace_result, nil)
+      |> assign(:trajectory, [])
+      |> assign(:settings_open, false)
+      |> assign(:settings_section, :models)
+      |> assign(:view_tab, :chat)
+      |> assign(:plugin_open, MapSet.new())
+      |> assign(:plugin_drafts, %{})
+      |> assign(:plugins_result, nil)
+      |> assign(:custom_presets, [])
+      |> assign(:presets_result, nil)
+      |> assign(:sidebar_collapsed, false)
+      |> assign(:picker_open, false)
+      |> assign(:picker_path, nil)
+      |> assign(:picker_entries, [])
       |> refresh()
 
     {:ok, socket}
@@ -137,7 +184,9 @@ defmodule DshBeamWeb.ConsoleLive do
       |> Enum.reject(
         &(&1.id in [
             :session,
+            :workspace,
             :llm,
+            :adapter,
             :shell,
             :bash,
             :fs,
@@ -150,7 +199,9 @@ defmodule DshBeamWeb.ConsoleLive do
             :panel_llm,
             :panel_creator,
             :panel_events,
-            :panel_plugins
+            :panel_plugins,
+            :panel_workspace,
+            :panel_trajectory
           ])
       )
 
@@ -167,12 +218,21 @@ defmodule DshBeamWeb.ConsoleLive do
         # as a message and rendered in handle_info/2.
         from = self()
 
-        Task.start(fn ->
-          result = DshBeam.Agent.Loop.run_trace(loop, text)
-          send(from, {:chat_result, text, result})
-        end)
+        {:ok, task} =
+          Task.start(fn ->
+            result = DshBeam.Agent.Loop.run_trace(loop, text)
+            send(from, {:chat_result, text, result})
+          end)
 
-        {:noreply, socket |> assign(chat_text: "", chat_busy: true) |> refresh()}
+        {:noreply,
+         socket
+         |> assign(
+           chat_text: "",
+           chat_busy: true,
+           chat_task: task,
+           chat_started_at: System.system_time(:second)
+         )
+         |> refresh()}
 
       :not_found ->
         {:noreply,
@@ -180,6 +240,24 @@ defmodule DshBeamWeb.ConsoleLive do
          |> assign(chat_text: "", chat_error: ":no_loop_plugin")
          |> refresh()}
     end
+  end
+
+  def handle_event("stop_chat", _params, socket) do
+    # Best-effort stop: the model call runs in a spawned Task, so killing it
+    # unblocks the pane immediately; the loop fiber may still finish its
+    # in-flight round-trip and write the answer to the session.
+    if is_pid(socket.assigns.chat_task), do: Process.exit(socket.assigns.chat_task, :kill)
+
+    case DshBeam.Context.get(socket.assigns.ctx, :session) do
+      {:ok, session} when is_pid(session) ->
+        DshBeam.Session.append(session, %{"role" => "error", "content" => "stopped by user"})
+
+      _ ->
+        :ok
+    end
+
+    {:noreply,
+     socket |> assign(chat_busy: false, chat_task: nil, chat_started_at: nil) |> refresh()}
   end
 
   def handle_event("clear_chat", _params, socket) do
@@ -191,22 +269,73 @@ defmodule DshBeamWeb.ConsoleLive do
     {:noreply, socket |> assign(chat_error: nil) |> refresh()}
   end
 
+  def handle_event("workspace_create", %{"repo" => repo} = params, socket) do
+    result =
+      with {:ok, workspace} <- workspace_pid(socket.assigns.ctx),
+           repo when is_binary(repo) and repo != "" <- repo do
+        title =
+          case params["title"] do
+            "" -> nil
+            nil -> nil
+            t -> t
+          end
+
+        opts = if title, do: [title: title], else: []
+        DshBeam.Workspace.open_session(workspace, repo, opts)
+      else
+        :not_found -> {:error, :no_workspace_plugin}
+        _ -> {:error, :empty_repo}
+      end
+
+    {:noreply, socket |> assign(workspace_result: result) |> refresh()}
+  end
+
+  def handle_event("workspace_switch", %{"session" => session_key}, socket) do
+    session = session_key |> Base.decode64!() |> :erlang.binary_to_term([:safe])
+    :ok = switch_session(socket.assigns.runtime, session)
+    {:noreply, refresh(socket)}
+  end
+
+  def handle_event("workspace_close", %{"session" => session_key}, socket) do
+    session = session_key |> Base.decode64!() |> :erlang.binary_to_term([:safe])
+
+    result =
+      with {:ok, workspace} <- workspace_pid(socket.assigns.ctx) do
+        DshBeam.Workspace.close_session(workspace, session)
+      end
+
+    {:noreply, socket |> assign(workspace_result: result) |> refresh()}
+  end
+
   def handle_event("llm_apply", params, socket) do
+    # The Models surface. A blank credential field keeps the current key (as
+    # before). Model/base_url/credential are also persisted to the settings
+    # store so they survive a restart. The running provider is re-armed
+    # in-memory via configure/2 (dynamic reconfiguration — no re-mount), while
+    # the store carries the value to the next boot.
+    base_url = params["base_url"] || "https://api.deepseek.com"
+    model = params["model"] || "deepseek-chat"
+
+    credential =
+      case {params["credential_mode"], params["credential_value"]} do
+        {_mode, ""} -> nil
+        {"literal", value} -> {:literal, value}
+        {_mode, value} -> {:env, value}
+      end
+
     result =
       case DshBeam.Context.get(socket.assigns.ctx, :llm) do
         {:ok, llm} ->
-          opts = [base_url: params["base_url"], model: params["model"]]
+          opts = [base_url: base_url, model: model]
+          opts = if credential, do: Keyword.put(opts, :credential, credential), else: opts
+          configure_result = DshBeam.Llm.configure(llm, opts)
+          persisted = persist_llm(socket.assigns.runtime, base_url, model, credential)
 
-          # a blank credential field keeps the current key (the harness's
-          # "leave blank to keep the current key")
-          opts =
-            case {params["credential_mode"], params["credential_value"]} do
-              {_mode, ""} -> opts
-              {"literal", value} -> Keyword.put(opts, :credential, {:literal, value})
-              {_mode, value} -> Keyword.put(opts, :credential, {:env, value})
-            end
-
-          DshBeam.Llm.configure(llm, opts)
+          case {configure_result, persisted} do
+            {:ok, true} -> {:ok, "saved + persisted (next boot applies the stored config)"}
+            {:ok, false} -> {:error, :persist_failed}
+            other -> other
+          end
 
         :not_found ->
           {:error, :no_llm_plugin}
@@ -216,7 +345,7 @@ defmodule DshBeamWeb.ConsoleLive do
   end
 
   def handle_event("settings_save", params, socket) do
-    plugin = String.to_existing_atom(params["plugin"])
+    plugin = decode_plugin!(params["plugin"])
     store = DshBeam.Runtime.settings(socket.assigns.runtime)
     values = params["settings"] || %{}
 
@@ -240,7 +369,115 @@ defmodule DshBeamWeb.ConsoleLive do
       id -> DshBeam.Runtime.restart(socket.assigns.runtime, id)
     end
 
-    {:noreply, refresh(socket)}
+    {:noreply,
+     socket
+     |> assign(plugin_drafts: Map.delete(socket.assigns.plugin_drafts, plugin))
+     |> assign(plugins_result: "saved #{friendly_plugin_name(plugin)}")
+     |> refresh()}
+  end
+
+  def handle_event("open_settings", _params, socket) do
+    {:noreply, socket |> assign(settings_open: true, settings_section: :models) |> refresh()}
+  end
+
+  def handle_event("close_settings", _params, socket) do
+    {:noreply, assign(socket, settings_open: false) |> refresh()}
+  end
+
+  def handle_event("toggle_sidebar", _params, socket) do
+    {:noreply,
+     assign(socket, sidebar_collapsed: not socket.assigns.sidebar_collapsed) |> refresh()}
+  end
+
+  def handle_event("browse_dir", _params, socket) do
+    root = Path.expand(socket.assigns.workspace_repo || ".")
+
+    {:noreply,
+     socket
+     |> assign(picker_open: true, picker_path: root, picker_entries: list_dirs(root))
+     |> refresh()}
+  end
+
+  def handle_event("picker_nav", %{"path" => path}, socket) do
+    {:noreply, socket |> assign(picker_path: path, picker_entries: list_dirs(path)) |> refresh()}
+  end
+
+  def handle_event("picker_select", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(workspace_repo: socket.assigns.picker_path, picker_open: false)
+     |> refresh()}
+  end
+
+  def handle_event("picker_cancel", _params, socket) do
+    {:noreply, assign(socket, picker_open: false) |> refresh()}
+  end
+
+  def handle_event("view_tab", %{"tab" => tab}, socket) do
+    view_tab = if tab == "trajectory", do: :trajectory, else: :chat
+    {:noreply, assign(socket, view_tab: view_tab) |> refresh()}
+  end
+
+  def handle_event("plugin_toggle", %{"plugin" => plugin_str}, socket) do
+    plugin = decode_plugin!(plugin_str)
+    open = socket.assigns.plugin_open
+
+    open =
+      if MapSet.member?(open, plugin),
+        do: MapSet.delete(open, plugin),
+        else: MapSet.put(open, plugin)
+
+    {:noreply, assign(socket, plugin_open: open) |> refresh()}
+  end
+
+  def handle_event("plugin_edit", %{"plugin" => plugin_str, "settings" => settings}, socket) do
+    plugin = decode_plugin!(plugin_str)
+    drafts = Map.put(socket.assigns.plugin_drafts, plugin, settings)
+    {:noreply, assign(socket, plugin_drafts: drafts) |> refresh()}
+  end
+
+  def handle_event("plugin_discard", %{"plugin" => plugin_str}, socket) do
+    plugin = decode_plugin!(plugin_str)
+    drafts = Map.delete(socket.assigns.plugin_drafts, plugin)
+    {:noreply, assign(socket, plugin_drafts: drafts) |> refresh()}
+  end
+
+  def handle_event("preset_default", %{"preset" => id}, socket) do
+    store = DshBeam.Runtime.settings(socket.assigns.runtime)
+    :ok = DshBeam.Settings.put(store, DshBeam.Ui.Panel.General, :default_preset, id)
+    {:noreply, socket |> assign(presets_result: "default = #{id}") |> refresh()}
+  end
+
+  def handle_event("preset_apply", %{"preset" => id}, socket) do
+    entries = preset_entries_for(id, socket.assigns.custom_presets)
+    specs = socket.assigns.runtime |> current_specs() |> Enum.reject(&(&1.id in @reseed_ids))
+
+    result = DshBeam.Runtime.reconcile(socket.assigns.runtime, specs ++ entries)
+
+    {:noreply,
+     socket |> assign(presets_result: "applied #{id} · #{inspect(result)}") |> refresh()}
+  end
+
+  def handle_event("preset_copy", %{"preset" => id, "name" => name}, socket) do
+    name = name |> to_string() |> String.trim()
+    new_id = if name == "", do: id <> "-copy", else: name
+    entries = preset_entries_for(id, socket.assigns.custom_presets)
+
+    custom =
+      socket.assigns.custom_presets ++
+        [%{id: new_id, name: name, desc: "copy of #{id}", entries: entries}]
+
+    {:noreply, assign(socket, custom_presets: custom) |> refresh()}
+  end
+
+  def handle_event("preset_delete", %{"preset" => id}, socket) do
+    custom = Enum.reject(socket.assigns.custom_presets, &(&1.id == id))
+    {:noreply, assign(socket, custom_presets: custom) |> refresh()}
+  end
+
+  def handle_event("settings_tab", %{"section" => section_key}, socket) do
+    section = String.to_existing_atom(section_key)
+    {:noreply, assign(socket, settings_section: section) |> refresh()}
   end
 
   defp entry_id_for_plugin(runtime, plugin) do
@@ -300,8 +537,16 @@ defmodule DshBeamWeb.ConsoleLive do
     # Only a hard failure (the loop fiber died mid-call) surfaces here.
     socket =
       case result do
-        {:ok, _answer, _trace} -> assign(socket, chat_busy: false)
-        {:error, reason} -> assign(socket, chat_busy: false, chat_error: inspect(reason))
+        {:ok, _answer, _trace} ->
+          assign(socket, chat_busy: false, chat_task: nil, chat_started_at: nil)
+
+        {:error, reason} ->
+          assign(socket,
+            chat_busy: false,
+            chat_task: nil,
+            chat_started_at: nil,
+            chat_error: inspect(reason)
+          )
       end
 
     {:noreply, refresh(socket)}
@@ -323,13 +568,202 @@ defmodule DshBeamWeb.ConsoleLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <main>
-      <%= DshBeam.Ui.render_slot(:panels, assigns) %>
-    </main>
+    <div
+      class="frame"
+      style={"grid-template-columns: " <> (if @sidebar_collapsed, do: "56px", else: "280px") <> " minmax(0, 1fr) 280px"}
+    >
+      <div class="frame-sidebar">
+        <div class={"sidebar-root #{if @sidebar_collapsed, do: "collapsed"}"}>
+          <div class="logo-row">
+            <%= if @sidebar_collapsed do %>
+              <button class="toggle" phx-click="toggle_sidebar" aria-label="expand sidebar">☰</button>
+            <% else %>
+              <span class="brand">dsh-beam</span>
+              <button class="toggle" phx-click="toggle_sidebar" aria-label="collapse sidebar">☰</button>
+            <% end %>
+          </div>
+          <%= unless @sidebar_collapsed do %>
+            <div class="region">
+              <%= DshBeam.Ui.render_slot(:sidebar, assigns) %>
+            </div>
+            <div class="foot">
+              <button class="settings-trigger" phx-click="open_settings">settings</button>
+            </div>
+          <% end %>
+        </div>
+      </div>
+
+      <div class="frame-center">
+        <div class="conv-root" data-phase="active">
+          <div class="conv-header">
+            <div class="title-row">
+              <div class="crumbs"><span class="crumb crumb-current">console</span></div>
+            </div>
+            <div class="tabs">
+              <button
+                class={"tab #{if @view_tab == :chat, do: "tab-active"}"}
+                phx-click="view_tab"
+                phx-value-tab="chat"
+              >
+                Chat
+              </button>
+              <button
+                class={"tab #{if @view_tab == :trajectory, do: "tab-active"}"}
+                phx-click="view_tab"
+                phx-value-tab="trajectory"
+              >
+                Trajectory
+              </button>
+            </div>
+          </div>
+          <div class="conv-scroll" id="conv-scroll" phx-hook="ScrollFollow">
+            <%= if @workspace_active do %>
+              <%= DshBeam.Ui.render_slot(:conversation, assigns, key: @view_tab) %>
+            <% else %>
+              <div class="conversation-empty">
+                <p class="empty-title">no workspace open</p>
+                <p class="muted">pick a folder in the sidebar and press “+ new session” to start a conversation</p>
+              </div>
+            <% end %>
+            <div class="composer-seat">
+              <%= if @workspace_active do %>
+                <div class="to-bottom-wrap">
+                  <button type="button" class="to-bottom" aria-label="scroll to bottom">▾</button>
+                </div>
+                <form class="composer" phx-submit="ask">
+                  <textarea
+                    name="text"
+                    id="composer-textarea"
+                    phx-hook="AutoGrow"
+                    rows="1"
+                    placeholder="run a task (drives the agent loop)"
+                    disabled={@chat_busy}
+                  ><%= @chat_text %></textarea>
+                  <div class="composer-actions">
+                    <%= if @chat_busy do %>
+                      <button type="button" class="composer-send" phx-click="stop_chat">stop</button>
+                    <% else %>
+                      <button type="submit" class="composer-send">send</button>
+                    <% end %>
+                  </div>
+                </form>
+              <% else %>
+                <div class="composer composer-inert">
+                  <textarea disabled placeholder="open a workspace to start"></textarea>
+                  <button type="button" disabled class="composer-send">send</button>
+                </div>
+              <% end %>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="frame-details">
+        <%= DshBeam.Ui.render_slot(:details, assigns) %>
+      </div>
+    </div>
+
+    <%= if @settings_open do %>
+      <div class="settings-overlay">
+        <div class="settings-backdrop" phx-click="close_settings"></div>
+        <div class="settings-panel">
+          <nav class="settings-nav">
+            <%= for section <- @settings_sections do %>
+              <button
+                phx-click="settings_tab"
+                phx-value-section={section.key}
+                class={"settings-nav-item #{if section.key == @settings_section, do: "active"}"}
+              >
+                <%= section.label %>
+              </button>
+            <% end %>
+            <button phx-click="close_settings" class="settings-nav-item close">close</button>
+          </nav>
+          <div class="settings-content">
+            <%= DshBeam.Ui.render_slot(:settings_section, assigns, key: @settings_section) %>
+          </div>
+        </div>
+      </div>
+    <% end %>
+
+    <%= if @picker_open do %>
+      <div class="settings-overlay">
+        <div class="settings-backdrop" phx-click="picker_cancel"></div>
+        <div class="settings-panel picker-panel">
+          <div class="picker-head">
+            <span class="picker-title">choose a workspace folder</span>
+            <button phx-click="picker_cancel">cancel</button>
+          </div>
+          <div class="picker-path"><code><%= @picker_path %></code></div>
+          <div class="picker-list">
+            <button class="picker-entry" phx-click="picker_nav" phx-value-path={Path.dirname(@picker_path)}>
+              ../ (up)
+            </button>
+            <%= for dir <- @picker_entries do %>
+              <button class="picker-entry" phx-click="picker_nav" phx-value-path={dir.path}>
+                📁 <%= dir.name %>
+              </button>
+            <% end %>
+            <%= if @picker_entries == [] do %>
+              <p class="muted">no subdirectories here</p>
+            <% end %>
+          </div>
+          <div class="picker-foot">
+            <button class="new-session-btn" phx-click="picker_select">select this folder</button>
+          </div>
+        </div>
+      </div>
+    <% end %>
     """
   end
 
   # -- internals --
+
+  # Re-point the :session binding at a workspace session by reconfiguring the
+  # session entry and reconciling — the provider-swap path of the substrate
+  # (the guard deactivates dependents first, then the new session mounts).
+  defp switch_session(runtime, session) do
+    specs =
+      runtime
+      |> current_specs()
+      |> Enum.map(fn entry ->
+        if entry.id == :session, do: %{entry | config: [session: session]}, else: entry
+      end)
+
+    DshBeam.Runtime.reconcile(runtime, specs)
+  end
+
+  defp workspace_pid(ctx) do
+    case DshBeam.Context.get(ctx, :workspace) do
+      {:ok, workspace} when is_pid(workspace) -> {:ok, workspace}
+      _ -> :not_found
+    end
+  end
+
+  # Subdirectories of a path, sorted by name — the server-side folder picker
+  # browses the local filesystem and returns real absolute paths (the browser
+  # File System Access API cannot expose a picked folder's path).
+  defp list_dirs(path) do
+    case File.ls(path) do
+      {:ok, entries} ->
+        entries
+        |> Enum.filter(&File.dir?(Path.join(path, &1)))
+        |> Enum.map(fn name -> %{name: name, path: Path.join(path, name)} end)
+        |> Enum.sort_by(& &1.name)
+
+      {:error, _} ->
+        []
+    end
+  end
+
+  defp persist_llm(runtime, base_url, model, credential) do
+    store = DshBeam.Runtime.settings(runtime)
+
+    :ok == DshBeam.Settings.put(store, DshBeam.Llm.Plugin, :base_url, base_url) and
+      :ok == DshBeam.Settings.put(store, DshBeam.Llm.Plugin, :model, model) and
+      (is_nil(credential) or
+         :ok == DshBeam.Settings.put(store, DshBeam.Llm.Plugin, :credential, credential))
+  end
 
   defp loop_pid(runtime) do
     case DshBeam.Runtime.entries(runtime) do
@@ -386,6 +820,11 @@ defmodule DshBeamWeb.ConsoleLive do
         _ -> {"env", "DEEPSEEK_API_KEY"}
       end
 
+    store = DshBeam.Runtime.settings(runtime)
+    default_preset = resolve_default_preset(store)
+    workspace_sessions = workspace_sessions(socket.assigns.ctx)
+    workspace_active = Enum.any?(workspace_sessions, & &1.current)
+
     assign(socket,
       rows: rows,
       bindings: bindings,
@@ -394,15 +833,28 @@ defmodule DshBeamWeb.ConsoleLive do
       credential_env: credential_env,
       chat_log: chat_log(socket.assigns.ctx),
       todos: todos(socket.assigns.ctx),
-      inventory: build_inventory(runtime, entries)
+      trajectory: trajectory(socket.assigns.ctx),
+      workspace_sessions: workspace_sessions,
+      workspace_active: workspace_active,
+      inventory:
+        build_inventory(
+          runtime,
+          entries,
+          socket.assigns.plugin_open,
+          socket.assigns.plugin_drafts
+        ),
+      presets: roster(socket.assigns.custom_presets, default_preset),
+      default_preset: default_preset,
+      workspace_default_root: resolve_workspace_root(store),
+      settings_sections: settings_sections()
     )
   end
 
   # The todo list is a projection of the session: the latest todo_write event
   # (whole-list, last-write-wins), nil before the first write.
   defp todos(ctx) do
-    case DshBeam.Context.get(ctx, :session) do
-      {:ok, session} when is_pid(session) ->
+    case alive_session(ctx) do
+      {:ok, session} ->
         session
         |> DshBeam.Session.all()
         |> Enum.filter(&(&1["role"] == "todo_write"))
@@ -421,8 +873,8 @@ defmodule DshBeamWeb.ConsoleLive do
   # The chat pane renders the session log (the single source of truth), so the
   # conversation survives a page refresh and tool calls appear chronologically.
   defp chat_log(ctx) do
-    case DshBeam.Context.get(ctx, :session) do
-      {:ok, session} when is_pid(session) ->
+    case alive_session(ctx) do
+      {:ok, session} ->
         # idempotent: once subscribed, appends fan out {:dsh_session_event, ...}
         # and re-render the pane incrementally (reactive coeffect, not polling)
         _ = DshBeam.Session.subscribe(session)
@@ -436,17 +888,201 @@ defmodule DshBeamWeb.ConsoleLive do
     end
   end
 
-  defp chat_entry(%{"role" => "user", "content" => content}), do: {"user", content}
-  defp chat_entry(%{"role" => "assistant", "content" => content}), do: {"assistant", content}
+  defp chat_entry(%{"role" => "user", "content" => content}),
+    do: %{kind: :user, content: content}
+
+  defp chat_entry(%{"role" => "assistant", "content" => content}),
+    do: %{kind: :assistant, content: content}
 
   defp chat_entry(%{"role" => "tool_call", "name" => name, "arguments" => args}),
-    do: {"tool_call", "#{name} #{inspect(args)}"}
+    do: %{kind: :tool_call, name: name, command: tool_command(name, args)}
 
   defp chat_entry(%{"role" => "tool_result", "name" => name, "content" => content}),
-    do: {"tool_result", "#{name} -> #{content}"}
+    do: %{kind: :tool_result, name: name, content: content}
 
-  defp chat_entry(%{"role" => "error", "content" => content}), do: {"error", content}
-  defp chat_entry(other), do: {"event", inspect(other)}
+  defp chat_entry(%{"role" => "error", "content" => content}),
+    do: %{kind: :error, content: content}
+
+  defp chat_entry(other), do: %{kind: :event, content: inspect(other)}
+
+  # The readable invocation of a tool call: the bash command verbatim, and any
+  # other tool's arguments as a compact term (instead of the raw map inspect).
+  defp tool_command(_name, args) when is_map(args) do
+    case Map.get(args, "command") do
+      command when is_binary(command) -> command
+      _ -> inspect(args)
+    end
+  end
+
+  defp tool_command(_name, args), do: inspect(args)
+
+  # The trajectory is the same session log grouped by turn: a "user" event opens
+  # a turn; the tool calls, results, and the answer that follow belong to it.
+  defp trajectory(ctx) do
+    case alive_session(ctx) do
+      {:ok, session} ->
+        session
+        |> DshBeam.Session.all()
+        |> group_turns()
+        |> Enum.map(fn turn -> Enum.map(turn, &chat_entry/1) end)
+
+      _ ->
+        []
+    end
+  end
+
+  # The current :session, only while its process is alive. Closing a session
+  # (e.g. the current workspace session) kills its pid, but the :session
+  # binding can briefly keep the stale pid — reading or subscribing to it
+  # would raise :noproc and crash the console.
+  defp alive_session(ctx) do
+    case DshBeam.Context.get(ctx, :session) do
+      {:ok, session} when is_pid(session) ->
+        if Process.alive?(session), do: {:ok, session}, else: :dead
+
+      _ ->
+        :none
+    end
+  end
+
+  defp group_turns(events) do
+    {turns, current} =
+      Enum.reduce(events, {[], []}, fn event, {turns, current} ->
+        if event["role"] == "user" do
+          {[Enum.reverse(current) | turns], [event]}
+        else
+          {turns, [event | current]}
+        end
+      end)
+
+    (turns ++ [Enum.reverse(current)])
+    |> Enum.reject(&(&1 == []))
+    |> Enum.reverse()
+  end
+
+  # The workspace sidebar: every workspace session, with its current/current?
+  # flag and an encoded key for the switch/close events.
+  defp workspace_sessions(ctx) do
+    with {:ok, workspace} when is_pid(workspace) <- DshBeam.Context.get(ctx, :workspace),
+         sessions when is_map(sessions) <- safe_sessions(workspace) do
+      current =
+        case DshBeam.Context.get(ctx, :session) do
+          {:ok, session} when is_pid(session) -> session
+          _ -> nil
+        end
+
+      sessions
+      |> Enum.map(fn {session, meta} ->
+        %{
+          session: session,
+          session_key: encode_id(session),
+          title: meta.title || inspect(session),
+          cwd: meta.cwd,
+          current: session == current
+        }
+      end)
+      |> Enum.sort_by(& &1.title)
+    else
+      _ -> []
+    end
+  end
+
+  defp safe_sessions(workspace) do
+    if Process.alive?(workspace) do
+      DshBeam.Workspace.all_sessions(workspace)
+    else
+      %{}
+    end
+  catch
+    :exit, _ -> %{}
+  end
+
+  # The settings modal's left nav: every registered settings section, sorted by
+  # order, with a human label (the ui_slot DSL has no label field, so sections
+  # carry a `key` and the shell maps it here).
+  defp settings_sections do
+    labels = %{
+      general: "General",
+      presets: "Agent presets",
+      models: "Models",
+      plugins: "Plugins",
+      composition: "Composition",
+      bindings: "Bindings",
+      events: "Events",
+      creator: "Creator"
+    }
+
+    DshBeam.Ui.Registry.for_slot(:settings_section)
+    |> Enum.sort_by(& &1.order)
+    |> Enum.map(fn entry ->
+      %{key: entry.key, label: Map.get(labels, entry.key, inspect(entry.key))}
+    end)
+  end
+
+  # -- agent presets (reference ui-agent-preset) --
+
+  defp panel_entries do
+    Enum.filter(@demo_entries, &String.starts_with?(to_string(&1.id), "panel_"))
+  end
+
+  defp core_entries(ids) do
+    Enum.filter(@demo_entries, &(&1.id in ids))
+  end
+
+  defp builtin_presets do
+    [
+      %{
+        id: "demo",
+        name: "Demo",
+        desc: "Full console: session, workspace, llm, shell, tools, loop",
+        entries: @demo_entries
+      },
+      %{
+        id: "agent",
+        name: "Agent",
+        desc: "Session + llm + adapter + shell + bash + loop",
+        entries: panel_entries() ++ core_entries([:session, :llm, :adapter, :shell, :bash, :loop])
+      },
+      %{
+        id: "chat",
+        name: "Chat",
+        desc: "Session + llm + adapter + loop (no tools)",
+        entries: panel_entries() ++ core_entries([:session, :llm, :adapter, :loop])
+      }
+    ]
+  end
+
+  defp roster(custom_presets, default_preset) do
+    builtin = Enum.map(builtin_presets(), &Map.put(&1, :builtin, true))
+    custom = Enum.map(custom_presets, &Map.put(&1, :builtin, false))
+
+    (builtin ++ custom)
+    |> Enum.map(&Map.put(&1, :default, &1.id == default_preset))
+  end
+
+  defp preset_entries_for(id, custom_presets) do
+    case Enum.find(custom_presets, &(&1.id == id)) do
+      nil ->
+        Enum.find_value(builtin_presets(), fn p -> if p.id == id, do: p.entries end) || []
+
+      preset ->
+        preset.entries
+    end
+  end
+
+  defp resolve_default_preset(store) do
+    case DshBeam.Settings.get(store, DshBeam.Ui.Panel.General, :default_preset) do
+      {:ok, value} -> to_string(value)
+      _ -> "demo"
+    end
+  end
+
+  defp resolve_workspace_root(store) do
+    case DshBeam.Settings.get(store, DshBeam.Ui.Panel.General, :workspace_default_root) do
+      {:ok, value} -> to_string(value)
+      _ -> "."
+    end
+  end
 
   defp module_name(source) do
     case Regex.run(~r/^\s*defmodule\s+([A-Z]\w*)/, source) do
@@ -455,40 +1091,89 @@ defmodule DshBeamWeb.ConsoleLive do
     end
   end
 
-  defp build_inventory(runtime, entries) do
+  defp build_inventory(runtime, entries, plugin_open, plugin_drafts) do
     store = DshBeam.Runtime.settings(runtime)
     mounted = MapSet.new(entries, fn {_id, rec} -> rec.spec.plugin end)
 
     DshBeam.Plugin.Inventory.installed()
     |> Enum.map(fn entry ->
+      plugin = entry.plugin
+      drafts = Map.get(plugin_drafts, plugin, %{})
+
       %{
-        plugin: entry.plugin,
-        name: entry.plugin |> inspect() |> String.replace("Elixir.", ""),
-        enabled: MapSet.member?(mounted, entry.plugin),
-        settings: Enum.map(entry.settings, &setting_view(store, entry.plugin, &1))
+        plugin: plugin,
+        name: friendly_plugin_name(plugin),
+        enabled: MapSet.member?(mounted, plugin),
+        open: MapSet.member?(plugin_open, plugin),
+        dirty: map_size(drafts) > 0,
+        desc: plugin_desc(plugin),
+        settings: Enum.map(entry.settings, &setting_view(store, plugin, &1, drafts))
       }
     end)
+    |> Enum.sort_by(& &1.name)
   end
 
-  defp setting_view(store, plugin, setting) do
+  defp setting_view(store, plugin, setting, drafts) do
     value =
       case DshBeam.Settings.get(store, plugin, setting.name) do
         {:ok, value} -> value
         _ -> setting.default
       end
 
+    display = setting_display(setting.type, value)
+
     %{
       name: setting.name,
       type: setting.type,
       doc: setting.doc,
       value: value,
-      display: setting_display(setting.type, value)
+      display: display,
+      text: Map.get(drafts, to_string(setting.name), display)
     }
   end
 
   defp setting_display(:credential, {:env, name}), do: "env:" <> name
   defp setting_display(:credential, {:literal, _key}), do: "literal:"
   defp setting_display(_type, value), do: to_string(value)
+
+  # A short human label for the card header and save notice; falls back to the
+  # module's own name when the plugin is not one of the known hosts.
+  @plugin_names %{
+    DshBeam.Shell.Plugin => "Shell",
+    DshBeam.Agent.Loop => "Agent Loop",
+    DshBeam.Tool.Bash => "Tool: Bash",
+    DshBeam.Tool.Fs => "Tool: Files",
+    DshBeam.Tool.Todo => "Tool: Todo",
+    DshBeam.Workspace => "Workspace",
+    DshBeam.Llm.Plugin => "LLM"
+  }
+
+  defp friendly_plugin_name(plugin) do
+    Map.get_lazy(@plugin_names, plugin, fn ->
+      plugin |> inspect() |> String.replace("Elixir.", "")
+    end)
+  end
+
+  @plugin_descriptions %{
+    DshBeam.Shell.Plugin => "Command timeout and output cap per stream",
+    DshBeam.Agent.Loop => "Max model→tool round-trips",
+    DshBeam.Tool.Todo => "The agent's plan/todo list",
+    DshBeam.Workspace => "Default root for new session worktrees",
+    DshBeam.Llm.Plugin => "Provider, model, and credential"
+  }
+
+  defp plugin_desc(plugin) do
+    Map.get(@plugin_descriptions, plugin, "Configure this plugin's settings")
+  end
+
+  # Decode an inspect/1 or to_string/1 form of a module back to the module atom.
+  # Both "DshBeam.Shell.Plugin" (inspect) and "Elixir.DshBeam.Shell.Plugin"
+  # (to_string) reach the loaded module atom.
+  defp decode_plugin!(str) do
+    str = to_string(str)
+    str = if String.starts_with?(str, "Elixir."), do: str, else: "Elixir." <> str
+    String.to_existing_atom(str)
+  end
 
   defp os_pid_for(%{plugin: DshBeam.Sandbox.Plugin, pid: pid}) when is_pid(pid) do
     # the adapter may be mid-crash when the event refresh runs: never let a

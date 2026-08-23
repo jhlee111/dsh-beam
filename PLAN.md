@@ -408,3 +408,73 @@ hacks.
   "asset" the user asked for, named in the harness's own domain vocabulary
   ("plugin"), not "asset".
 - 114 tests.
+
+## 25. Milestone 14 — v0.1.0: a usable agent harness (complete)
+
+**Goal** (tracked as a same-session goal): make dsh-beam usable like Claude
+Code/Codex — workspaces, chat, trajectory, settings — as plugins, verified
+end-to-end from the console.
+
+### Done (round 1)
+
+- `DshBeam.Shell.Plugin.run_in/4` — run a command in a given `cwd`
+  (`System.cmd` `cd:`); the mechanism behind per-session worktree isolation.
+- `DshBeam.Git` — `repo_root/1`, `worktree_add/3`, `worktree_remove/2`,
+  `branch/1`, `worktree_list/1` over `git(1)`.
+- `DshBeam.Session.header/1` + `set_header/2` — session identity (`title`,
+  `cwd`) on both Memory and File providers.
+- `DshBeam.Workspace` plugin (`provide :workspace`) — groups sessions by `cwd`;
+  `peers/2` returns the other sessions in a directory; `relay/3` appends a
+  `peer_message` to a target session's log (refused across workspaces). The
+  minimal port of the reference `agent-team` peer mailbox.
+- 126 tests.
+
+### Done (round 2 — v0.1.0 complete)
+
+1. **Worktree sessions** — `Workspace.open_session/2` resolves the repo root,
+   checks out a `session/<id>` worktree, and starts the session log in it
+   (`header.cwd` = the checkout); `close_session/2` runs `git worktree remove`
+   and stops the log. `DshBeam.Git` runs `git(1)` unlinked so a trapping fiber
+   survives the subprocess exit. `Tool.Bash`/`Tool.Fs` now `need(:session)` and
+   run in the current session's `cwd` (session header), falling back to the fs
+   config root only when no session is present. ADR-0016.
+2. **Workspace sidebar** — `DshBeam.Ui.Panel.Workspace` lists sessions, creates
+   one over a repository, and switches/closes. Switching re-points `:session`
+   by reconfiguring the session entry (`config: [session: pid]`) and
+   reconciling — the substrate's provider-swap path (the guard deactivates
+   dependents first, then the new session mounts). The chat/todo/trajectory
+   panes bind to the *current* session automatically.
+3. **Trajectory view** — `DshBeam.Ui.Panel.Trajectory` projects the session log
+   grouped by turn (a `user` event opens a turn; tool calls, results, and the
+   answer follow) — the reference `ui-trajectory`, as a plugin.
+4. **Settings surface** — model selection (llm settings) + the plugin inventory
+   + per-plugin typed settings (shell limits, loop budget, workspace
+   `default_root`) are editable from the console, layered over defaults via
+   `DshBeam.Settings`.
+5. **End-to-end verification** — a console test drives the full flow: create a
+   workspace session → switch to it → run a scripted chat task → assert the
+   trajectory turn → save a setting override. Plus ADR-0016 and
+   `CHANGELOG.md` v0.1.0 release notes.
+- Also fixed: the plugin inventory no longer depends on `:code.all_loaded()`
+  order (it enumerates the app's modules + runtime-loaded creator plugins), so
+  a bare console renders its panels deterministically.
+- 140 tests.
+
+### Design decisions to record (when implemented)
+
+- **Session = git worktree** — each session checks out its own directory/branch,
+  so two sessions over one repository never clobber each other (the reference
+  `agent-team` documents "shared checkout" as an unsolved limitation; this is
+  our fix). Non-git directories: open question (git init vs refuse).
+- **Branch strategy** — per-session `session/<id>` branch (open question:
+  user-supplied branch vs auto-generated).
+- **Merge/commit** — v0.1.0 stops at *isolation*; merging session work back is
+  deferred.
+
+### Elixir idiom recorded (path canonicalization)
+
+OTP 28 has no `realpath/1`; `Path.expand/1` only resolves `..`/`.`. macOS
+resolves `/var` → `/private/var`, so *comparing path strings* is brittle. The
+idiom used: assert by **filesystem effect** (e.g. `File.exists?`), not by
+`pwd` string equality; resolve symlinks via `:file.read_link_all/1` only when a
+canonical path is truly required.

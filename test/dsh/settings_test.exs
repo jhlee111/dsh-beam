@@ -37,6 +37,23 @@ defmodule DshBeam.SettingsTest do
     assert {:error, :invalid_value} =
              DshBeam.Settings.put(store, SettingsSample, :api_key, "sk-bare")
   end
+
+  test "overrides persist to disk and reload on a fresh store (the Models surface guarantee)" do
+    dir = Path.join(System.tmp_dir!(), "dsh_settings_#{System.unique_integer([:positive])}")
+    path = Path.join(dir, "settings.json")
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    # first store persists model/credential
+    {:ok, store} = DshBeam.Settings.start_link(path: path)
+    assert :ok = DshBeam.Settings.put(store, SettingsSample, :command_timeout_ms, 9999)
+    assert :ok = DshBeam.Settings.put(store, SettingsSample, :api_key, {:env, "MY_KEY"})
+    assert File.exists?(path)
+
+    # a fresh store with the same path reloads them (a console restart)
+    {:ok, fresh} = DshBeam.Settings.start_link(path: path)
+    assert {:ok, 9999} = DshBeam.Settings.get(fresh, SettingsSample, :command_timeout_ms)
+    assert {:ok, {:env, "MY_KEY"}} = DshBeam.Settings.get(fresh, SettingsSample, :api_key)
+  end
 end
 
 defmodule SettingsSample do
