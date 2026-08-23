@@ -22,4 +22,15 @@ defmodule DshBeam.Session do
 
   @doc "The number of appended events."
   def count(session), do: GenServer.call(session, :count)
+
+  @doc "Truncate the log, dropping every event (a fresh conversation)."
+  def clear(session), do: GenServer.call(session, :clear)
+
+  @doc """
+  Subscribe the calling process to session appends. Each append fans out
+  {:dsh_session_event, event} to every subscriber; the subscription is removed
+  when the subscriber dies. This is the session as a reactive coeffect: an
+  observer re-renders as the conversation grows, instead of polling.
+  """
+  def subscribe(session), do: GenServer.call(session, :subscribe)
 end

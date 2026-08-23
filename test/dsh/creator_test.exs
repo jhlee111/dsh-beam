@@ -94,6 +94,30 @@ defmodule DshBeam.CreatorTest do
     assert DshBeam.Runtime.entries(runtime) == %{}
   end
 
+  test "export_plugin writes a deployable script that re-mounts the composition" do
+    {:ok, runtime} = DshBeam.Runtime.start_link([], [])
+
+    # define a creator-written plugin, then export the composition + its source
+    {:ok, _mod} = DshBeam.Creator.define(runtime, @provider_v1)
+
+    path = Path.join(System.tmp_dir!(), "dsh_export_#{System.unique_integer([:positive])}.exs")
+    on_exit(fn -> File.rm(path) end)
+
+    assert {:ok, ^path} =
+             DshBeam.Creator.export_plugin(runtime, path, %{MadeValueProvider: @provider_v1})
+
+    # the export embeds both the plugin source and the composition entry
+    content = File.read!(path)
+    assert content =~ "defmodule MadeValueProvider"
+    assert content =~ "provide :made_value, value: 42"
+    assert content =~ "DshBeam.Runtime.start_link"
+
+    # importing it boots a fresh runtime with the same plugin mounted
+    assert {:ok, new_runtime} = DshBeam.Creator.import_plugin(path)
+    ctx = DshBeam.Runtime.context(new_runtime)
+    assert {:ok, 42} = DshBeam.Context.get(ctx, :made_value)
+  end
+
   defp wait_until(fun), do: wait_until(fun, 200)
 
   defp wait_until(fun, tries) when is_function(fun, 0) do

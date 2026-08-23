@@ -26,3 +26,6 @@ dsh-*.tar
 # elixir/lib; source lives there, so re-include it for this project.
 !lib/
 !lib/**
+
+# Local hex package cache (sandboxed fetch keeps it inside the workspace).
+/.hex/

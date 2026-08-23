@@ -48,6 +48,14 @@ defmodule DshBeam.Context do
   def provide(ctx, key, value), do: GenServer.call(ctx, {:provide, key, value})
 
   @doc """
+  Subscribe the calling process to the context event stream. Every state
+  change logged by the context (registrations, activations, deactivations,
+  withdrawals, fiber state transitions) is fanned out as {:dsh_event, event}.
+  The subscription is removed when the subscriber dies.
+  """
+  def subscribe(ctx), do: GenServer.call(ctx, :subscribe)
+
+  @doc """
   Register a raw inverse effect for the calling fiber. The closure
   (state -> state) joins the fiber's LIFO accumulator and runs when its
   bindings are withdrawn — after dependents drained, even when the fiber's
@@ -80,6 +88,7 @@ defmodule DshBeam.Context do
       fibers: %{},
       monitors: %{},
       pending: %{},
+      subscribers: %{},
       deactivate_timeout: Keyword.get(opts, :deactivate_timeout, 1000),
       history: []
     }
@@ -88,10 +97,23 @@ defmodule DshBeam.Context do
   end
 
   @impl true
+  def handle_call(:subscribe, {owner, _tag}, state) do
+    case state.subscribers do
+      %{^owner => _ref} ->
+        {:reply, :ok, state}
+
+      _ ->
+        ref = Process.monitor(owner)
+        {:reply, :ok, %{state | subscribers: Map.put(state.subscribers, owner, ref)}}
+    end
+  end
+
+  @impl true
   def handle_call({:register, opts}, {owner, _tag}, state) do
     id = Keyword.fetch!(opts, :id)
     deps = MapSet.new(Keyword.get(opts, :deps, []))
     provides = Keyword.get(opts, :provides, %{})
+    intercepts = Keyword.get(opts, :intercepts, %{})
     dupes = Enum.filter(Map.keys(provides), &Map.has_key?(state.bindings, &1))
 
     if dupes != [] do
@@ -117,6 +139,7 @@ defmodule DshBeam.Context do
         | id: id,
           deps: deps,
           provides: MapSet.union(existing.provides, MapSet.new(Map.keys(provides))),
+          intercepts: intercepts,
           inverses: inverses ++ existing.inverses
       }
 
@@ -186,8 +209,11 @@ defmodule DshBeam.Context do
 
       fiber ->
         case Coeffect.resolve(state.bindings, fiber.deps) do
-          {:satisfied, view} -> {:reply, {:active, view}, state}
-          {:unsatisfied, view, _missing} -> {:reply, {:inactive, view}, state}
+          {:satisfied, view} ->
+            {:reply, {:active, intercept_view(view, fiber)}, state}
+
+          {:unsatisfied, view, _missing} ->
+            {:reply, {:inactive, intercept_view(view, fiber)}, state}
         end
     end
   end
@@ -226,11 +252,19 @@ defmodule DshBeam.Context do
   end
 
   # The fiber reports its own transitions; the context mirror follows it and
-  # never leads it.
+  # never leads it. Transitions are events: observers (consoles) watch them.
   def handle_info({:dsh_fiber_state, pid, fiber_state}, state) do
     case Map.get(state.fibers, pid) do
-      nil -> {:noreply, state}
-      fiber -> {:noreply, put_fiber(state, %{fiber | state: fiber_state})}
+      nil ->
+        {:noreply, state}
+
+      fiber ->
+        state =
+          state
+          |> put_fiber(%{fiber | state: fiber_state})
+          |> log({:fiber_state, pid, fiber_state})
+
+        {:noreply, state}
     end
   end
 
@@ -242,7 +276,12 @@ defmodule DshBeam.Context do
   end
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
-    state = %{state | monitors: Map.delete(state.monitors, pid)}
+    state = %{
+      state
+      | monitors: Map.delete(state.monitors, pid),
+        subscribers: Map.delete(state.subscribers, pid)
+    }
+
     # a dependent that died mid-teardown counts as teardown-complete
     state = acknowledge(state, pid)
 
@@ -316,7 +355,13 @@ defmodule DshBeam.Context do
   @max_history 200
 
   defp log(state, event) do
-    %{state | history: Enum.take([event | state.history], @max_history)}
+    history = Enum.take([event | state.history], @max_history)
+
+    Enum.each(state.subscribers, fn {pid, _ref} ->
+      send(pid, {:dsh_event, event})
+    end)
+
+    %{state | history: history}
   end
 
   # Bindings of fibers that are mid-withdrawal do not satisfy new resolutions
@@ -333,8 +378,8 @@ defmodule DshBeam.Context do
   defp reactivate(state, subject) do
     {subject_state, own_view} =
       case Coeffect.resolve(active_bindings(state), subject.deps) do
-        {:satisfied, view} -> {:active, view}
-        {:unsatisfied, view, _missing} -> {:inactive, view}
+        {:satisfied, view} -> {:active, intercept_view(view, subject)}
+        {:unsatisfied, view, _missing} -> {:inactive, intercept_view(view, subject)}
       end
 
     state = put_fiber(state, %{subject | state: subject_state})
@@ -355,6 +400,7 @@ defmodule DshBeam.Context do
             true ->
               case Coeffect.resolve(active_bindings(st2), fiber.deps) do
                 {:satisfied, view} ->
+                  view = intercept_view(view, fiber)
                   send(pid, {:dsh_activate, view})
 
                   st2
@@ -369,6 +415,18 @@ defmodule DshBeam.Context do
       end)
 
     {state, subject_state, own_view}
+  end
+
+  # Interception (access control / provider wrapping): a fiber's declared
+  # intercept transforms the resolved value of that dependency, per consumer —
+  # two fibers resolving the same provider see different views.
+  defp intercept_view(view, fiber) do
+    Map.new(view, fn {key, value} ->
+      case Map.get(fiber.intercepts, key) do
+        {mod, fun, args} -> {key, apply(mod, fun, [value | args])}
+        nil -> {key, value}
+      end
+    end)
   end
 
   defp active_dependents(state, fiber) do
@@ -454,7 +512,7 @@ defmodule DshBeam.Context do
     state = log(state, {outcome, owner})
     state = %{state | fibers: Map.delete(state.fibers, owner)}
     state = demonitor_owner(state, owner)
-    if Process.alive?(owner), do: send(owner, {:dsh_unloaded, owner})
+    if DshBeam.Pid.alive?(owner), do: send(owner, {:dsh_unloaded, owner})
     state
   end
 

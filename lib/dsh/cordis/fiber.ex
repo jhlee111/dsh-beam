@@ -19,7 +19,8 @@ defmodule DshBeam.Fiber do
           deps: MapSet.t(),
           provides: MapSet.t(),
           state: state(),
-          inverses: [DshBeam.Effect.inverse()]
+          inverses: [DshBeam.Effect.inverse()],
+          intercepts: %{optional(atom()) => {module(), atom(), [term()]}}
         }
 
   defstruct id: nil,
@@ -27,5 +28,6 @@ defmodule DshBeam.Fiber do
             deps: MapSet.new(),
             provides: MapSet.new(),
             state: :inactive,
-            inverses: []
+            inverses: [],
+            intercepts: %{}
 end

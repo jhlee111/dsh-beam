@@ -202,9 +202,78 @@ defmodule DshBeam.RuntimeTest do
     entry = %{id: :loop, plugin: CrashLoopPlugin, config: [], disabled: false}
     :ok = DshBeam.Runtime.reconcile(runtime, [entry])
 
-    wait_until(fn -> match?(%{loop: %{pid: nil}}, DshBeam.Runtime.entries(runtime)) end)
+    # re-injection is asynchronous (backoff), so wait for the terminal state
+    wait_until(fn ->
+      match?(%{loop: %{pid: nil, error: :crash_loop}}, DshBeam.Runtime.entries(runtime))
+    end)
+  end
 
-    assert %{loop: %{error: :crash_loop}} = DshBeam.Runtime.entries(runtime)
+  test "a crashed provider with a slow-draining dependent is re-injected after the withdrawal" do
+    provider_entry = %{id: :p, plugin: CrashableProvider, config: [], disabled: false}
+
+    consumer_entry = %{
+      id: :slow,
+      plugin: SlowDrainConsumer,
+      config: [deps: [:crashable], parent: self(), drain_ms: 300],
+      disabled: false
+    }
+
+    {:ok, runtime} = DshBeam.Runtime.start_link([provider_entry, consumer_entry], [])
+    ctx = DshBeam.Runtime.context(runtime)
+
+    assert_receive {:slow_registered, slow, :active}, 2000
+
+    %{p: %{pid: crashed}} = DshBeam.Runtime.entries(runtime)
+    catch_exit(:gen_statem.call(crashed, :crash))
+
+    # The dependent drains for 300ms; the re-injection must wait out the
+    # withdrawal instead of burning the restart budget on :already_provided.
+    wait_until(fn ->
+      match?(
+        %{p: %{pid: pid, restarts: 1, error: nil}} when is_pid(pid),
+        DshBeam.Runtime.entries(runtime)
+      )
+    end)
+
+    assert %{p: %{pid: revived}} = DshBeam.Runtime.entries(runtime)
+    refute revived == crashed
+
+    assert {:ok, :up} = DshBeam.Context.get(ctx, :crashable)
+    wait_until(fn -> DshBeam.Plugin.fiber_state(slow) == :active end)
+
+    # the crash path still honored the guard: dependent drained before unload
+    history = DshBeam.Context.history(ctx)
+    deactivated = Enum.find_index(history, &match?({:deactivated, pid} when pid == slow, &1))
+    unloaded = Enum.find_index(history, &match?({:unloaded, _pid}, &1))
+    assert deactivated != nil and unloaded != nil and deactivated < unloaded
+  end
+
+  test "an intentionally killed plugin stays down; a reconcile re-asserts it" do
+    {:ok, runtime} = DshBeam.Runtime.start_link([], [])
+    ctx = DshBeam.Runtime.context(runtime)
+
+    entry = %{id: :k, plugin: DshBeam.Provider, config: [provides: %{k: 1}], disabled: false}
+    :ok = DshBeam.Runtime.reconcile(runtime, [entry])
+
+    %{k: %{pid: pid}} = DshBeam.Runtime.entries(runtime)
+    ref = Process.monitor(pid)
+    Process.exit(pid, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :killed}, 2000
+
+    wait_until(fn -> match?(%{k: %{pid: nil}}, DshBeam.Runtime.entries(runtime)) end)
+
+    # a crash would already be re-injected here (first backoff is ~10ms);
+    # the kill must be distinguishable and left for the orchestrator
+    Process.sleep(120)
+    assert %{k: %{pid: nil, error: {:exited, :killed}}} = DshBeam.Runtime.entries(runtime)
+
+    :ok = DshBeam.Runtime.reconcile(runtime, [entry])
+
+    wait_until(fn ->
+      match?(%{k: %{pid: p}} when is_pid(p), DshBeam.Runtime.entries(runtime))
+    end)
+
+    assert {:ok, 1} = DshBeam.Context.get(ctx, :k)
   end
 
   test "the quiescent state is a function of the final configuration (confluence)" do
@@ -360,4 +429,44 @@ defmodule CrashLoopPlugin do
 
   @impl true
   def handle_continue(:crash, _state), do: raise("boom")
+end
+
+defmodule CrashableProvider do
+  @moduledoc false
+  use DshBeam.Plugin
+
+  @impl DshBeam.Plugin
+  def mount(_ctx, _opts) do
+    {:ok, [], %{crashable: :up}, %{}}
+  end
+
+  @impl true
+  def handle_event({:call, _from}, :crash, _state, _data), do: raise("provider crash")
+end
+
+defmodule SlowDrainConsumer do
+  @moduledoc false
+  use DshBeam.Plugin
+
+  @impl DshBeam.Plugin
+  def mount(_ctx, opts) do
+    extra = %{parent: Keyword.get(opts, :parent), drain_ms: Keyword.fetch!(opts, :drain_ms)}
+    {:ok, Keyword.fetch!(opts, :deps), %{}, extra}
+  end
+
+  @impl DshBeam.Plugin
+  def handle_dsh_ready(state) do
+    if state.extra.parent,
+      do: send(state.extra.parent, {:slow_registered, self(), state.fiber_state})
+
+    {:ok, state}
+  end
+
+  @impl DshBeam.Plugin
+  def handle_dsh_withdraw(_keys, state) do
+    # slow teardown: keeps the provider's binding in withdrawal long enough
+    # for an immediate re-injection to race it
+    Process.sleep(state.extra.drain_ms)
+    {:ok, state}
+  end
 end

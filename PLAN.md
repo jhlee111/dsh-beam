@@ -1,158 +1,410 @@
-# Elixir Harness PoC — 계획
+# Elixir Harness PoC — Plan
 
-> 아이디어는 계승, 생태계는 새로 시작. DeepSeek Harness의 "모든 것은 플러그인" 철학 —
-> 정확히는 그 이론 기반인 **시공간 합성(spatiotemporal composability)** 패러다임 — 을
-> Elixir/OTP 위에 재현하는 PoC. 마일스톤 1은 구현·독립 리뷰·수정 완료(§11).
+> The idea is inherited, the ecosystem starts anew. A PoC that reproduces on Elixir/OTP the
+> "everything is a plugin" philosophy of DeepSeek Harness — more precisely its theoretical
+> basis, the **spatiotemporal composability** paradigm. Milestone 1 is complete: implementation,
+> independent review, and fixes (§11).
 
-## 1. 검증할 질문 (단 하나)
+## 1. The question to verify (a single one)
 
-Cordis의 정밀 모델 — **되돌릴 수 있는 효과(revertible effect) + 반응적 코이펙트(reactive coeffect)** —
-을 OTP의 조악하지만 강한 **프로세스 격리/감독** 위에 구현할 때, 어디가 서로 강화되고 어디가 충돌하는가.
+When Cordis's precise model — **revertible effect + reactive coeffect** — is implemented on top of
+OTP's coarse but strong **process isolation/supervision**, where do the two reinforce each other and
+where do they collide?
 
-## 2. 이론 배경 (paper.pdf 요약)
+## 2. Theoretical background (summary of paper.pdf)
 
-"A Programming Paradigm for Spatiotemporal Composability" (Shi, Zhang, Cui; PKU / DeepSeek-AI, 88쪽)는
-동적 합성을 두 직교 차원으로 분해한다.
+"A Programming Paradigm for Spatiotemporal Composability" (Shi, Zhang, Cui; PKU / DeepSeek-AI, 88 pages)
+decomposes dynamic composition into two orthogonal dimensions.
 
-- **시간적 합성(temporal)** — 제거 시 부작용의 완전한 되돌림.
-  **되돌릴 수 있는 효과**: 모든 context 변환 Γ→Γ에 역(inverse)을 짝지우고, 런타임이 역을
-  LIFO 누산기(accumulator, 비틀린 합성 모노이드 𝔗Γ)로 추적. track/recover.
-- **공간적 합성(spatial)** — 의존성의 선언·반응적 관리.
-  **반응적 코이펙트**: 컴포넌트가 의존 키 집합 d를 선언하고, context 변경 시 활성화/비활성화/중립으로 통지.
-- **통합 context** — 효과 context와 코이펙트 context를 단일 context 타입 Γ로 통합.
-- **동적 합성 계산** — 컴포넌트 → 파이버(fiber, 인스턴스). 라이프사이클 Θ = INACTIVE/ACTIVE/RELOADING/UNLOADING.
-  규칙: O-Insert/Retire/Remove(오케스트레이션), L-Begin/Iter/Finish(활성화), L-Divert/Raise(조기 종료),
-  L-Leave/Unload(비활성화).
+- **Temporal composition** — complete rollback of side effects on removal.
+  **Revertible effect**: pair every context transformation Γ→Γ with an inverse, and the runtime tracks
+  the inverses in a LIFO accumulator (the twisted composition monoid 𝔗Γ). track/recover.
+- **Spatial composition** — declarative, reactive management of dependencies.
+  **Reactive coeffect**: a component declares a set of dependency keys d, and on context changes it is
+  notified as activate/deactivate/neutral.
+- **Unified context** — the effect context and the coeffect context unified into a single context type Γ.
+- **Dynamic composition calculus** — component → fiber (instance). Lifecycle Θ = INACTIVE/ACTIVE/RELOADING/UNLOADING.
+  Rules: O-Insert/Retire/Remove (orchestration), L-Begin/Iter/Finish (activation), L-Divert/Raise (early termination),
+  L-Leave/Unload (deactivation).
 
-계승해야 할 보증(metatheory):
+Guarantees to inherit (metatheory):
 
-1. **복구 정확성** — 파이버의 누산기를 실행하면 그 파이버의 기여만, 그 외엔 아무것도 제거 안 됨(쌍별 독립 전제).
-2. **L-Unload 가드** — 제공자의 철수는 그걸 resolve한 모든 소비자가 비활성화된 뒤에만 실행(의존 방향 정렬, 교착 없음).
-3. **합류** — 정지 상태는 최종 구성의 함수일 뿐(재구성 순서 무관).
-4. **고장 격리** — 실패는 UNLOADING 경유로 효과를 복구하고 파이버 단위로 기록(형제는 계속 동작).
+1. **Recovery exactness** — running a fiber's accumulator removes only that fiber's contributions and nothing
+   else (under the pairwise-independence premise).
+2. **L-Unload guard** — a provider's withdrawal runs only after every consumer that resolved it is deactivated
+   (dependency-order alignment, no deadlock).
+3. **Confluence** — the quiescent state is a function of the final configuration alone (reconfiguration order irrelevant).
+4. **Fault isolation** — a failure recovers its effects via UNLOADING and is recorded per fiber (siblings keep running).
 
-## 3. OTP 매핑 (본 PoC의 지적 핵심)
+## 3. OTP mapping (the intellectual core of this PoC)
 
-| 논문 | Elixir/OTP 재현 |
+| paper | Elixir/OTP reproduction |
 |---|---|
-| 되돌릴 수 있는 효과 Γ→Γ×(Γ→Γ) | 역을 클로저로 반환하는 함수 `{new_state, inverse_fun}` (클로저 1급) |
-| LIFO 누산기 | 역 클로저 리스트, teardown 시 역순 적용 |
-| 효과 독립성(교환) | 프로세스 격리: 별도 프로세스는 상태 비공유 → 교환 자명. 공유 상태(ETS)는 별도 규율 |
-| 코이펙트 선언 d | 플러그인이 선언한 키 리스트; Registry/store에서 resolve |
-| 반응 통지 | Registry.register/subscribe + 의존 변경 시 child 재시작 |
-| 파이버 라이프사이클 | Context 맵 레코드 3상태(inactive/active/unloading) + pending-unload 머신 — :gen_statem 프로세스 승격은 마일스톤 2 |
-| committed view ω | GenServer 상태의 `%{key => pid | module}` |
-| L-Unload 가드(¬relied) | 소비자 프로세스 monitor; 전원 비활성화 후 역 실행 |
+| Revertible effect Γ→Γ×(Γ→Γ) | a function returning the inverse as a closure `{new_state, inverse_fun}` (closures are first-class) |
+| LIFO accumulator | a list of inverse closures, applied in reverse order on teardown |
+| Effect independence (commutativity) | process isolation: separate processes share no state → commutativity is trivial. Shared state (ETS) is a separate discipline |
+| Coeffect declaration d | the key list a plugin declares; resolved from the Registry/store |
+| Reactive notification | Registry.register/subscribe + child restart on dependency change |
+| Fiber lifecycle | a 3-state Context map record (inactive/active/unloading) + the pending-unload machine — promotion to a :gen_statem process is milestone 2 |
+| committed view ω | `%{key => pid | module}` in GenServer state |
+| L-Unload guard (¬relied) | monitoring consumer processes; run inverses after all are deactivated |
 | O-Insert/Retire/Remove | DynamicSupervisor.start_child/terminate_child/delete_child |
-| 재구성 | config entry diff → child start/stop/update |
-| HMR(트랜잭션 리로드) | BEAM code server(:code, Code.compile_string) + hot swap — Node보다 네이티브 |
-| 샌드박스(실행 경계) | 신뢰 불가 코드를 Port/subprocess(다른 런타임)로 감독 하에 실행 — §6.3이 정확히 이 설계를 요구 |
-| 크로스 프로세스 호출 | :erlang.dist + GenServer.call/:rpc — §6.2 |
-| 접근 제어(inject=capability) | behaviour + Registry 중재; interception = provider 래핑 |
+| Reconfiguration | config entry diff → child start/stop/update |
+| HMR (transactional reload) | the BEAM code server (:code, Code.compile_string) + hot swap — more native than Node |
+| Sandbox (execution boundary) | running untrusted code under supervision in a Port/subprocess (a different runtime) — §6.3 requires exactly this design |
+| Cross-process calls | :erlang.dist + GenServer.call/:rpc — §6.2 |
+| Access control (inject = capability) | behaviour + Registry mediation; interception = wrapping the provider |
 
-**중앙 설계 긴장(탐구 대상)**: 논문은 *파이버 내부의 미세 단위 효과 추적*을 모델링하지만,
-OTP의 격리/감독 단위는 *프로세스*로 더 거칠다. PoC가 답할 것 — 미세 누산기를 Elixir 클로저로 재현하되,
-OTP 감독이 그 위의 조악한 안전망으로 겹치는지, 그리고 그 겹침이 강화인지 충돌인지.
+**Central design tension (the object of inquiry)**: the paper models *fine-grained effect tracking inside a fiber*,
+but OTP's isolation/supervision unit is the *process*, which is coarser. The PoC will answer — reproducing the
+fine-grained accumulator as Elixir closures, whether OTP supervision overlaps on top of it as a coarse safety net,
+and whether that overlap is reinforcement or collision.
 
-## 4. 기판(substrate) 설계
+## 4. Substrate design
 
-"모든 것이 플러그인"을 참으로 만드는 메타프레임워크(Cordis core에 해당). 플러그인이 아니라 전제.
+The metaframework (corresponding to the Cordis core) that makes "everything is a plugin" true. Not a plugin but a premise.
 
-- DshBeam.Context — 통합 효과/코이펙트 context.
-- DshBeam.Effect — ctx.effect(fn -> ... {value, inverse} end); 역 누산, LIFO dispose.
-- DshBeam.Coeffect — 키 선언 d + resolve + 변경 통지.
-- DshBeam.Fiber — 3상태 맵 레코드; L-Unload 가드는 Context의 pending-unload 머신이 구현(비동기, 의존자 ack/DOWN/타임아웃).
-- DshBeam.Loader — 선언적 entry 목록(id/url/isolate/config/disabled) + 증분 재구성.
+- DshBeam.Context — the unified effect/coeffect context.
+- DshBeam.Effect — ctx.effect(fn -> ... {value, inverse} end); inverse accumulation, LIFO dispose.
+- DshBeam.Coeffect — key declaration d + resolution + change notification.
+- DshBeam.Fiber — a 3-state map record; the L-Unload guard is implemented by the Context's pending-unload machine
+  (asynchronous, dependent ack/DOWN/timeout).
+- DshBeam.Loader — a declarative list of entries (id/url/isolate/config/disabled) + incremental reconfiguration.
 
-## 5. 마일스톤 1: 첫 플러그인 — Session (append-only 로그)
+## 5. Milestone 1: the first plugin — Session (append-only log)
 
-**선택 근거**: DSH에서 세션 로그는 "단일 진실 원천"이고 모든 것(model-visible ⟺ logged)이 여기서 파생된다.
-동시에 이 플러그인 하나가 두 메커니즘을 모두 시연한다.
+**Rationale**: in DSH the session log is the "single source of truth", and everything (model-visible ⟺ logged)
+is derived from it. At the same time this one plugin demonstrates both mechanisms.
 
-- **효과**: append 이벤트 (역 = 그 시퀀스 이후 truncate/복원).
-- **코이펙트**: projection/소비자가 :session을 선언 → 제공자가 내려가면 소비자가 먼저 비활성화.
-- **provider 스왑**: in-memory(ETS) ↔ persisted(파일) 제공자 교체 = 재구성.
+- **Effect**: appending events (inverse = truncate/restore after that sequence).
+- **Coeffect**: a projection/consumer declares :session → when the provider goes down the consumer deactivates first.
+- **Provider swap**: swapping the in-memory (ETS) ↔ persisted (file) provider = reconfiguration.
 
-## 6. 검증 기준 (마일스톤 1 완료의 정의)
+## 6. Verification criteria (the definition of milestone 1 completion)
 
-1. 런타임이 정렬된 플러그인 목록에서 부팅.
-2. Session 제공자 마운트 → 소비자가 :session resolve → append/read 동작.
-3. 제공자 언로드 → 소비자 먼저 비활성화 → 제공자 효과 역순 복구 → context 사전 상태 복귀(복구 정확성).
-4. provider 스왑이 소비자만 재활성화(형제는 무영향).
-5. mix test로 1–4 자동 검증.
+1. The runtime boots from an ordered plugin list.
+2. The Session provider mounts → a consumer resolves :session → append/read work.
+3. Provider unload → the consumer deactivates first → the provider's effects recover in reverse order → the context
+   returns to its prior state (recovery exactness).
+4. A provider swap reactivates only the consumer (siblings unaffected).
+5. 1–4 verified automatically via mix test.
 
-## 7. 논문이 미리 답해주는 어려운 부분
+## 7. The hard parts the paper answers in advance
 
-- **샌드박스(§6.3)** — 언어 수준 접근 제어는 악의 코드 앞에서 무력; 실행 경계(별도 런타임/샌드박스 프로세스/컨테이너)가 필요.
-  → 신뢰 불가 플러그인은 BEAM 밖 subprocess 런타임으로. (사용자 제안과 일치, 이론 근거 확보)
-- **언어 독립성(§6.4)** — 시간 합성은 클로저 + 런타임 모듈 레지스트리, 공간 합성은 typed DI + 동적 중재.
-  Elixir: 클로저 ✓, :code 모듈 레지스트리 ✓(Node보다 우월), typed DI는 behaviour+Registry+1.20 타입으로 *부분* 충족(동적 Proxy 부재는 약점).
-- **시스템 경계(§6.1)** — 외부 위치(파일 쓰기, 네트워크)에 대한 연산은 idΓ로 취급되어 추적·복구 불가; 복구는 보류(withholding) 또는 보상(compensation).
-  → 세션 로그의 영속화는 "경계 밖"이므로 별도 복구 전략 필요.
-- **의존 타입/버저닝(§6.6)** — nominal 키 충돌/드리프트. PoC는 namespacing으로 회피, 구조적 호환은 비-목표.
+- **Sandbox (§6.3)** — language-level access control is powerless against malicious code; an execution boundary
+  (a separate runtime / sandbox process / container) is needed.
+  → Untrusted plugins run in a subprocess runtime outside the BEAM. (matches the user's proposal; theoretical
+  grounding secured)
+- **Language independence (§6.4)** — temporal composition via closures + a runtime module registry, spatial composition
+  via typed DI + dynamic mediation.
+  Elixir: closures ✓, the :code module registry ✓ (superior to Node), typed DI *partially* satisfied via behaviour +
+  Registry + 1.20 types (the lack of a dynamic Proxy is a weakness).
+- **System boundary (§6.1)** — operations on external locations (file writes, the network) are treated as idΓ and cannot
+  be tracked or recovered; recovery is withholding or compensation.
+  → Persisting the session log is "outside the boundary", so it needs a separate recovery strategy.
+- **Dependency types/versioning (§6.6)** — nominal key collisions/drift. The PoC avoids this via namespacing; structural
+  compatibility is a non-goal.
 
-## 8. 비-목표
+## 8. Non-goals
 
-- TS 하네스의 SDK projection/타입 그래프 재현.
-- LLM 어댑터, 에이전트 루프, 툴 파이프라인(후속 마일스톤).
-- 제3자 플러그인 생태계 호환.
-- Windows 지원.
+- Reproducing the TS harness's SDK projection/type graph.
+- LLM adapters, agent loops, tool pipelines (later milestones).
+- Compatibility with a third-party plugin ecosystem.
+- Windows support.
 
-## 9. 디렉터리
+## 9. Directory
 
-독립 저장소 jhlee111/dsh-beam — Mix 프로젝트 dsh_beam.
-.tool-versions에 Elixir 1.20.2 / Erlang 28.4.3 고정.
+An independent repository jhlee111/dsh-beam — a Mix project dsh_beam.
+Elixir 1.20.2 / Erlang 28.4.3 pinned in .tool-versions.
 
-## 10. TDD 테스트 목록 (마일스톤 1 실행 사양)
+## 10. TDD test list (the milestone 1 execution spec)
 
-ExUnit으로 테스트를 먼저 쓰고 구현으로 초록을 만든다. 각 테스트는 논문의 보증 하나를 고정한다.
+Write tests first with ExUnit, then make them green with the implementation. Each test pins one guarantee from the paper.
 
-| 증분 | 테스트 | 고정하는 보증 |
+| Increment | Test | Guarantee pinned |
 |---|---|---|
-| 1. Effect | dispose가 역을 LIFO로 적용 | 복구 순서(§3.1, recoverΓ) |
-| 1. Effect | 각 역은 자기 단계만 되돌림 | 역의 합성 |
-| 1. Coeffect | 선언 키 전부 제공 시 satisfied | 공간 합성(§3.2) |
-| 1. Coeffect | 누락 키 보고 | unsatisfied |
-| 1. Coeffect | 뷰는 선언 키만 포함 | committed view |
-| 2. Session | Memory: seq 할당·순서 읽기·count | 첫 플러그인 동작 |
-| 2. Session | File: 재시작 후에도 지속(JSONL) | 영속 경계(§6.1) |
-| 3. Context | unload가 소유자 기여만 복구 | 복구 정확성(Thm 61/62) |
-| 3. Context | 키 등장 시 의존자 활성화 | 반응적 코이펙트 |
-| 3. Context | 의존자 비활성화가 철수보다 먼저 | L-Unload 가드(Thm 63) |
-| 3. Context | teardown 중 committed view 유지 | 가드의 실체 |
-| 3. Context | 소유자 사망 시 바인딩 철수 | OTP 안전망 |
-| 3. Context | 중복 키 거부 | exclusive binding(§6.2) |
-| 4. Runtime | 정렬 조성 부팅·session 사용 | 조성 |
-| 4. Runtime | 제공자 제거 시 가드 순서 | 재구성 |
-| 4. Runtime | provider 스왑이 의존자만 재활성화 | 스왑 + 합류(Thm 73) |
-| 4. Runtime | teardown 중 세션 읽기(probe) | 가드의 실체 |
-| M2. DSL | needs/provides 선언이 Spark로 검증·introspect | 논문 Def 44(d, p)의 인코딩 |
-| M2. DSL | 조성 DSL(entry)이 마일스톤 1 테스트를 그대로 통과 | Def 74의 인코딩 + 회귀망 |
+| 1. Effect | dispose applies inverses LIFO | recovery order (§3.1, recoverΓ) |
+| 1. Effect | each inverse reverts only its own step | composition of inverses |
+| 1. Coeffect | satisfied when all declared keys are provided | spatial composition (§3.2) |
+| 1. Coeffect | reports missing keys | unsatisfied |
+| 1. Coeffect | the view contains only the declared keys | committed view |
+| 2. Session | Memory: seq assignment · ordered reads · count | first-plugin behavior |
+| 2. Session | File: persists across restart (JSONL) | persistence boundary (§6.1) |
+| 3. Context | unload recovers only the owner's contributions | recovery exactness (Thm 61/62) |
+| 3. Context | dependents activate when a key appears | reactive coeffect |
+| 3. Context | dependent deactivation precedes withdrawal | L-Unload guard (Thm 63) |
+| 3. Context | the committed view holds during teardown | the guard's substance |
+| 3. Context | binding withdrawal on owner death | OTP safety net |
+| 3. Context | rejects duplicate keys | exclusive binding (§6.2) |
+| 4. Runtime | boots an ordered composition · uses session | composition |
+| 4. Runtime | guard ordering on provider removal | reconfiguration |
+| 4. Runtime | a provider swap reactivates only dependents | swap + confluence (Thm 73) |
+| 4. Runtime | reading the session during teardown (probe) | the guard's substance |
+| M2. DSL | needs/provides declarations validated · introspected via Spark | the encoding of paper Def 44 (d, p) |
+| M2. DSL | the composition DSL (entry) passes the milestone 1 tests unchanged | the encoding of Def 74 + the regression net |
 
-**마일스톤 2 — Spark DSL 전면.** 논문의 선언들(컴포넌트의 d/p, entry의 id/url/isolate/config/disabled)은 사실상 DSL 문법이다. Spark(Ash 팀, v2.6)의 section/entity/옵션 검증 + introspection으로 `use DshBeam.Plugin`(needs/provides)과 `use DshBeam.Composition`(entry)을 작성한다. 이점: (1) 선언의 컴파일타임 검증, (2) `Spark.Dsl.Extension` introspection이 cordis_inspect/크리에이터 모드의 기질, (3) entry 스키마 검증이 Loader.diff의 전제. **순서**: 증분 1–4로 런타임 의미론(인터프리터)을 먼저 고정한 뒤 DSL을 얹는다 — DSL의 관측 가능한 동작은 그 의미론뿐이고, 기존 테스트가 회귀망이 된다. 핸드롤 defmacro도 가능하나 검증·introspection 재발명을 피해 유지보수되는 Spark를 쓴다.
+**Milestone 2 — the Spark DSL front.** The paper's declarations (a component's d/p, an entry's
+id/url/isolate/config/disabled) are in effect DSL syntax. Using Spark's (Ash team, v2.6) section/entity/option
+validation + introspection, write `use DshBeam.Plugin` (needs/provides) and `use DshBeam.Composition` (entry).
+Benefits: (1) compile-time validation of declarations, (2) `Spark.Dsl.Extension` introspection as the substrate
+for cordis_inspect/creator mode, (3) entry schema validation as the premise of Loader.diff. **Order**: pin down the
+runtime semantics (the interpreter) first with increments 1–4, then layer the DSL on top — the DSL's observable
+behavior is nothing but that semantics, and the existing tests become the regression net. Hand-rolling defmacro is
+possible, but we use the maintained Spark to avoid reinventing validation and introspection.
 
-주의: Elixir는 미정의 모듈 참조가 테스트 컴파일을 깨므로, 전체 레드 스위트를 한 번에 쓰지 않고 증분(테스트 파일 하나 + 구현)으로 진행한다.
+Note: since undefined module references break test compilation in Elixir, proceed incrementally (one test file +
+implementation) rather than writing the whole red suite at once.
 
-## 11. 진행 상태
+## 11. Progress status
 
-- [x] 증분 1–4: 기판 + Session + Runtime — 마일스톤 1 구현 완료
-- [x] 독립 리뷰 2건(A: Elixir 공식 문서, B: 정확성·동시성) — REVIEW.md에 병합
-- [x] P1 register fiber 병합(H3) / P2 C' 비동기 철수 프로토콜 + use DshBeam.Plugin(B-H1/B-H2) / P3 Runtime 실패 보고·재주입(A-H2) / P5 위생
-- [x] P4 본 문서를 구현 상태와 정렬(3상태 축소 모델 명시)
-- [x] 마일스톤 2-①: 파이버 :gen_statem 4상태 프로세스 승격 — 23 passed
-- [x] 마일스톤 2-②: 크래시 경로 committed view(정렬된 shutdown) — 24 passed, 25개 시드 0 실패
-- [x] 마일스톤 2-③: 합류 동시성 검증 — 27 passed (경로 무관 정지 상태·동시 reconcile·스왑 중 동시 사용)
-- [x] 마일스톤 2-④: Spark DSL 전면 — 30 passed (need/provide 선언, 조성 DSL, 회귀망 27개 유지)
+- [x] Increments 1–4: substrate + Session + Runtime — milestone 1 implementation complete
+- [x] 2 independent reviews (A: official Elixir docs, B: correctness · concurrency) — merged into REVIEW.md
+- [x] P1 register-fiber merge (H3) / P2 C' asynchronous withdrawal protocol + use DshBeam.Plugin (B-H1/B-H2) / P3
+  Runtime failure reporting · re-injection (A-H2) / P5 hygiene
+- [x] P4 aligned this document with the implementation state (explicit 3-state reduced model)
+- [x] Milestone 2-①: promoted the fiber to a 4-state :gen_statem process — 23 passed
+- [x] Milestone 2-②: crash-path committed view (ordered shutdown) — 24 passed, 0 failures across 25 seeds
+- [x] Milestone 2-③: confluence concurrency verification — 27 passed (path-independent quiescent state · concurrent
+  reconcile · concurrent use during swap)
+- [x] Milestone 2-④: Spark DSL front — 30 passed (need/provide declarations, composition DSL, 27-test regression net maintained)
+- [x] Known-limitations backlog: crash re-injection gained backoff + withdrawal-race retries and a kill/crash
+  distinction, and reconcile now re-asserts every desired non-running entry (convergence) — 35 passed
+- [x] Known-limitations backlog: §6.3 execution boundary implemented (DshBeam.Sandbox) — untrusted source compiles
+  and runs in a child OS process with its own BEAM; crash → guard → re-injection crosses the boundary — 40 passed
 
-## 13. 마일스톤 3 — 크리에이터 모드 (완료)
+## 14. Milestone 4 — LLM provider plugin + live web console (complete)
 
-DshBeam.Creator: 소스 문자열을 Code.compile_string -> BEAM :code 서버로 로드 -> 파이버로 마운트.
-redefine은 논문 §5.2.2의 트랜잭션 HMR(컴파일 선행 -> 가드 통과 철수 -> 코드 교체 -> 실패 시 롤백).
-테스트 3개(define/redefine/undefine 스토리, mount 크래시 격리, syntax error 무변화) — 33 passed.
+- LLM capability: DshBeam.Llm.Plugin provides :llm (OpenAI-compatible
+  /chat/completions, deepseek-chat and peers) with a swappable adapter
+  (provider-swap pattern; a :plug replaces the transport for offline tests).
+  DshBeam.Llm.Chat declares :session + :llm and appends user/assistant turns.
+- Subscriber streams: Context.subscribe / Runtime.subscribe fan out state
+  and entry changes to observers; dead subscribers are cleaned up.
+- The UI is a plugin: DshBeam.Console owns the Phoenix endpoint (started
+  unlinked, stopped synchronously on withdrawal), and the LiveView reads the
+  composition and chat through the subscription streams.
+- Tests: llm (4), subscribe (4), console LiveView (6: render/seed, chat loop,
+  creator define, sandbox define, kill-via-event-stream, crash-child
+  re-injection) — 54 passed, stable across seeds.
 
-## 12. 마일스톤 2 (후보)
+## 13. Milestone 3 — creator mode (complete)
 
-- 파이버를 :gen_statem 프로세스로 승격(4상태) — 논문의 "미세 누산기 vs 프로세스 격리" 긴장을 실제로 시연
-- 크래시 경로에서도 committed view 보장(정렬된 shutdown: 제공자 자원이 의존자 teardown 동안 생존)
-- 합류(재구성 순서 무관)의 동시성 검증
-- Spark DSL 전면: use DshBeam.Plugin의 needs/provides + 조성 DSL(entry)
+DshBeam.Creator: load a source string via Code.compile_string -> the BEAM :code server -> mount as a fiber.
+redefine is the transactional HMR of paper §5.2.2 (compile first -> withdraw through the guard -> swap the code ->
+roll back on failure). define is transactional too: a failed mount rolls the composition back.
+3 tests (define/redefine/undefine stories, mount-crash isolation, syntax-error no-change) — 33 passed.
+
+The §6.3 execution boundary for untrusted source lives in DshBeam.Sandbox (child OS process + line-JSON
+protocol + DshBeam.Sandbox.Plugin guardian fiber); see REVIEW.md for the boundary rules.
+
+## 12. Milestone 2 (candidate)
+
+- Promoting the fiber to a :gen_statem process (4 states) — actually demonstrating the paper's "fine-grained
+  accumulator vs process isolation" tension
+- Guaranteeing the committed view on the crash path (ordered shutdown: a provider's resources survive its dependents'
+  teardown)
+- Concurrency verification of confluence (reconfiguration order irrelevant)
+- Spark DSL front: use DshBeam.Plugin's needs/provides + the composition DSL (entry)
+
+## 15. "Everything is a plugin" — the inventory + typed settings substrate (complete)
+
+The original harness's design is not the LLM/chat/loop framework (those exist
+everywhere); it is that EVERYTHING — shell limits, web search, storage,
+tools, UI panels, policies — is a plugin with typed settings and an inventory.
+Expressed here as:
+
+- `setting` declarations in use DshBeam.Plugin (name/type/default/doc, Spark
+  validated + introspectable) — the per-plugin typed settings schema.
+- DshBeam.Plugin.Inventory — the installed-plugin catalog (list + settings).
+- DshBeam.Settings — per-plugin overrides validated against the schema, layered
+  over defaults; credentials are references, never stored values.
+- The console's plugins panel — the inventory list (enabled/disabled) with
+  per-plugin typed forms and Save.
+
+LLM stays an example plugin: DshBeam.Credential (config carries a name, not a
+literal key) + configure/2 (adapter re-resolves per request — reconfiguration
+without re-mount) mirror the harness's credential/settings separation.
+
+## 16. Milestone 6 — breadth: a non-LLM capability (shell) (complete)
+
+The design is not LLM-specific. DshBeam.Shell.Plugin provides :shell with the
+original harness's Shell settings (command_timeout_ms, output_cap_bytes) —
+visible in the inventory/settings panel — and run/3 executes in a subprocess
+with a timeout and output cap. DshBeam.Shell.Consumer declares :shell and
+deactivates first when the provider withdraws (the guard across a non-LLM
+capability). 77 tests.
+
+## 17. Milestone 7 — the MVP: tools are plugins, the loop is a plugin (complete)
+
+The harness "runs" when the model↔tool loop works on the substrate. A tool is
+a plugin (`tool` DSL → default mount binds the name; handle_dsh_tool_call
+answers {:tool_call, ...}); the agent loop is a plugin (`need :llm, :session`)
+that discovers tools from the registry, dispatches their calls, and answers.
+tool-bash (needs :shell) and tool-fs (workspace root, path containment) are the
+first tools. The LLM result now carries tool_calls + finish_reason. 85 tests.
+
+## 18. Milestone 8 — intercept (access control = provider wrapping) (complete)
+
+Cordis's `intercept` (inject=capability, interception=provider wrapping): a
+`need` may declare an intercept ({M, f, args}) that wraps the resolved value
+for that fiber only. The same provider resolves to different views per
+consumer; a swap re-applies the intercept; the intercepted consumer is still a
+dependent. 88 tests.
+
+## 19. Milestone 9 — §6.2 cross-node composition (complete)
+
+The last mapping-table row: a fiber can live on another BEAM node and register
+with a local context. The context's monitor, activation messages, and the
+L-Unload guard all cross :erlang.dist — a remote owner is just {pid, node}
+(DshBeam.Dist, DshBeam.Pid). Guard + crash safety net hold across nodes.
+91 tests. (Requires epmd + ~/.erlang.cookie; the tests skip without them.)
+
+## 20. Milestone 10 — MVP web UI (complete)
+
+The console's chat pane now drives the agent loop and renders its step trace
+chronologically (task → tool call → result → answer); the seed mounts the full
+agent composition. Agent.Loop gained run_trace/2. 93 tests. A cleanup pass
+grouped the substrate modules, removed a crash dump, and boots the console demo
+with the full composition.
+
+## 21. Milestone 11 — web console stabilization (complete)
+
+The hand-wired Phoenix/LiveView layer had three gaps that only surfaced when
+driving the real model path in the browser; each is now fixed with a regression
+test where the seam was testable.
+
+- **LiveView client was never loaded.** The layout omitted phoenix.js /
+  phoenix_live_view.js and the LiveSocket connect, so the browser never opened
+  /live. Every `phx-submit` fell back to a plain HTML GET (`/?text=hello`),
+  which both dropped the event and leaked the literal API key into the URL.
+  The endpoint now serves vendored bundles via `Plug.Static` and the layout
+  connects the socket with the CSRF token.
+- **secret_key_base too short.** Plug.Session's cookie store requires ≥64 bytes;
+  the previous hand-written value was 44, so the first render that stored the
+  CSRF token crashed. Replaced with a `mix phx.gen.secret` value.
+- **Req adapter read `tools` as a map.** `chat/3` passes a keyword list
+  `[tools: ...]`; the adapter used the map-only `opts.tools` and raised
+  `BadMapError`, crashing the llm fiber on the first real tool-armed call.
+  Now `opts[:tools]`; a regression test drives `chat/3` + tools through the
+  mock plug and asserts the JSON body.
+- The agent loop now runs off the LiveView process (a `Task` + `handle_info`
+  result message), so the real model round-trip no longer freezes the pane.
+- Code reloading is disabled: Phoenix 1.8's CodeReloader cannot survive a
+  config change or a mid-edit compile error, and a poisoned VM is worse than an
+  explicit restart. 95 tests.
+
+## 22. Conclusion — where the two reinforce, and where they collide
+
+The PoC set out to answer one question (§1): when the paper's precise model —
+revertible effect + reactive coeffect — is implemented on OTP's coarse but
+strong process isolation/supervision, where do the two **reinforce** and where
+do they **collide**? After milestones 1–11, the answer is concrete.
+
+### Where they reinforce
+
+1. **Commutativity for free.** Recovery exactness presupposes that effects are
+   pairwise-independent so inverses can run in LIFO order. OTP process isolation
+   *is* that independence: separate processes share no state, so the premise the
+   paper has to *assume* is *given* by the substrate. The accumulator stays a
+   list of closures; nothing in it has to prove non-interference.
+2. **Supervision as the coarse safety net over the fine-grained accumulator.**
+   The paper's recoverable-effect machinery and OTP's restart machinery are not
+   the same layer and do not fight: the fiber's inverse list is the *semantic*
+   rollback (exact, per-fiber), while `DynamicSupervisor` + backoff re-injection
+   is the *availability* safety net (coarse, best-effort). A crash unwinds
+   through the guard, then a fresh fiber is re-injected — the two overlap rather
+   than collide.
+3. **The guard maps cleanly to monitors.** The L-Unload guard ("a provider
+   withdraws only after every consumer is deactivated") is a dependency order
+   that OTP's monitor/`DOWN` primitive expresses directly; the pending-unload
+   machine rides `Process.monitor` and needs no extra bookkeeping.
+
+### Where they collide
+
+1. **The unit of composition does not match the unit of isolation.** The paper
+   tracks effects *inside* a fiber (an internal accumulator), but OTP's atomic
+   unit is the *process*; a fiber's in-process accumulator is torn down by a
+   kill before it can run its inverses, so "recovery exactness on the crash
+   path" is only as good as the ordering that survives. The PoC had to add the
+   committed view + ordered shutdown (milestone 2-②) precisely to bridge this —
+   evidence of the collision, resolved by more machinery.
+2. **Synchronous `call` reentrancy vs the async ack protocol.** The paper's
+   activation/deactivation is asynchronous with acks; OTP's `GenServer.call` is
+   synchronous. The unload path's `:gen_statem.call` into a consumer can
+   re-enter the context and deadlock (REVIEW H1). The substrate works around it
+   by making withdrawal message-driven — the collision is a recurring trap, not
+   a one-off.
+3. **Fine-grained coeffect reactivity has no native substrate.** The paper
+   notifies dependents of *arbitrary context keys* changing; OTP gives process
+   exit signals but not key-level change notifications, so the reactive-coeffect
+   layer is hand-built (subscription streams, `activate`/`deactivate` messages)
+   on top of the substrate — a genuinely new mechanism, not a reuse of OTP.
+4. **The HMR/reload boundary.** The paper's transactional reload presumes a
+   runtime that can swap code atomically; the BEAM can (code server), but the
+   *web* layer around it (Phoenix's code reloader) cannot survive a config
+   change or a mid-edit error — milestone 11 disabled it for stability. The
+   boundary between "BEAM-native reload" and "framework reload" is where the
+   two paradigms stop cooperating.
+
+### Bottom line
+
+The two reinforce at the **effect/rollback** layer (isolation gives the
+independence the paper needs) and collide at the **lifecycle/notification**
+layer (the fiber is a finer unit than a process; synchronous calls and
+key-level reactivity have to be hand-built). The PoC's contribution is making
+that boundary explicit: revertible effects port cleanly onto OTP, reactive
+coeffects and the guard do not — they are the parts that had to be invented
+afresh.
+
+## 23. Milestone 12 — toward a usable harness (complete)
+
+After the conclusion, the console is pushed from a design PoC into a harness
+you can actually drive, closing the feature gap to the reference webui while
+keeping the "everything is a plugin" substrate intact:
+
+- **Multi-turn agent loop** — `Agent.Loop.run/2` replays prior user/assistant
+  turns from the session into the model context (a conversation, not a
+  stateless one-shot).
+- **Session as the chat pane's single source of truth** — the loop records each
+  turn chronologically (user → tool_call → tool_result → assistant, or error);
+  the chat pane derives its rows from `Session.all/1`, so a page refresh keeps
+  the conversation and tool execution is visible; `Session.clear/1` ("new
+  conversation") truncates the log.
+- **Session is a reactive coeffect** — `Session.subscribe/1` fans out
+  `{:dsh_session_event, event}` per append (dead subscribers cleaned via
+  `:DOWN`), so the chat pane re-renders incrementally as the loop produces tool
+  calls and the answer — real-time execution visibility without polling.
+- **Todo tool (agent-driven plan)** — `DshBeam.Tool.Todo` ports the reference
+  `todo/write` model: a `todo_write` tool appends whole-list snapshots to the
+  session (last-write-wins), and the console projects the latest snapshot into
+  a plan panel. The agent plans by calling a tool; the plan is a session
+  projection, not a separate store.
+- The model/credential/settings UX is the existing llm-settings panel plus the
+  typed inventory/settings panel (milestones 5/15).
+- An end-to-end console test drives a scripted model that writes a todo plan and
+  runs a tool in one turn, asserting the chat pane, the todo panel, and the
+  session all reflect it. 105 tests.
+
+## 24. Milestone 13 — safety guards + plugin export (complete)
+
+Two safety guards ported from the reference harness's `guard/*` family, plus
+creator-defined plugin sources made deployable — all as plugins, not loop
+hacks.
+
+- **`DshBeam.Guard.TimeoutPolicy`** — the reference `guard/timeout-policy`. A
+  tool declares `timeout_ms` in its DSL; the loop bounds each call to that
+  budget (cooperative, `Task.yield`, not a hard kill) and returns a
+  `TOOL_TIMEOUT` result when the deadline wins. Zero-config: the budget lives
+  on the tool's own declaration (`DshBeam.Tool.Registry.timeout/1`).
+- **`DshBeam.Guard.RepeatToolReminder`** — the reference
+  `guard/repeat-tool-reminder`. Tracks runs of consecutive identical
+  (canonicalized) tool calls and injects an advisory nudge at thresholds
+  `[3,5,8]` — advisory only, no veto; the decision stays with the model.
+- **Plugin export/import** — `DshBeam.Creator.export_plugin/3` writes the live
+  composition + creator-defined source as a deployable `.exs` script
+  (recompiled from source, not a binary), and `import_plugin/1` boots a fresh
+  runtime from it. The console's creator panel gains an "export plugin (.exs)"
+  button. An edited plugin now survives a restart and can be shared — the
+  "asset" the user asked for, named in the harness's own domain vocabulary
+  ("plugin"), not "asset".
+- 114 tests.
