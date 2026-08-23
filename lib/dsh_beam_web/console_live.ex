@@ -136,17 +136,18 @@ defmodule DshBeamWeb.ConsoleLive do
     result =
       case DshBeam.Context.get(socket.assigns.ctx, :llm) do
         {:ok, llm} ->
-          credential =
-            case params["credential_mode"] do
-              "literal" -> {:literal, params["credential_value"]}
-              _ -> {:env, params["credential_value"]}
+          opts = [base_url: params["base_url"], model: params["model"]]
+
+          # a blank credential field keeps the current key (the harness's
+          # "leave blank to keep the current key")
+          opts =
+            case {params["credential_mode"], params["credential_value"]} do
+              {_mode, ""} -> opts
+              {"literal", value} -> Keyword.put(opts, :credential, {:literal, value})
+              {_mode, value} -> Keyword.put(opts, :credential, {:env, value})
             end
 
-          DshBeam.Llm.configure(llm,
-            base_url: params["base_url"],
-            model: params["model"],
-            credential: credential
-          )
+          DshBeam.Llm.configure(llm, opts)
 
         :not_found ->
           {:error, :no_llm_plugin}
@@ -304,19 +305,24 @@ defmodule DshBeamWeb.ConsoleLive do
             <input type="text" name="base_url" value={@llm_config.base_url} />
             <label class="muted">model</label>
             <input type="text" name="model" value={@llm_config.model} />
+            <label class="muted">credential</label>
             <select name="credential_mode">
               <option value="env" selected={@credential_mode == "env"}>env</option>
-              <option value="literal" selected={@credential_mode == "literal"}>literal</option>
+              <option value="literal" selected={@credential_mode == "literal"}>api key (literal)</option>
             </select>
             <input
               type="text"
               name="credential_value"
               value={@credential_env}
-              placeholder={if @credential_mode == "env", do: "env name", else: "literal key (not echoed)"}
+              placeholder={
+                if @credential_mode == "env",
+                  do: "env var name (e.g. DEEPSEEK_API_KEY)",
+                  else: "paste API key (blank keeps current)"
+              }
             />
-            <button type="submit">apply (configure, no re-mount)</button>
+            <button type="submit">apply</button>
           </form>
-          <p class="muted">result: <code><%= inspect(@llm_result) %></code></p>
+          <p class="muted">leave the credential field blank to keep the current key · result: <code><%= inspect(@llm_result) %></code></p>
         <% else %>
           <p class="muted">no :llm provider (seed the demo composition)</p>
         <% end %>

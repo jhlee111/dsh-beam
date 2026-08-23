@@ -124,6 +124,34 @@ defmodule DshBeam.ConsoleTest do
     assert %{model: "deepseek-reasoner", credential: {:env, "MY_KEY"}} = DshBeam.Llm.config(llm)
   end
 
+  test "the llm settings panel stores a literal API key and keeps it on blank re-apply",
+       %{session: session, ctx: ctx} do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    render_submit(view, "seed", %{})
+
+    {:ok, llm} = DshBeam.Context.get(ctx, :llm)
+
+    # paste a literal key, leave base_url/model blank (only the key changes)
+    render_submit(view, "llm_apply", %{
+      "base_url" => "https://api.deepseek.com",
+      "model" => "deepseek-chat",
+      "credential_mode" => "literal",
+      "credential_value" => "sk-test-key"
+    })
+
+    assert %{credential: {:literal, "sk-test-key"}} = DshBeam.Llm.config(llm)
+
+    # re-apply with a blank credential field keeps the current key
+    render_submit(view, "llm_apply", %{
+      "base_url" => "https://api.deepseek.com",
+      "model" => "deepseek-chat",
+      "credential_mode" => "literal",
+      "credential_value" => ""
+    })
+
+    assert %{credential: {:literal, "sk-test-key"}} = DshBeam.Llm.config(llm)
+  end
+
   test "the plugins panel lists the inventory and saves a setting override",
        %{session: session, runtime: runtime} do
     {:ok, view, html} = live(build_conn(), "/", session: session)
