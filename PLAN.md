@@ -266,3 +266,29 @@ chronologically (task → tool call → result → answer); the seed mounts the 
 agent composition. Agent.Loop gained run_trace/2. 93 tests. A cleanup pass
 grouped the substrate modules, removed a crash dump, and boots the console demo
 with the full composition.
+
+## 21. Milestone 11 — web console stabilization (complete)
+
+The hand-wired Phoenix/LiveView layer had three gaps that only surfaced when
+driving the real model path in the browser; each is now fixed with a regression
+test where the seam was testable.
+
+- **LiveView client was never loaded.** The layout omitted phoenix.js /
+  phoenix_live_view.js and the LiveSocket connect, so the browser never opened
+  /live. Every `phx-submit` fell back to a plain HTML GET (`/?text=hello`),
+  which both dropped the event and leaked the literal API key into the URL.
+  The endpoint now serves vendored bundles via `Plug.Static` and the layout
+  connects the socket with the CSRF token.
+- **secret_key_base too short.** Plug.Session's cookie store requires ≥64 bytes;
+  the previous hand-written value was 44, so the first render that stored the
+  CSRF token crashed. Replaced with a `mix phx.gen.secret` value.
+- **Req adapter read `tools` as a map.** `chat/3` passes a keyword list
+  `[tools: ...]`; the adapter used the map-only `opts.tools` and raised
+  `BadMapError`, crashing the llm fiber on the first real tool-armed call.
+  Now `opts[:tools]`; a regression test drives `chat/3` + tools through the
+  mock plug and asserts the JSON body.
+- The agent loop now runs off the LiveView process (a `Task` + `handle_info`
+  result message), so the real model round-trip no longer freezes the pane.
+- Code reloading is disabled: Phoenix 1.8's CodeReloader cannot survive a
+  config change or a mid-edit compile error, and a poisoned VM is worse than an
+  explicit restart. 95 tests.

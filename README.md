@@ -41,11 +41,16 @@ Phoenix endpoint, fed by the context/runtime subscription streams:
     DEEPSEEK_API_KEY=sk-... mix run scripts/console.exs   # http://127.0.0.1:4001
 
 The chat pane drives the agent loop (model ↔ bash/fs tools) and renders its
-trace; the llm provider talks to real deepseek-chat via the DEEPSEEK_API_KEY
-environment variable. Without it the pane reports
+trace; the llm provider talks to real deepseek-chat. Set the API key either
+via the DEEPSEEK_API_KEY environment variable or paste it into the page's
+"llm settings" panel (a literal key is held in the fiber's memory, resolved per
+request — re-enter it after a server restart). Without a key the pane reports
 {:error, {:missing_env, "DEEPSEEK_API_KEY"}}. The page shows fibers (4 states),
 bindings, the event feed, and a creator/sandbox source editor with kill/crash
-buttons to watch re-injection and the L-Unload guard live.
+buttons to watch re-injection and the L-Unload guard live. The agent loop runs
+off the LiveView process, so a slow model round-trip shows a "thinking" row
+instead of freezing the page. Code reloading is disabled (see config/config.exs):
+restart the demo after an edit.
 
 ## Protocol summary
 

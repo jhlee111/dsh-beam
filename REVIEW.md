@@ -322,3 +322,17 @@ or timeout). The dependent survives, becomes :inactive, and can be reactivated.
 
 - Agent.Loop.run_trace/2 exposes the loop's steps; the console chat pane drives
   the loop and renders the trace. 93 tests.
+
+## Milestone 11 — web console stabilization (complete)
+
+Hand-wiring the Phoenix/LiveView layer (no `mix phx.new` scaffold) left three
+gaps that only showed up on the real browser path; see PLAN §21.
+
+- LiveView client was never loaded → `phx-submit` fell back to a GET and leaked
+  the API key into the URL; now served via Plug.Static + a LiveSocket connect
+  in the layout.
+- `secret_key_base` was 44 bytes (Plug.Session requires ≥64); replaced.
+- Req adapter used the map-only `opts.tools` on a keyword list → `BadMapError`
+  crashed the llm fiber; now `opts[:tools]` + a regression test.
+- ask runs off the LiveView process (Task + handle_info); code reloader disabled
+  (config changes / mid-edit errors poison the VM). 95 tests.
