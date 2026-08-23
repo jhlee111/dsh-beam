@@ -224,3 +224,12 @@ Expressed here as:
 LLM stays an example plugin: DshBeam.Credential (config carries a name, not a
 literal key) + configure/2 (adapter re-resolves per request — reconfiguration
 without re-mount) mirror the harness's credential/settings separation.
+
+## 16. Milestone 6 — breadth: a non-LLM capability (shell) (complete)
+
+The design is not LLM-specific. DshBeam.Shell.Plugin provides :shell with the
+original harness's Shell settings (command_timeout_ms, output_cap_bytes) —
+visible in the inventory/settings panel — and run/3 executes in a subprocess
+with a timeout and output cap. DshBeam.Shell.Consumer declares :shell and
+deactivates first when the provider withdraws (the guard across a non-LLM
+capability). 77 tests.

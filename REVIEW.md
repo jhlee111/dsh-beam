@@ -278,3 +278,13 @@ or timeout). The dependent survives, becomes :inactive, and can be reactivated.
 - The console's plugins panel lists the inventory (enabled/disabled) and edits
   settings with Save.
 - 71 tests, stable.
+
+## Milestone 6 — breadth: the shell capability (complete)
+
+- DshBeam.Shell.Plugin: a non-LLM provider (:shell) with typed settings and
+  subprocess execution (timeout + output cap). The Shell settings mirror the
+  original harness's inventory verbatim.
+- DshBeam.Shell.Consumer: guard across a non-LLM capability.
+- Fixed a latent teardown race (context dies between alive? check and the
+  unload call on the runtime exit cascade) — the injected terminate/3 now
+  swallows that exit.
