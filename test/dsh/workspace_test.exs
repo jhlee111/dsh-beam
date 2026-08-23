@@ -67,4 +67,91 @@ defmodule DshBeam.WorkspaceTest do
     :ok = DshBeam.Session.set_header(session, %{cwd: "/repo/new"})
     assert DshBeam.Session.header(session).cwd == "/repo/new"
   end
+
+  # -- worktree-backed sessions (the workspace owns the checkout) --
+
+  setup :git_repo
+
+  defp git_repo(_context) do
+    dir = Path.join(System.tmp_dir!(), "dsh_ws_repo_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    run_git(dir, ["init", "-q", "-b", "main"])
+    File.write!(Path.join(dir, "README.md"), "hello")
+    run_git(dir, ["add", "."])
+    run_git(dir, ["commit", "-q", "-m", "init"])
+
+    on_exit(fn -> File.rm_rf!(dir) end)
+    %{repo: dir}
+  end
+
+  test "open_session checks out a worktree and starts the session log in it", %{repo: repo} do
+    {:ok, runtime} = DshBeam.Runtime.start_link([workspace_entry()], [])
+    ctx = DshBeam.Runtime.context(runtime)
+    {:ok, workspace} = DshBeam.Context.get(ctx, :workspace)
+
+    assert {:ok, session} = DshBeam.Workspace.open_session(workspace, repo)
+
+    # the session owns its checkout: header.cwd is the worktree, which exists
+    # on disk with the repository's content checked out
+    %{cwd: cwd, title: title} = DshBeam.Session.header(session)
+    assert is_binary(cwd)
+    assert File.exists?(Path.join(cwd, "README.md"))
+    assert title =~ "session/"
+
+    # and the workspace lists it
+    assert %{^session => %{repo: _}} = DshBeam.Workspace.all_sessions(workspace)
+  end
+
+  test "two sessions over one repository get distinct worktrees", %{repo: repo} do
+    {:ok, runtime} = DshBeam.Runtime.start_link([workspace_entry()], [])
+    ctx = DshBeam.Runtime.context(runtime)
+    {:ok, workspace} = DshBeam.Context.get(ctx, :workspace)
+
+    {:ok, a} = DshBeam.Workspace.open_session(workspace, repo)
+    {:ok, b} = DshBeam.Workspace.open_session(workspace, repo)
+
+    %{cwd: cwd_a} = DshBeam.Session.header(a)
+    %{cwd: cwd_b} = DshBeam.Session.header(b)
+    assert cwd_a != cwd_b
+
+    # a write in one worktree does not appear in the other (isolation)
+    File.write!(Path.join(cwd_a, "only_a.txt"), "a")
+    refute File.exists?(Path.join(cwd_b, "only_a.txt"))
+
+    assert map_size(DshBeam.Workspace.all_sessions(workspace)) == 2
+  end
+
+  test "close_session removes the worktree and drops the session", %{repo: repo} do
+    {:ok, runtime} = DshBeam.Runtime.start_link([workspace_entry()], [])
+    ctx = DshBeam.Runtime.context(runtime)
+    {:ok, workspace} = DshBeam.Context.get(ctx, :workspace)
+
+    {:ok, session} = DshBeam.Workspace.open_session(workspace, repo)
+    %{cwd: cwd} = DshBeam.Session.header(session)
+    assert File.exists?(cwd)
+
+    assert :ok = DshBeam.Workspace.close_session(workspace, session)
+
+    refute File.exists?(cwd)
+    assert DshBeam.Workspace.all_sessions(workspace) == %{}
+    refute Process.alive?(session)
+  end
+
+  test "open_session outside a repository is refused", _context do
+    {:ok, runtime} = DshBeam.Runtime.start_link([workspace_entry()], [])
+    ctx = DshBeam.Runtime.context(runtime)
+    {:ok, workspace} = DshBeam.Context.get(ctx, :workspace)
+
+    outside = Path.join(System.tmp_dir!(), "dsh_ws_notrepo_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(outside)
+    on_exit(fn -> File.rm_rf!(outside) end)
+
+    assert {:error, :not_a_git_repo} = DshBeam.Workspace.open_session(workspace, outside)
+    assert DshBeam.Workspace.all_sessions(workspace) == %{}
+  end
+
+  defp run_git(dir, args) do
+    {_out, 0} = System.cmd("git", args, stderr_to_stdout: true, cd: dir)
+    :ok
+  end
 end

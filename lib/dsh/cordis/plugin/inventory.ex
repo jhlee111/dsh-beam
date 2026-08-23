@@ -26,11 +26,24 @@ defmodule DshBeam.Plugin.Inventory do
     DshBeam.Plugin.settings(mod)
   end
 
+  # Installed plugins are discovered deterministically, not by whatever
+  # happens to be loaded at the moment: the application's own compiled modules
+  # (Application.spec) plus any runtime-loaded plugin (a creator-defined module
+  # compiled with Code.compile_string). Relying on :code.all_loaded() alone
+  # made the inventory — and therefore the tool registry, the UI slots, and the
+  # plugins panel — depend on load order, so a bare console mounted in a fresh
+  # VM rendered no panels until something else had referenced them.
   defp loaded_plugins do
-    for {mod, _binary} <- :code.all_loaded(),
-        is_atom(mod),
-        behaviours = mod.module_info(:attributes)[:behaviour] || [],
-        DshBeam.Plugin in behaviours,
-        do: mod
+    app_modules = Application.spec(:dsh_beam, :modules) || []
+    runtime_modules = for {mod, _binary} <- :code.all_loaded(), do: mod
+
+    (app_modules ++ runtime_modules)
+    |> Enum.uniq()
+    |> Enum.filter(&plugin?/1)
+  end
+
+  defp plugin?(mod) do
+    is_atom(mod) and Code.ensure_loaded?(mod) and
+      Enum.member?(mod.module_info(:attributes)[:behaviour] || [], DshBeam.Plugin)
   end
 end

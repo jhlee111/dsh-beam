@@ -17,20 +17,32 @@ defmodule DshBeam.Session.Plugin do
 
   @impl DshBeam.Plugin
   def mount(_ctx, opts) do
-    provider = Keyword.get(opts, :provider, DshBeam.Session.Memory)
-    {:ok, session} = provider.start(opts)
-    {:ok, [], %{session: session}, %{session: session}}
+    case Keyword.fetch(opts, :session) do
+      # adopt an externally-owned session (a workspace worktree session): the
+      # plugin points :session at it but does NOT own its lifetime
+      {:ok, session} ->
+        {:ok, [], %{session: session}, %{session: session, owned: false}}
+
+      :error ->
+        provider = Keyword.get(opts, :provider, DshBeam.Session.Memory)
+        {:ok, session} = provider.start(opts)
+        {:ok, [], %{session: session}, %{session: session, owned: true}}
+    end
   end
 
   @impl DshBeam.Plugin
   def handle_dsh_ready(state) do
-    session = state.extra.session
+    # Only the mount-started session is released here: a workspace session is
+    # owned by the workspace, not this plugin.
+    if state.extra.owned do
+      session = state.extra.session
 
-    :ok =
-      DshBeam.Context.effect(state.ctx, fn st ->
-        if Process.alive?(session), do: Process.exit(session, :shutdown)
-        st
-      end)
+      :ok =
+        DshBeam.Context.effect(state.ctx, fn st ->
+          if Process.alive?(session), do: Process.exit(session, :shutdown)
+          st
+        end)
+    end
 
     {:ok, state}
   end
@@ -46,8 +58,10 @@ defmodule DshBeam.Session.Plugin do
 
     # fallback for whole-application shutdown, when the context may already
     # be gone and the release inverse never ran
-    session = data.extra.session
-    if Process.alive?(session), do: Process.exit(session, :shutdown)
+    if data.extra[:owned] do
+      session = data.extra.session
+      if Process.alive?(session), do: Process.exit(session, :shutdown)
+    end
 
     :ok
   end
