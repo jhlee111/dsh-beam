@@ -38,12 +38,14 @@ plugins built on it (`packages/*`).
 Everything the harness does is visible on one page — a plugin that owns the
 Phoenix endpoint, fed by the context/runtime subscription streams:
 
-    mix run scripts/console.exs   # http://127.0.0.1:4001
+    DEEPSEEK_API_KEY=sk-... mix run scripts/console.exs   # http://127.0.0.1:4001
 
-Set DEEPSEEK_API_KEY to talk to real deepseek-chat; without it the chat pane
-uses the offline Echo adapter. The page shows fibers (4 states), bindings,
-the event feed, and a creator/sandbox source editor with kill/crash buttons
-to watch re-injection and the L-Unload guard live.
+The chat pane drives the agent loop (model ↔ bash/fs tools) and renders its
+trace; the llm provider talks to real deepseek-chat via the DEEPSEEK_API_KEY
+environment variable. Without it the pane reports
+{:error, {:missing_env, "DEEPSEEK_API_KEY"}}. The page shows fibers (4 states),
+bindings, the event feed, and a creator/sandbox source editor with kill/crash
+buttons to watch re-injection and the L-Unload guard live.
 
 ## Protocol summary
 

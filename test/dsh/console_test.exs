@@ -7,6 +7,15 @@ defmodule DshBeam.ConsoleTest do
   @endpoint DshBeamWeb.Endpoint
 
   setup do
+    # the seed mounts the llm provider with the real Req adapter; ensure no
+    # API key leaks from the developer's environment into the chat-path tests
+    previous_key = System.get_env("DEEPSEEK_API_KEY")
+    System.delete_env("DEEPSEEK_API_KEY")
+
+    on_exit(fn ->
+      if previous_key, do: System.put_env("DEEPSEEK_API_KEY", previous_key)
+    end)
+
     # start_supervised! tears the runtime down synchronously in this test's
     # teardown phase (before the next test starts), so the console's web
     # subtree (endpoint + pubsub) never overlaps the next test's mount
@@ -43,18 +52,14 @@ defmodule DshBeam.ConsoleTest do
     assert html =~ "DshBeam.Session.Plugin"
   end
 
-  test "the chat pane runs the full loop through session + llm plugins", %{
-    session: session,
-    ctx: ctx
-  } do
+  test "the chat pane reports a missing credential honestly", %{session: session} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
     render_submit(view, "seed", %{})
 
+    # no DEEPSEEK_API_KEY -> the real Req adapter fails the credential
+    # resolution, and the chat pane surfaces the error instead of a fake reply
     html = render_submit(view, "ask", %{"text" => "hello console"})
-    assert html =~ "echo: hello console"
-
-    {:ok, session_pid} = DshBeam.Context.get(ctx, :session)
-    assert DshBeam.Session.count(session_pid) == 2
+    assert html =~ "missing_env"
   end
 
   test "the chat pane renders the loop's tool trace", %{session: session, runtime: runtime} do

@@ -22,12 +22,7 @@ defmodule DshBeamWeb.ConsoleLive do
 
   @demo_entries [
     %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
-    %{
-      id: :llm,
-      plugin: DshBeam.Llm.Plugin,
-      config: [adapter: DshBeam.Llm.Adapter.Echo],
-      disabled: false
-    },
+    %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [], disabled: false},
     %{id: :shell, plugin: DshBeam.Shell.Plugin, config: [], disabled: false},
     %{id: :bash, plugin: DshBeam.Tool.Bash, config: [], disabled: false},
     %{id: :fs, plugin: DshBeam.Tool.Fs, config: [root: "."], disabled: false},
