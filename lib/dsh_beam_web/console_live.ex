@@ -76,6 +76,9 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:settings_open, false)
       |> assign(:settings_section, :models)
       |> assign(:view_tab, :chat)
+      |> assign(:plugin_open, MapSet.new())
+      |> assign(:plugin_drafts, %{})
+      |> assign(:plugins_result, nil)
       |> refresh()
 
     {:ok, socket}
@@ -282,7 +285,7 @@ defmodule DshBeamWeb.ConsoleLive do
   end
 
   def handle_event("settings_save", params, socket) do
-    plugin = String.to_existing_atom(params["plugin"])
+    plugin = decode_plugin!(params["plugin"])
     store = DshBeam.Runtime.settings(socket.assigns.runtime)
     values = params["settings"] || %{}
 
@@ -306,7 +309,11 @@ defmodule DshBeamWeb.ConsoleLive do
       id -> DshBeam.Runtime.restart(socket.assigns.runtime, id)
     end
 
-    {:noreply, refresh(socket)}
+    {:noreply,
+     socket
+     |> assign(plugin_drafts: Map.delete(socket.assigns.plugin_drafts, plugin))
+     |> assign(plugins_result: "saved #{friendly_plugin_name(plugin)}")
+     |> refresh()}
   end
 
   def handle_event("open_settings", _params, socket) do
@@ -320,6 +327,30 @@ defmodule DshBeamWeb.ConsoleLive do
   def handle_event("view_tab", %{"tab" => tab}, socket) do
     view_tab = if tab == "trajectory", do: :trajectory, else: :chat
     {:noreply, assign(socket, view_tab: view_tab) |> refresh()}
+  end
+
+  def handle_event("plugin_toggle", %{"plugin" => plugin_str}, socket) do
+    plugin = decode_plugin!(plugin_str)
+    open = socket.assigns.plugin_open
+
+    open =
+      if MapSet.member?(open, plugin),
+        do: MapSet.delete(open, plugin),
+        else: MapSet.put(open, plugin)
+
+    {:noreply, assign(socket, plugin_open: open) |> refresh()}
+  end
+
+  def handle_event("plugin_edit", %{"plugin" => plugin_str, "settings" => settings}, socket) do
+    plugin = decode_plugin!(plugin_str)
+    drafts = Map.put(socket.assigns.plugin_drafts, plugin, settings)
+    {:noreply, assign(socket, plugin_drafts: drafts) |> refresh()}
+  end
+
+  def handle_event("plugin_discard", %{"plugin" => plugin_str}, socket) do
+    plugin = decode_plugin!(plugin_str)
+    drafts = Map.delete(socket.assigns.plugin_drafts, plugin)
+    {:noreply, assign(socket, plugin_drafts: drafts) |> refresh()}
   end
 
   def handle_event("settings_tab", %{"section" => section_key}, socket) do
@@ -597,7 +628,13 @@ defmodule DshBeamWeb.ConsoleLive do
       todos: todos(socket.assigns.ctx),
       trajectory: trajectory(socket.assigns.ctx),
       workspace_sessions: workspace_sessions(socket.assigns.ctx),
-      inventory: build_inventory(runtime, entries),
+      inventory:
+        build_inventory(
+          runtime,
+          entries,
+          socket.assigns.plugin_open,
+          socket.assigns.plugin_drafts
+        ),
       settings_sections: settings_sections()
     )
   end
@@ -746,40 +783,89 @@ defmodule DshBeamWeb.ConsoleLive do
     end
   end
 
-  defp build_inventory(runtime, entries) do
+  defp build_inventory(runtime, entries, plugin_open, plugin_drafts) do
     store = DshBeam.Runtime.settings(runtime)
     mounted = MapSet.new(entries, fn {_id, rec} -> rec.spec.plugin end)
 
     DshBeam.Plugin.Inventory.installed()
     |> Enum.map(fn entry ->
+      plugin = entry.plugin
+      drafts = Map.get(plugin_drafts, plugin, %{})
+
       %{
-        plugin: entry.plugin,
-        name: entry.plugin |> inspect() |> String.replace("Elixir.", ""),
-        enabled: MapSet.member?(mounted, entry.plugin),
-        settings: Enum.map(entry.settings, &setting_view(store, entry.plugin, &1))
+        plugin: plugin,
+        name: friendly_plugin_name(plugin),
+        enabled: MapSet.member?(mounted, plugin),
+        open: MapSet.member?(plugin_open, plugin),
+        dirty: map_size(drafts) > 0,
+        desc: plugin_desc(plugin),
+        settings: Enum.map(entry.settings, &setting_view(store, plugin, &1, drafts))
       }
     end)
+    |> Enum.sort_by(& &1.name)
   end
 
-  defp setting_view(store, plugin, setting) do
+  defp setting_view(store, plugin, setting, drafts) do
     value =
       case DshBeam.Settings.get(store, plugin, setting.name) do
         {:ok, value} -> value
         _ -> setting.default
       end
 
+    display = setting_display(setting.type, value)
+
     %{
       name: setting.name,
       type: setting.type,
       doc: setting.doc,
       value: value,
-      display: setting_display(setting.type, value)
+      display: display,
+      text: Map.get(drafts, to_string(setting.name), display)
     }
   end
 
   defp setting_display(:credential, {:env, name}), do: "env:" <> name
   defp setting_display(:credential, {:literal, _key}), do: "literal:"
   defp setting_display(_type, value), do: to_string(value)
+
+  # A short human label for the card header and save notice; falls back to the
+  # module's own name when the plugin is not one of the known hosts.
+  @plugin_names %{
+    DshBeam.Shell.Plugin => "Shell",
+    DshBeam.Agent.Loop => "Agent Loop",
+    DshBeam.Tool.Bash => "Tool: Bash",
+    DshBeam.Tool.Fs => "Tool: Files",
+    DshBeam.Tool.Todo => "Tool: Todo",
+    DshBeam.Workspace => "Workspace",
+    DshBeam.Llm.Plugin => "LLM"
+  }
+
+  defp friendly_plugin_name(plugin) do
+    Map.get_lazy(@plugin_names, plugin, fn ->
+      plugin |> inspect() |> String.replace("Elixir.", "")
+    end)
+  end
+
+  @plugin_descriptions %{
+    DshBeam.Shell.Plugin => "Command timeout and output cap per stream",
+    DshBeam.Agent.Loop => "Max model→tool round-trips",
+    DshBeam.Tool.Todo => "The agent's plan/todo list",
+    DshBeam.Workspace => "Default root for new session worktrees",
+    DshBeam.Llm.Plugin => "Provider, model, and credential"
+  }
+
+  defp plugin_desc(plugin) do
+    Map.get(@plugin_descriptions, plugin, "Configure this plugin's settings")
+  end
+
+  # Decode an inspect/1 or to_string/1 form of a module back to the module atom.
+  # Both "DshBeam.Shell.Plugin" (inspect) and "Elixir.DshBeam.Shell.Plugin"
+  # (to_string) reach the loaded module atom.
+  defp decode_plugin!(str) do
+    str = to_string(str)
+    str = if String.starts_with?(str, "Elixir."), do: str, else: "Elixir." <> str
+    String.to_existing_atom(str)
+  end
 
   defp os_pid_for(%{plugin: DshBeam.Sandbox.Plugin, pid: pid}) when is_pid(pid) do
     # the adapter may be mid-crash when the event refresh runs: never let a

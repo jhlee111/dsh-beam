@@ -203,6 +203,34 @@ defmodule DshBeamWeb.Layouts do
           .events { max-height: 200px; overflow-y: auto; }
           .chat { max-height: 260px; overflow-y: auto; }
 
+          /* Configurable plugin cards (reference ui-settings-plugins). */
+          .plugins-scroll { display: flex; flex-direction: column; gap: 8px; }
+          .plugin-card {
+            border: 1px solid var(--dsw-alias-border-l2);
+            border-radius: 8px; overflow: hidden;
+            background: var(--dsw-alias-bg-layer-1, #1a1f27);
+          }
+          .plugin-head {
+            display: flex; align-items: center; gap: 8px; width: 100%;
+            padding: 8px 10px; background: transparent; border: none; cursor: pointer;
+            text-align: left; color: inherit; font-size: 14px;
+          }
+          .plugin-head:hover { background: var(--dsw-alias-interactive-bg-hover); }
+          .plugin-name { font-weight: 600; }
+          .plugin-desc {
+            flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap; color: var(--dsw-alias-label-secondary); font-size: 12px;
+          }
+          .chevron { margin-left: auto; transition: transform .15s var(--ds-ease-in-out); }
+          .chevron.open { transform: rotate(180deg); }
+          .plugin-body { padding: 8px 10px; border-top: 1px solid var(--dsw-alias-border-l2); }
+          .plugin-body label {
+            display: block; margin: 8px 0 2px; color: var(--dsw-alias-label-secondary); font-size: 12px;
+          }
+          .plugin-body input { width: 100%; box-sizing: border-box; }
+          .plugin-actions { display: flex; gap: 8px; margin-top: 10px; }
+          .pill.unsaved { color: var(--dsw-static-amber-400); border-color: var(--dsw-static-amber-400); }
+
           /* Models provider card (mirrors the reference models section). */
           .provider-card {
             border: 1px solid var(--dsw-alias-border-l3, #2b3442);

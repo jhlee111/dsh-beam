@@ -314,21 +314,47 @@ defmodule DshBeam.Ui.Panel do
       ~H"""
       <section>
         <h2>plugins</h2>
-        <div class="scroll">
-          <%= for plugin <- @inventory do %>
-            <div style="border-top:1px solid #20262f; padding:6px 0">
-              <strong><%= plugin.name %></strong>
-              <span class={"pill state-#{if plugin.enabled, do: "active", else: "gone"}"}>
-                <%= if plugin.enabled, do: "enabled", else: "disabled" %>
-              </span>
-              <%= if plugin.settings != [] do %>
-                <form phx-submit="settings_save" class="row">
-                  <input type="hidden" name="plugin" value={to_string(plugin.plugin)} />
-                  <%= for setting <- plugin.settings do %>
-                    <label class="muted" title={setting.doc}><%= setting.name %></label>
-                    <input type="text" name={"settings[#{setting.name}]"} value={setting.display} />
+        <%= if @plugins_result do %>
+          <p class="muted"><%= @plugins_result %></p>
+        <% end %>
+        <div class="plugins-scroll">
+          <%= for p <- @inventory do %>
+            <div class="plugin-card">
+              <button
+                type="button"
+                class="plugin-head"
+                phx-click="plugin_toggle"
+                phx-value-plugin={inspect(p.plugin)}
+              >
+                <span class="plugin-name"><%= p.name %></span>
+                <span class={"pill state-#{if p.enabled, do: "active", else: "gone"}"}>
+                  <%= if p.enabled, do: "enabled", else: "disabled" %>
+                </span>
+                <%= if p.settings != [] do %>
+                  <span class="plugin-desc"><%= p.desc %></span>
+                  <%= if p.dirty do %>
+                    <span class="pill unsaved">unsaved</span>
                   <% end %>
-                  <button type="submit">save</button>
+                  <span class={"chevron #{if p.open, do: "open"}"}>▾</span>
+                <% end %>
+              </button>
+              <%= if p.open and p.settings != [] do %>
+                <form class="plugin-body" phx-change="plugin_edit" phx-submit="settings_save">
+                  <input type="hidden" name="plugin" value={to_string(p.plugin)} />
+                  <%= for s <- p.settings do %>
+                    <label class="muted" title={s.doc}><%= s.name %></label>
+                    <input type="text" name={"settings[#{s.name}]"} value={s.text} />
+                  <% end %>
+                  <div class="plugin-actions">
+                    <button type="submit">save</button>
+                    <button
+                      type="button"
+                      phx-click="plugin_discard"
+                      phx-value-plugin={inspect(p.plugin)}
+                    >
+                      discard
+                    </button>
+                  </div>
                 </form>
               <% end %>
             </div>

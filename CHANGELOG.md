@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Plugins settings surface — configurable cards
+
+- The Plugins tab now renders each plugin as an accordion card (reference
+  `ui-settings-plugins`): a header with a friendly name, an enabled/disabled
+  pill, a description, and an unsaved badge; expanding a configurable card
+  discloses its typed fields with staged edit + Save/Discard. Edits stage in
+  the LiveView until Save writes them (and re-mounts the plugin); Discard
+  drops them without writing.
+
 ### Console shell — reference layout
 
 - The console now mirrors the reference three-column `AppFrame` grid

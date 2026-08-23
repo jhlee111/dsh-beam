@@ -294,6 +294,51 @@ defmodule DshBeam.ConsoleTest do
     assert html =~ "9"
   end
 
+  test "the plugins tab shows configurable cards with staged edits", %{
+    session: session,
+    runtime: runtime
+  } do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    _ = open_settings(view)
+    _ = open_section(view, :plugins)
+
+    # every plugin renders as a card, with its name and an enabled pill
+    html = render(view)
+    assert html =~ "plugin-card"
+    assert html =~ "ConsoleSettingsPlugin"
+    assert html =~ "enabled"
+
+    # expanding a configurable card discloses its fields
+    html = render_click(view, "plugin_toggle", %{"plugin" => to_string(ConsoleSettingsPlugin)})
+    assert html =~ "answer_limit"
+
+    # staging an edit marks the card unsaved
+    html =
+      render_change(view, "plugin_edit", %{
+        "plugin" => to_string(ConsoleSettingsPlugin),
+        "settings" => %{"answer_limit" => "7"}
+      })
+
+    assert html =~ "unsaved"
+
+    # discard drops the staged edit without writing; the default is intact
+    html = render_click(view, "plugin_discard", %{"plugin" => to_string(ConsoleSettingsPlugin)})
+    refute html =~ "unsaved"
+
+    store = DshBeam.Runtime.settings(runtime)
+    assert {:ok, 3} = DshBeam.Settings.get(store, ConsoleSettingsPlugin, :answer_limit)
+
+    # save writes the staged value and reports the save
+    html =
+      render_submit(view, "settings_save", %{
+        "plugin" => to_string(ConsoleSettingsPlugin),
+        "settings" => %{"answer_limit" => "9"}
+      })
+
+    assert html =~ "saved"
+    assert {:ok, 9} = DshBeam.Settings.get(store, ConsoleSettingsPlugin, :answer_limit)
+  end
+
   test "the sandbox form defines a plugin outside the host BEAM", %{session: session, ctx: ctx} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
     _ = open_settings(view)
