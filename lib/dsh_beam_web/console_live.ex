@@ -253,6 +253,10 @@ defmodule DshBeamWeb.ConsoleLive do
      socket |> assign(:events, Enum.take([event | socket.assigns.events], 100)) |> refresh()}
   end
 
+  def handle_info({:dsh_session_event, _event}, socket) do
+    {:noreply, refresh(socket)}
+  end
+
   def handle_info({:dsh_runtime_event, _event}, socket) do
     {:noreply, refresh(socket)}
   end
@@ -483,6 +487,10 @@ defmodule DshBeamWeb.ConsoleLive do
   defp chat_log(ctx) do
     case DshBeam.Context.get(ctx, :session) do
       {:ok, session} when is_pid(session) ->
+        # idempotent: once subscribed, appends fan out {:dsh_session_event, ...}
+        # and re-render the pane incrementally (reactive coeffect, not polling)
+        _ = DshBeam.Session.subscribe(session)
+
         session
         |> DshBeam.Session.all()
         |> Enum.map(&chat_entry/1)

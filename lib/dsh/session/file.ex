@@ -29,13 +29,14 @@ defmodule DshBeam.Session.File do
         []
       end
 
-    {:ok, %{path: path, seq: length(events)}}
+    {:ok, %{path: path, seq: length(events), subscribers: %{}}}
   end
 
   @impl true
   def handle_call({:append, event}, _from, state) do
     seq = state.seq + 1
     File.open(state.path, [:append], fn io -> IO.puts(io, JSON.encode!(event)) end)
+    notify(state.subscribers, event)
     {:reply, {:ok, seq}, %{state | seq: seq}}
   end
 
@@ -54,6 +55,27 @@ defmodule DshBeam.Session.File do
   def handle_call(:clear, _from, state) do
     File.write!(state.path, "")
     {:reply, :ok, %{state | seq: 0}}
+  end
+
+  @impl true
+  def handle_call(:subscribe, {owner, _tag}, state) do
+    case state.subscribers do
+      %{^owner => _ref} ->
+        {:reply, :ok, state}
+
+      _ ->
+        ref = Process.monitor(owner)
+        {:reply, :ok, %{state | subscribers: Map.put(state.subscribers, owner, ref)}}
+    end
+  end
+
+  @impl true
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
+    {:noreply, %{state | subscribers: Map.delete(state.subscribers, pid)}}
+  end
+
+  defp notify(subscribers, event) do
+    Enum.each(subscribers, fn {pid, _ref} -> send(pid, {:dsh_session_event, event}) end)
   end
 
   defp decode_line(line) do
