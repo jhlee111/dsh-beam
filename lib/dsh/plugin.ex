@@ -220,12 +220,19 @@ defmodule DshBeam.Plugin do
         ctx = data.ctx
 
         if is_pid(ctx) and Process.alive?(ctx) do
-          DshBeam.Context.unload(ctx, self())
+          # the context may die between the alive? check and the call (the
+          # runtime tears it down on the same exit cascade): a dead context
+          # needs no unload, so swallow the race
+          try do
+            DshBeam.Context.unload(ctx, self())
 
-          receive do
-            {:dsh_unloaded, _owner} -> :ok
-          after
-            @dsh_unload_timeout -> :ok
+            receive do
+              {:dsh_unloaded, _owner} -> :ok
+            after
+              @dsh_unload_timeout -> :ok
+            end
+          catch
+            :exit, _reason -> :ok
           end
         end
 
