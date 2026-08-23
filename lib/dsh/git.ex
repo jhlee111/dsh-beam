@@ -52,7 +52,29 @@ defmodule DshBeam.Git do
   end
 
   defp git(dir, args) do
-    {output, status} = System.cmd("git", args, stderr_to_stdout: true, cd: dir)
-    if status == 0, do: {:ok, output}, else: {:error, status, output}
+    # System.cmd links its subprocess port to the caller; a caller that traps
+    # exits (a plugin fiber) would receive the port's completion EXIT and stop.
+    # Run it in an unlinked, monitored process and have it report the result
+    # back — the same isolation the Shell plugin uses for its subprocess.
+    parent = self()
+
+    pid =
+      spawn(fn ->
+        send(
+          parent,
+          {:git_result, self(), System.cmd("git", args, stderr_to_stdout: true, cd: dir)}
+        )
+      end)
+
+    ref = Process.monitor(pid)
+
+    receive do
+      {:git_result, ^pid, {output, status}} ->
+        Process.demonitor(ref, [:flush])
+        if status == 0, do: {:ok, output}, else: {:error, status, output}
+
+      {:DOWN, ^ref, :process, ^pid, _reason} ->
+        {:error, :crashed, ""}
+    end
   end
 end
