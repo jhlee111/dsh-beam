@@ -64,6 +64,25 @@ defmodule DshBeam.Plugin do
   @doc "The fiber's own lifecycle state (its :gen_statem state)."
   def fiber_state(pid), do: :gen_statem.call(pid, :__dsh_fiber_state__)
 
+  @doc """
+  The module's declared typed settings (name/type/default/doc), introspected
+  from the Spark DSL — the schema a plugin-inventory/settings UI renders.
+  """
+  def settings(mod) when is_atom(mod) do
+    if Code.ensure_loaded?(mod) do
+      try do
+        Spark.Dsl.Extension.get_entities(mod, [:setting])
+        |> Enum.map(fn setting ->
+          %{name: setting.name, type: setting.type, default: setting.default, doc: setting.doc}
+        end)
+      rescue
+        _ -> []
+      end
+    else
+      []
+    end
+  end
+
   # The case analyses on the generic hooks live here, behind a remote call,
   # so the type checker treats the dispatch result as dynamic: the default
   # hook bodies return a single shape, and narrowing a local call's case

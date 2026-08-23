@@ -18,6 +18,11 @@ defmodule DshBeam.Plugin.Dsl do
     defstruct [:key, :value, :via, :__identifier__, :__spark_metadata__]
   end
 
+  defmodule Setting do
+    @moduledoc false
+    defstruct [:name, :type, :default, :doc, :__identifier__, :__spark_metadata__]
+  end
+
   use Spark.Dsl.Extension,
     sections: [
       Section.new(:need,
@@ -49,6 +54,28 @@ defmodule DshBeam.Plugin.Dsl do
               )
             ],
             identifier: :key
+          )
+          |> Entity.build!()
+        ]
+      )
+      |> Section.build!(),
+      Section.new(:setting,
+        describe: "A typed configuration setting (the plugin inventory's schema)",
+        top_level?: true,
+        entities: [
+          Entity.new(:setting, Setting,
+            describe: "one typed setting with its default",
+            args: [:name],
+            schema: [
+              Field.new(:name, :atom, required: true, doc: "the setting key"),
+              Field.new(:type, :atom,
+                required: true,
+                doc: ":integer | :float | :boolean | :string | :credential"
+              ),
+              Field.new(:default, :any, required: true, doc: "the default value"),
+              Field.new(:doc, :string, default: "", doc: "human description")
+            ],
+            identifier: :name
           )
           |> Entity.build!()
         ]
