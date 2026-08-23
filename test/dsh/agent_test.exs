@@ -41,6 +41,20 @@ defmodule DshBeam.AgentTest do
     {:ok, session} = DshBeam.Context.get(ctx, :session)
     assert DshBeam.Session.count(session) == 2
   end
+
+  test "run_trace/2 returns the loop's step trace" do
+    {:ok, runtime} =
+      DshBeam.Runtime.start_link([session_entry(), llm_entry(), tool_entry(), loop_entry()], [])
+
+    %{loop: %{pid: loop}} = DshBeam.Runtime.entries(runtime)
+
+    assert {:ok, "final answer", trace} = DshBeam.Agent.Loop.run_trace(loop, "do something")
+
+    assert trace == [
+             {:tool_call, "loop_echo", %{"text" => "from-loop"}},
+             {:tool_result, "loop_echo", "echo:from-loop"}
+           ]
+  end
 end
 
 defmodule LoopEchoTool do

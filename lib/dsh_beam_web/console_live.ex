@@ -28,7 +28,10 @@ defmodule DshBeamWeb.ConsoleLive do
       config: [adapter: DshBeam.Llm.Adapter.Echo],
       disabled: false
     },
-    %{id: :chat, plugin: DshBeam.Llm.Chat, config: [], disabled: false}
+    %{id: :shell, plugin: DshBeam.Shell.Plugin, config: [], disabled: false},
+    %{id: :bash, plugin: DshBeam.Tool.Bash, config: [], disabled: false},
+    %{id: :fs, plugin: DshBeam.Tool.Fs, config: [root: "."], disabled: false},
+    %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false}
   ]
 
   @impl true
@@ -106,30 +109,31 @@ defmodule DshBeamWeb.ConsoleLive do
     specs =
       socket.assigns.runtime
       |> current_specs()
-      |> Enum.reject(&(&1.id in [:session, :llm, :chat]))
+      |> Enum.reject(&(&1.id in [:session, :llm, :shell, :bash, :fs, :loop]))
 
     :ok = DshBeam.Runtime.reconcile(socket.assigns.runtime, specs ++ @demo_entries)
     {:noreply, refresh(socket)}
   end
 
   def handle_event("ask", %{"text" => text}, socket) do
-    reply =
-      case DshBeam.Context.get(socket.assigns.ctx, :chat) do
-        {:ok, chat} -> DshBeam.Llm.Chat.ask(chat, text)
-        :not_found -> {:error, :no_chat_plugin}
+    result =
+      case loop_pid(socket.assigns.runtime) do
+        {:ok, loop} -> DshBeam.Agent.Loop.run_trace(loop, text)
+        :not_found -> {:error, :no_loop_plugin}
       end
 
-    entry = {"user", text}
+    turn =
+      case result do
+        {:ok, answer, trace} ->
+          [{"user", text} | Enum.map(trace, &trace_entry/1)] ++ [{"assistant", answer}]
 
-    assistant =
-      case reply do
-        {:ok, %{content: content}} -> {"assistant", content}
-        {:error, reason} -> {"error", inspect(reason)}
+        {:error, reason} ->
+          [{"user", text}, {"error", inspect(reason)}]
       end
 
     {:noreply,
      socket
-     |> assign(chat_log: [assistant, entry | socket.assigns.chat_log], chat_text: "")
+     |> assign(chat_log: socket.assigns.chat_log ++ turn, chat_text: "")
      |> refresh()}
   end
 
@@ -292,7 +296,7 @@ defmodule DshBeamWeb.ConsoleLive do
           </ul>
         </div>
         <form class="row" phx-submit="ask">
-          <input type="text" name="text" value={@chat_text} placeholder="say something (needs session + llm + chat)" style="flex:1" />
+          <input type="text" name="text" value={@chat_text} placeholder="run a task (drives the agent loop)" style="flex:1" />
           <button type="submit">ask</button>
         </form>
       </section>
@@ -373,6 +377,16 @@ defmodule DshBeamWeb.ConsoleLive do
   end
 
   # -- internals --
+
+  defp loop_pid(runtime) do
+    case DshBeam.Runtime.entries(runtime) do
+      %{loop: %{pid: pid}} when is_pid(pid) -> {:ok, pid}
+      _ -> :not_found
+    end
+  end
+
+  defp trace_entry({:tool_call, name, args}), do: {"tool_call", "#{name} #{inspect(args)}"}
+  defp trace_entry({:tool_result, name, result}), do: {"tool_result", "#{name} -> #{result}"}
 
   defp refs(session) do
     case session do

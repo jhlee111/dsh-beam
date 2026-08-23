@@ -37,8 +37,9 @@ defmodule DshBeam.ConsoleTest do
     html = render_submit(view, "seed", %{})
     assert html =~ ":session"
     assert html =~ ":llm"
-    assert html =~ ":chat"
-    assert html =~ "DshBeam.Llm.Chat"
+    assert html =~ ":shell"
+    assert html =~ ":bash"
+    assert html =~ ":loop"
     assert html =~ "DshBeam.Session.Plugin"
   end
 
@@ -54,6 +55,30 @@ defmodule DshBeam.ConsoleTest do
 
     {:ok, session_pid} = DshBeam.Context.get(ctx, :session)
     assert DshBeam.Session.count(session_pid) == 2
+  end
+
+  test "the chat pane renders the loop's tool trace", %{session: session, runtime: runtime} do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+
+    entries = [
+      %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
+      %{
+        id: :llm,
+        plugin: DshBeam.Llm.Plugin,
+        config: [adapter: ConsoleLoopLlm],
+        disabled: false
+      },
+      %{id: :tool, plugin: ConsoleEchoTool, config: [], disabled: false},
+      %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false}
+    ]
+
+    :ok = DshBeam.Runtime.reconcile(runtime, entries)
+
+    html = render_submit(view, "ask", %{"text" => "run"})
+    assert html =~ "tool_call"
+    assert html =~ "console_echo"
+    assert html =~ "tool_result"
+    assert html =~ "final answer"
   end
 
   test "the creator form defines a plugin in-process", %{session: session, ctx: ctx} do
@@ -217,4 +242,36 @@ defmodule ConsoleSettingsPlugin do
   use DshBeam.Plugin
 
   setting(:answer_limit, type: :integer, default: 3, doc: "max answers per request")
+end
+
+defmodule ConsoleEchoTool do
+  @moduledoc false
+  use DshBeam.Plugin
+
+  tool(:console_echo,
+    description: "echo the input",
+    parameters: %{"type" => "object", "properties" => %{"text" => %{"type" => "string"}}}
+  )
+
+  @impl DshBeam.Plugin
+  def handle_dsh_tool_call(:console_echo, %{"text" => text}, _state), do: {:ok, "echo:" <> text}
+end
+
+defmodule ConsoleLoopLlm do
+  @moduledoc false
+  @behaviour DshBeam.Llm.Adapter
+
+  @impl true
+  def complete(_config, messages, _opts) do
+    if Enum.any?(messages, &(&1["role"] == "tool")) do
+      {:ok, %{content: "final answer", tool_calls: [], finish_reason: :stop}}
+    else
+      {:ok,
+       %{
+         content: nil,
+         tool_calls: [%{id: "c1", name: "console_echo", arguments: ~s({"text":"hi"})}],
+         finish_reason: :tool_calls
+       }}
+    end
+  end
 end
