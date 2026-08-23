@@ -28,6 +28,7 @@ platform* and *how the UI is built* — and everything else hangs off them.
 | [0011](0011-disable-phoenix-code-reloader.md) | Disable the Phoenix code reloader in dev | accepted |
 | [0012](0012-builtin-type-checker-and-credo.md) | Built-in type checker + scoped Credo (no dialyzer) | accepted |
 | [0013](0013-ui-slots-for-panels.md) | UI slots: a UI panel is a plugin | accepted |
+| [0014](0014-session-surface-and-kv-cache.md) | Session history as an append-only log with a derived model surface (KV-cache reuse) | accepted |
 
 ## How to add an ADR
 
