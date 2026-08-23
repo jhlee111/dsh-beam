@@ -21,6 +21,17 @@ Elixir 1.20.2 / OTP 28(.tool-versions로 asdf 고정).
 - lib/dsh/loader.ex · runtime.ex — 선언적 조성 + 증분 재구성
 - lib/dsh/session.ex + session/* — 첫 플러그인: append-only 세션 로그
 - test/dsh/* — TDD 스위트(논문 보증당 테스트)
+- reference/deepseek-harness — TS 하네스 git submodule. 모듈·UI 이식의 소스
+  (pnpm 모노레포; 원본을 수정할 때는 그 저장소에서 별도 브랜치로 작업)
+
+## reference/ 서브모듈
+
+`reference/deepseek-harness`는 [jhlee111/deepseek-harness](https://github.com/jhlee111/deepseek-harness)를
+가리키는 git submodule이다. TS 하네스의 packages/* 모듈과 apps/web UI를 Elixir로
+이식·확용할 때 읽기 소스로 사용한다.
+
+    git submodule update --init            # 클론 직후 초기화
+    git -C reference/deepseek-harness pull # 최신 추적
 
 ## 프로토콜 요약
 
