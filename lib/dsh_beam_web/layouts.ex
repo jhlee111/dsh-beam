@@ -9,6 +9,7 @@ defmodule DshBeamWeb.Layouts do
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="csrf-token" content={csrf_token()} />
         <title>dsh-beam console</title>
         <style>
           body { font-family: ui-monospace, monospace; font-size: 13px; margin: 0; background: #0f1115; color: #d7dae0; }
@@ -39,8 +40,20 @@ defmodule DshBeamWeb.Layouts do
       </head>
       <body>
         {@inner_content}
+        <script src="/assets/phoenix.js"></script>
+        <script src="/assets/phoenix_live_view.js"></script>
+        <script>
+          let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
+          let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
+            params: { _csrf_token: csrfToken }
+          });
+          liveSocket.connect();
+          window.addEventListener("phx:page-loading-stop", () => liveSocket.enableDebug());
+        </script>
       </body>
     </html>
     """
   end
+
+  defp csrf_token, do: Plug.CSRFProtection.get_csrf_token()
 end
