@@ -355,3 +355,23 @@ key-level reactivity have to be hand-built). The PoC's contribution is making
 that boundary explicit: revertible effects port cleanly onto OTP, reactive
 coeffects and the guard do not — they are the parts that had to be invented
 afresh.
+
+## 23. Milestone 12 — toward a usable harness (in progress)
+
+After the conclusion, the console is being pushed from a design PoC into a
+harness you can actually drive. Session and history first, because they are the
+"usable in practice" premise:
+
+- **Multi-turn agent loop** — `Agent.Loop.run/2` replays prior user/assistant
+  turns from the session into the model context (a conversation, not a
+  stateless one-shot).
+- **Session as the chat pane's single source of truth** — the loop records each
+  turn chronologically (user → tool_call → tool_result → assistant, or error);
+  the chat pane derives its rows from `Session.all/1`, so a page refresh keeps
+  the conversation and tool execution is visible; `Session.clear/1` ("new
+  conversation") truncates the log.
+- **Session is a reactive coeffect** — `Session.subscribe/1` fans out
+  `{:dsh_session_event, event}` per append (dead subscribers cleaned via
+  `:DOWN`), so the chat pane re-renders incrementally as the loop produces tool
+  calls and the answer — real-time execution visibility without polling.
+- 99 tests.
