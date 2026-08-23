@@ -84,6 +84,7 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:chat_text, "")
       |> assign(:chat_log, [])
       |> assign(:chat_busy, false)
+      |> assign(:chat_task, nil)
       |> assign(:chat_error, nil)
       |> assign(:todos, [])
       |> assign(:events, [])
@@ -212,12 +213,13 @@ defmodule DshBeamWeb.ConsoleLive do
         # as a message and rendered in handle_info/2.
         from = self()
 
-        Task.start(fn ->
-          result = DshBeam.Agent.Loop.run_trace(loop, text)
-          send(from, {:chat_result, text, result})
-        end)
+        {:ok, task} =
+          Task.start(fn ->
+            result = DshBeam.Agent.Loop.run_trace(loop, text)
+            send(from, {:chat_result, text, result})
+          end)
 
-        {:noreply, socket |> assign(chat_text: "", chat_busy: true) |> refresh()}
+        {:noreply, socket |> assign(chat_text: "", chat_busy: true, chat_task: task) |> refresh()}
 
       :not_found ->
         {:noreply,
@@ -225,6 +227,23 @@ defmodule DshBeamWeb.ConsoleLive do
          |> assign(chat_text: "", chat_error: ":no_loop_plugin")
          |> refresh()}
     end
+  end
+
+  def handle_event("stop_chat", _params, socket) do
+    # Best-effort stop: the model call runs in a spawned Task, so killing it
+    # unblocks the pane immediately; the loop fiber may still finish its
+    # in-flight round-trip and write the answer to the session.
+    if is_pid(socket.assigns.chat_task), do: Process.exit(socket.assigns.chat_task, :kill)
+
+    case DshBeam.Context.get(socket.assigns.ctx, :session) do
+      {:ok, session} when is_pid(session) ->
+        DshBeam.Session.append(session, %{"role" => "error", "content" => "stopped by user"})
+
+      _ ->
+        :ok
+    end
+
+    {:noreply, socket |> assign(chat_busy: false, chat_task: nil) |> refresh()}
   end
 
   def handle_event("clear_chat", _params, socket) do
@@ -475,8 +494,11 @@ defmodule DshBeamWeb.ConsoleLive do
     # Only a hard failure (the loop fiber died mid-call) surfaces here.
     socket =
       case result do
-        {:ok, _answer, _trace} -> assign(socket, chat_busy: false)
-        {:error, reason} -> assign(socket, chat_busy: false, chat_error: inspect(reason))
+        {:ok, _answer, _trace} ->
+          assign(socket, chat_busy: false, chat_task: nil)
+
+        {:error, reason} ->
+          assign(socket, chat_busy: false, chat_task: nil, chat_error: inspect(reason))
       end
 
     {:noreply, refresh(socket)}
@@ -522,6 +544,11 @@ defmodule DshBeamWeb.ConsoleLive do
           <div class="conv-header">
             <div class="title-row">
               <div class="crumbs"><span class="crumb crumb-current">console</span></div>
+              <div class="header-actions">
+                <button type="button" class="header-action" phx-click="clear_chat">
+                  new conversation
+                </button>
+              </div>
             </div>
             <div class="tabs">
               <button
@@ -551,8 +578,11 @@ defmodule DshBeamWeb.ConsoleLive do
                   placeholder="run a task (drives the agent loop)"
                   disabled={@chat_busy}
                 />
-                <button type="submit" disabled={@chat_busy}>ask</button>
-                <button type="button" phx-click="clear_chat">new conversation</button>
+                <%= if @chat_busy do %>
+                  <button type="button" phx-click="stop_chat">stop</button>
+                <% else %>
+                  <button type="submit">send</button>
+                <% end %>
               </form>
               <%= if @chat_busy do %>
                 <div class="composer-status muted">thinking (model round-trip)…</div>

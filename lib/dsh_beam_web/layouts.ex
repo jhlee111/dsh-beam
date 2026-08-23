@@ -107,6 +107,13 @@ defmodule DshBeamWeb.Layouts do
             white-space: nowrap; cursor: pointer;
           }
           .crumb-current { font-weight: 500; color: var(--dsw-alias-label-primary); cursor: default; }
+          .header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+          .header-action {
+            flex: none; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px;
+            background: transparent; color: var(--dsw-alias-label-secondary);
+            padding: 3px 10px; font-size: 12px; cursor: pointer;
+          }
+          .header-action:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
           .tabs {
             position: relative; z-index: 1; display: flex; gap: 36px;
             margin-top: 4px; padding-left: 8px;

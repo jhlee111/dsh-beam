@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Conversation composer
+
+- The composer is now a single send/stop toggle (the reference's shape) instead
+  of an "ask" + "new conversation" pair: idle shows `send`, a running turn shows
+  `stop` (best-effort — it unblocks the pane and marks the session, while the
+  synchronous loop may still finish in the background). "new conversation"
+  moved to the conversation header as a utility action.
+
 ### Conversation rendering
 
 - Chat and Trajectory now render the reference's conversation shape (borrowed
