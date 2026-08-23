@@ -13,8 +13,8 @@ defmodule DshBeam.Creator do
   - undefine/2 withdraws the fiber and unloads the code.
 
   Creator-supplied source is trusted in this PoC: module names become atoms
-  and code runs in-process. Sandboxing untrusted creators is the paper's
-  §6.3 execution boundary and future work.
+  and code runs in-process. Untrusted creators go through DshBeam.Sandbox,
+  the paper's §6.3 execution boundary (a child OS process with its own BEAM).
   """
 
   @doc """

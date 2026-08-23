@@ -24,7 +24,10 @@ defmodule DshBeam.Plugin do
     whose mirror drives the dependency graph; the fiber's own state is
     authoritative.
 
-  Plugins implement mount/3 and may override the three handle_dsh_* hooks.
+  Plugins implement mount/3 and may override the three handle_dsh_* hooks, plus
+  two generic message hooks: handle_dsh_info/2 receives unclaimed :info
+  messages (e.g. port data), handle_dsh_exit/3 receives linked-process exits
+  (defaulting to a graceful stop).
   """
 
   @typedoc "The unified context pid."
@@ -42,10 +45,44 @@ defmodule DshBeam.Plugin do
   @callback handle_dsh_ready(state :: DshBeam.Plugin.State.t()) ::
               {:ok, DshBeam.Plugin.State.t()}
 
-  @optional_callbacks handle_dsh_withdraw: 2, handle_dsh_activate: 2, handle_dsh_ready: 1
+  @callback handle_dsh_info(msg :: term(), state :: DshBeam.Plugin.State.t()) ::
+              {:ok, DshBeam.Plugin.State.t()} | {:stop, term(), DshBeam.Plugin.State.t()}
+
+  @callback handle_dsh_exit(
+              from :: pid() | port(),
+              reason :: term(),
+              state :: DshBeam.Plugin.State.t()
+            ) ::
+              {:ok, DshBeam.Plugin.State.t()} | {:stop, term(), DshBeam.Plugin.State.t()}
+
+  @optional_callbacks handle_dsh_withdraw: 2,
+                      handle_dsh_activate: 2,
+                      handle_dsh_ready: 1,
+                      handle_dsh_info: 2,
+                      handle_dsh_exit: 3
 
   @doc "The fiber's own lifecycle state (its :gen_statem state)."
   def fiber_state(pid), do: :gen_statem.call(pid, :__dsh_fiber_state__)
+
+  # The case analyses on the generic hooks live here, behind a remote call,
+  # so the type checker treats the dispatch result as dynamic: the default
+  # hook bodies return a single shape, and narrowing a local call's case
+  # against that shape would flag the other clause as never matching.
+  @doc false
+  def apply_exit_hook(result) do
+    case result do
+      {:ok, _data} -> {:keep_state_and_data, []}
+      {:stop, stop_reason, data} -> {:stop, stop_reason, data}
+    end
+  end
+
+  @doc false
+  def apply_info_hook(result) do
+    case result do
+      {:ok, _data} -> {:keep_state_and_data, []}
+      {:stop, stop_reason, data} -> {:stop, stop_reason, data}
+    end
+  end
 
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
@@ -129,12 +166,12 @@ defmodule DshBeam.Plugin do
         {:next_state, :unloading, data, {:next_event, :internal, {:finish_withdraw, keys}}}
       end
 
-      def handle_event(:info, {:dsh_withdraw, _keys}, :unloading, data) do
-        {:keep_state_and_data, data}
+      def handle_event(:info, {:dsh_withdraw, _keys}, :unloading, _data) do
+        {:keep_state_and_data, []}
       end
 
-      def handle_event(:info, {:dsh_withdraw, _keys}, :inactive, data) do
-        {:keep_state_and_data, data}
+      def handle_event(:info, {:dsh_withdraw, _keys}, :inactive, _data) do
+        {:keep_state_and_data, []}
       end
 
       def handle_event(:internal, {:finish_withdraw, keys}, :unloading, data) do
@@ -149,13 +186,15 @@ defmodule DshBeam.Plugin do
         {:keep_state_and_data, [{:reply, from, data.fiber_state}]}
       end
 
-      def handle_event(:info, {:EXIT, _pid, _reason}, _state, data) do
-        # a linked resource (or the parent) exited: stop and let the context's
-        # monitor safety net withdraw our contributions
-        {:stop, :normal, data}
+      def handle_event(:info, {:EXIT, from, reason}, _state, data) do
+        # a linked resource (or the parent) exited: by default stop and let
+        # the context's monitor safety net withdraw our contributions
+        DshBeam.Plugin.apply_exit_hook(handle_dsh_exit(from, reason, data))
       end
 
-      def handle_event(:info, _msg, _state, data), do: {:keep_state_and_data, data}
+      def handle_event(:info, msg, _state, data) do
+        DshBeam.Plugin.apply_info_hook(handle_dsh_info(msg, data))
+      end
 
       @impl true
       def terminate(_reason, _state, data) do
@@ -209,10 +248,23 @@ defmodule DshBeam.Plugin do
       def handle_dsh_activate(_view, state), do: {:ok, state}
       def handle_dsh_ready(state), do: {:ok, state}
 
+      # The specs widen the default returns to the callback's full union so
+      # the type checker accepts the {:ok, _} / {:stop, _, _} case clauses
+      # above even for plugins that never override these hooks.
+      @spec handle_dsh_info(term(), DshBeam.Plugin.State.t()) ::
+              {:ok, DshBeam.Plugin.State.t()} | {:stop, term(), DshBeam.Plugin.State.t()}
+      def handle_dsh_info(_msg, state), do: {:ok, state}
+
+      @spec handle_dsh_exit(term(), term(), DshBeam.Plugin.State.t()) ::
+              {:ok, DshBeam.Plugin.State.t()} | {:stop, term(), DshBeam.Plugin.State.t()}
+      def handle_dsh_exit(_from, _reason, state), do: {:stop, :normal, state}
+
       defoverridable mount: 2,
                      handle_dsh_withdraw: 2,
                      handle_dsh_activate: 2,
                      handle_dsh_ready: 1,
+                     handle_dsh_info: 2,
+                     handle_dsh_exit: 3,
                      terminate: 3
     end
   end
