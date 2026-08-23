@@ -308,3 +308,12 @@ or timeout). The dependent survives, becomes :inactive, and can be reactivated.
   stores it on the fiber, resolve/reactivate wrap the committed view per
   consumer (the access-control row of PLAN §3). Same provider, different
   views; swap re-applies; guard holds. 88 tests.
+
+## Milestone 9 — §6.2 cross-node composition (complete)
+
+- DshBeam.Dist starts a provider fiber on a remote node registering with a
+  local context; Process.alive?/1 raises on remote pids, so DshBeam.Pid.alive?
+  guards those checks (remote = assumed alive; sends are safe no-ops).
+- Unloading a remote provider deactivates the local consumer first; a remote
+  crash withdraws through the DOWN monitor safety net. 91 tests, skipping
+  gracefully without epmd/cookie.

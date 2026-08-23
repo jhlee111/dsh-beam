@@ -250,3 +250,11 @@ Cordis's `intercept` (inject=capability, interception=provider wrapping): a
 for that fiber only. The same provider resolves to different views per
 consumer; a swap re-applies the intercept; the intercepted consumer is still a
 dependent. 88 tests.
+
+## 19. Milestone 9 — §6.2 cross-node composition (complete)
+
+The last mapping-table row: a fiber can live on another BEAM node and register
+with a local context. The context's monitor, activation messages, and the
+L-Unload guard all cross :erlang.dist — a remote owner is just {pid, node}
+(DshBeam.Dist, DshBeam.Pid). Guard + crash safety net hold across nodes.
+91 tests. (Requires epmd + ~/.erlang.cookie; the tests skip without them.)
