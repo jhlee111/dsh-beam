@@ -356,11 +356,11 @@ that boundary explicit: revertible effects port cleanly onto OTP, reactive
 coeffects and the guard do not — they are the parts that had to be invented
 afresh.
 
-## 23. Milestone 12 — toward a usable harness (in progress)
+## 23. Milestone 12 — toward a usable harness (complete)
 
-After the conclusion, the console is being pushed from a design PoC into a
-harness you can actually drive. Session and history first, because they are the
-"usable in practice" premise:
+After the conclusion, the console is pushed from a design PoC into a harness
+you can actually drive, closing the feature gap to the reference webui while
+keeping the "everything is a plugin" substrate intact:
 
 - **Multi-turn agent loop** — `Agent.Loop.run/2` replays prior user/assistant
   turns from the session into the model context (a conversation, not a
@@ -374,4 +374,13 @@ harness you can actually drive. Session and history first, because they are the
   `{:dsh_session_event, event}` per append (dead subscribers cleaned via
   `:DOWN`), so the chat pane re-renders incrementally as the loop produces tool
   calls and the answer — real-time execution visibility without polling.
-- 99 tests.
+- **Todo tool (agent-driven plan)** — `DshBeam.Tool.Todo` ports the reference
+  `todo/write` model: a `todo_write` tool appends whole-list snapshots to the
+  session (last-write-wins), and the console projects the latest snapshot into
+  a plan panel. The agent plans by calling a tool; the plan is a session
+  projection, not a separate store.
+- The model/credential/settings UX is the existing llm-settings panel plus the
+  typed inventory/settings panel (milestones 5/15).
+- An end-to-end console test drives a scripted model that writes a todo plan and
+  runs a tool in one turn, asserting the chat pane, the todo panel, and the
+  session all reflect it. 105 tests.
