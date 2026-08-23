@@ -616,7 +616,7 @@ defmodule DshBeamWeb.ConsoleLive do
               </button>
             </div>
           </div>
-          <div class="conv-scroll">
+          <div class="conv-scroll" id="conv-scroll" phx-hook="ScrollFollow">
             <%= if @workspace_active do %>
               <%= DshBeam.Ui.render_slot(:conversation, assigns, key: @view_tab) %>
             <% else %>
@@ -627,6 +627,9 @@ defmodule DshBeamWeb.ConsoleLive do
             <% end %>
             <div class="composer-seat">
               <%= if @workspace_active do %>
+                <div class="to-bottom-wrap">
+                  <button type="button" class="to-bottom" aria-label="scroll to bottom">▾</button>
+                </div>
                 <form class="composer" phx-submit="ask">
                   <input
                     type="text"

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Conversation rendering
+
+- Added the reference's back-to-bottom control: a circular chevron floats just
+  above the composer while the reader is scrolled away from the newest message,
+  and clicking it scrolls to the bottom. A client-side hook also follows the
+  stream — while pinned to the bottom, new nodes keep the view scrolled to the
+  latest message.
+
 ### Fixes
 
 - Closing the current workspace session no longer crashes the console: the

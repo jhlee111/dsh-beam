@@ -155,6 +155,24 @@ defmodule DshBeamWeb.Layouts do
           .composer { display: flex; gap: 6px; align-items: center; }
           .composer input { flex: 1; }
           .composer-status { margin: 4px 0 0; font-size: 12px; }
+          /* Back-to-bottom: a circular chevron floating just above the composer,
+             revealed only while the reader is scrolled away from the newest
+             message (reference ChatView .toBottom). */
+          .to-bottom-wrap {
+            position: absolute; right: 20px; bottom: calc(100% + 10px);
+            z-index: 8; pointer-events: none;
+          }
+          .to-bottom {
+            display: none; align-items: center; justify-content: center;
+            width: 34px; height: 34px; padding: 0;
+            border: 1px solid var(--dsw-alias-border-l2); border-radius: 100px;
+            color: var(--dsw-alias-label-primary);
+            background: var(--dsw-alias-button-floating-fill);
+            box-shadow: var(--dsw-shadow-lv2, 0 4px 12px rgba(0, 0, 0, .4));
+            cursor: pointer; pointer-events: auto; font-size: 14px;
+          }
+          .to-bottom.visible { display: flex; }
+          .to-bottom:hover { background: var(--dsw-alias-button-floating-hover); }
           .conversation-empty {
             flex: 1; display: flex; flex-direction: column; align-items: center;
             justify-content: center; gap: 6px; padding: 40px 20px; text-align: center;
@@ -460,10 +478,67 @@ defmodule DshBeamWeb.Layouts do
             destroyed() { clearInterval(this.timer); }
           };
 
+          // Follows the chat stream: keeps the reader pinned to the newest
+          // message when new nodes arrive, and reveals a circular "to bottom"
+          // button while the reader is scrolled away. The button is queried
+          // fresh each time (it mounts only after a workspace session becomes
+          // active), and the click is delegated on the scroll element.
+          let ScrollFollow = {
+            mounted() {
+              this.atBottom = true;
+              this.frame = null;
+
+              this.isAtBottom = () => {
+                const el = this.el;
+                return el.scrollHeight - el.scrollTop - el.clientHeight <= 24;
+              };
+
+              this.sync = () => {
+                this.atBottom = this.isAtBottom();
+                const btn = this.el.querySelector('.to-bottom');
+                if (btn) btn.classList.toggle('visible', !this.atBottom);
+              };
+
+              this.toBottom = () => {
+                this.el.scrollTop = this.el.scrollHeight;
+                this.atBottom = true;
+                const btn = this.el.querySelector('.to-bottom');
+                if (btn) btn.classList.remove('visible');
+              };
+
+              this.onScroll = () => {
+                cancelAnimationFrame(this.frame);
+                this.frame = requestAnimationFrame(this.sync);
+              };
+
+              this.onClick = (event) => {
+                if (event.target.closest('.to-bottom')) this.toBottom();
+              };
+
+              this.el.addEventListener('scroll', this.onScroll, { passive: true });
+              this.el.addEventListener('click', this.onClick);
+
+              // New nodes (streaming tool calls / assistant text) re-pin only
+              // while already at the bottom.
+              this.observer = new MutationObserver(() => {
+                if (this.atBottom) this.el.scrollTop = this.el.scrollHeight;
+              });
+              this.observer.observe(this.el, { childList: true, subtree: true, characterData: true });
+
+              this.el.scrollTop = this.el.scrollHeight;
+              this.sync();
+            },
+            destroyed() {
+              this.observer && this.observer.disconnect();
+              this.el.removeEventListener('scroll', this.onScroll);
+              this.el.removeEventListener('click', this.onClick);
+            }
+          };
+
           let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
           let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
             params: { _csrf_token: csrfToken },
-            hooks: { ElapsedClock }
+            hooks: { ElapsedClock, ScrollFollow }
           });
           liveSocket.connect();
           window.addEventListener("phx:page-loading-stop", () => liveSocket.enableDebug());
