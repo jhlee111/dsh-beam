@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Sidebar
+
+- Session cards use a small current-indicator dot instead of a large pill, a
+  friendly title (the workspace folder name, not the internal branch), and a
+  wrapping cwd path. The sidebar boundary is now draggable to resize (clamped
+  200–520px), with the settled width persisted.
+
 ### Conversation composer
 
 - The composer is now a larger card with an auto-growing textarea (44px min,

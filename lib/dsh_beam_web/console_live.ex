@@ -109,6 +109,7 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:custom_presets, [])
       |> assign(:presets_result, nil)
       |> assign(:sidebar_collapsed, false)
+      |> assign(:sidebar_width, 280)
       |> assign(:picker_open, false)
       |> assign(:picker_path, nil)
       |> assign(:picker_entries, [])
@@ -389,6 +390,11 @@ defmodule DshBeamWeb.ConsoleLive do
      assign(socket, sidebar_collapsed: not socket.assigns.sidebar_collapsed) |> refresh()}
   end
 
+  def handle_event("resize_sidebar", %{"width" => width}, socket) do
+    width = width |> to_string() |> String.to_integer() |> max(200) |> min(520)
+    {:noreply, assign(socket, sidebar_width: width) |> refresh()}
+  end
+
   def handle_event("browse_dir", _params, socket) do
     root = Path.expand(socket.assigns.workspace_repo || ".")
 
@@ -570,7 +576,7 @@ defmodule DshBeamWeb.ConsoleLive do
     ~H"""
     <div
       class="frame"
-      style={"grid-template-columns: " <> (if @sidebar_collapsed, do: "56px", else: "280px") <> " minmax(0, 1fr) 280px"}
+      style={"grid-template-columns: " <> (if @sidebar_collapsed, do: "56px", else: "#{@sidebar_width}px") <> " minmax(0, 1fr) 280px"}
     >
       <div class="frame-sidebar">
         <div class={"sidebar-root #{if @sidebar_collapsed, do: "collapsed"}"}>
@@ -592,6 +598,16 @@ defmodule DshBeamWeb.ConsoleLive do
           <% end %>
         </div>
       </div>
+
+      <%= unless @sidebar_collapsed do %>
+        <div
+          class="sidebar-handle"
+          id="sidebar-handle"
+          phx-hook="SidebarResize"
+          style={"left: #{@sidebar_width - 4}px"}
+        >
+        </div>
+      <% end %>
 
       <div class="frame-center">
         <div class="conv-root" data-phase="active">

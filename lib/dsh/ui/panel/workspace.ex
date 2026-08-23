@@ -39,13 +39,15 @@ defmodule DshBeam.Ui.Panel.Workspace do
           </p>
         <% end %>
         <%= for s <- @workspace_sessions do %>
-          <div class="workspace-row">
-            <span class={"pill state-#{if s.current, do: "active", else: "gone"}"}>
-              <%= if s.current, do: "current", else: "idle" %>
+          <div class={"workspace-row #{if s.current, do: "current"}"}>
+            <span
+              class={"ws-dot #{if s.current, do: "current", else: "idle"}"}
+              title={if s.current, do: "current session", else: "idle"}
+            >
             </span>
             <div class="workspace-meta">
-              <code><%= s.title %></code>
-              <span class="muted"><%= s.cwd %></span>
+              <span class="ws-title"><%= s.title %></span>
+              <span class="ws-cwd" title={s.cwd}><%= s.cwd %></span>
             </div>
             <div class="workspace-actions">
               <%= unless s.current do %>

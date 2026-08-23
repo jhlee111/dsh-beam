@@ -41,6 +41,11 @@ defmodule DshBeamWeb.Layouts do
           }
           .frame-center { min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
           .frame-details { min-width: 0; overflow: hidden; border-left: 1px solid var(--dsw-alias-border-l2); }
+          .sidebar-handle {
+            position: absolute; top: 0; bottom: 0; width: 8px; margin-left: -4px;
+            cursor: col-resize; z-index: 10; touch-action: none;
+          }
+          .sidebar-handle:hover { background: var(--dsw-alias-interactive-bg-hover); }
 
           /* Sidebar column shell (reference ui-sidebar SidebarRoot): brand row,
              workspace browsing region, footer settings seat. */
@@ -306,12 +311,21 @@ defmodule DshBeamWeb.Layouts do
           .empty-hint { font-size: 12px; line-height: 18px; }
           .workspace-list { display: flex; flex-direction: column; gap: 6px; }
           .workspace-row {
-            display: flex; align-items: center; gap: 6px;
+            display: flex; align-items: flex-start; gap: 8px;
             border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; padding: 6px 8px;
           }
-          .workspace-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-          .workspace-meta .muted { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-          .workspace-actions { display: flex; gap: 4px; }
+          .ws-dot {
+            flex: none; width: 8px; height: 8px; margin-top: 5px; border-radius: 50%;
+            background: var(--dsw-alias-label-caption);
+          }
+          .ws-dot.current { background: var(--dsw-static-green-500, #34d399); }
+          .workspace-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+          .ws-title { font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary); }
+          .ws-cwd {
+            font-size: 11px; color: var(--dsw-alias-label-secondary);
+            word-break: break-all; line-height: 15px;
+          }
+          .workspace-actions { display: flex; flex-direction: column; gap: 4px; }
 
           /* Workspace folder picker. */
           .repo-picker {
@@ -478,6 +492,58 @@ defmodule DshBeamWeb.Layouts do
         <script src="/assets/phoenix.js"></script>
         <script src="/assets/phoenix_live_view.js"></script>
         <script>
+          // Resizes the sidebar via the boundary handle: pointer-captured drag
+          // updates the grid column live, then pushes the settled width back.
+          let SidebarResize = {
+            mounted() {
+              this.frame = this.el.closest('.frame');
+              this.dragging = false;
+              this.startX = 0;
+              this.startWidth = 0;
+
+              this.currentWidth = () => {
+                const cols = getComputedStyle(this.frame).gridTemplateColumns.split(' ');
+                return parseFloat(cols[0]) || 280;
+              };
+              this.setWidth = (w) => {
+                this.frame.style.gridTemplateColumns = `${w}px minmax(0, 1fr) 280px`;
+                this.el.style.left = `${w - 4}px`;
+              };
+              this.onDown = (e) => {
+                e.preventDefault();
+                this.dragging = true;
+                this.startX = e.clientX;
+                this.startWidth = this.currentWidth();
+                this.el.setPointerCapture(e.pointerId);
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+              };
+              this.onMove = (e) => {
+                if (!this.dragging) return;
+                const w = Math.min(520, Math.max(200, this.startWidth + (e.clientX - this.startX)));
+                this.setWidth(w);
+              };
+              this.onUp = () => {
+                if (!this.dragging) return;
+                this.dragging = false;
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+                this.pushEvent('resize_sidebar', { width: Math.round(this.currentWidth()) });
+              };
+
+              this.el.addEventListener('pointerdown', this.onDown);
+              this.el.addEventListener('pointermove', this.onMove);
+              this.el.addEventListener('pointerup', this.onUp);
+              this.el.addEventListener('pointercancel', this.onUp);
+            },
+            destroyed() {
+              this.el.removeEventListener('pointerdown', this.onDown);
+              this.el.removeEventListener('pointermove', this.onMove);
+              this.el.removeEventListener('pointerup', this.onUp);
+              this.el.removeEventListener('pointercancel', this.onUp);
+            }
+          };
+
           // Auto-grows the composer textarea to fit its content (capped by CSS
           // max-height, after which it scrolls).
           let AutoGrow = {
@@ -575,7 +641,7 @@ defmodule DshBeamWeb.Layouts do
           let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
           let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
             params: { _csrf_token: csrfToken },
-            hooks: { ElapsedClock, ScrollFollow, AutoGrow }
+            hooks: { ElapsedClock, ScrollFollow, AutoGrow, SidebarResize }
           });
           liveSocket.connect();
           window.addEventListener("phx:page-loading-stop", () => liveSocket.enableDebug());
