@@ -10,6 +10,7 @@
 entries = [
   %{id: :console, plugin: DshBeam.Console, config: [server: true], disabled: false},
   %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
+  %{id: :workspace, plugin: DshBeam.Workspace, config: [], disabled: false},
   %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [], disabled: false},
   %{id: :adapter, plugin: DshBeam.Llm.Adapter.Req, config: [], disabled: false},
   %{id: :shell, plugin: DshBeam.Shell.Plugin, config: [], disabled: false},
@@ -24,7 +25,9 @@ entries = [
   %{id: :panel_llm, plugin: DshBeam.Ui.Panel.LlmSettings, config: [], disabled: false},
   %{id: :panel_creator, plugin: DshBeam.Ui.Panel.Creator, config: [], disabled: false},
   %{id: :panel_events, plugin: DshBeam.Ui.Panel.EventFeed, config: [], disabled: false},
-  %{id: :panel_plugins, plugin: DshBeam.Ui.Panel.Plugins, config: [], disabled: false}
+  %{id: :panel_plugins, plugin: DshBeam.Ui.Panel.Plugins, config: [], disabled: false},
+  %{id: :panel_workspace, plugin: DshBeam.Ui.Panel.Workspace, config: [], disabled: false},
+  %{id: :panel_trajectory, plugin: DshBeam.Ui.Panel.Trajectory, config: [], disabled: false}
 ]
 
 {:ok, runtime} = DshBeam.Runtime.start_link(entries, [])

@@ -22,6 +22,7 @@ defmodule DshBeamWeb.ConsoleLive do
 
   @demo_entries [
     %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
+    %{id: :workspace, plugin: DshBeam.Workspace, config: [], disabled: false},
     %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [], disabled: false},
     %{id: :adapter, plugin: DshBeam.Llm.Adapter.Req, config: [], disabled: false},
     %{id: :shell, plugin: DshBeam.Shell.Plugin, config: [], disabled: false},
@@ -36,7 +37,9 @@ defmodule DshBeamWeb.ConsoleLive do
     %{id: :panel_llm, plugin: DshBeam.Ui.Panel.LlmSettings, config: [], disabled: false},
     %{id: :panel_creator, plugin: DshBeam.Ui.Panel.Creator, config: [], disabled: false},
     %{id: :panel_events, plugin: DshBeam.Ui.Panel.EventFeed, config: [], disabled: false},
-    %{id: :panel_plugins, plugin: DshBeam.Ui.Panel.Plugins, config: [], disabled: false}
+    %{id: :panel_plugins, plugin: DshBeam.Ui.Panel.Plugins, config: [], disabled: false},
+    %{id: :panel_workspace, plugin: DshBeam.Ui.Panel.Workspace, config: [], disabled: false},
+    %{id: :panel_trajectory, plugin: DshBeam.Ui.Panel.Trajectory, config: [], disabled: false}
   ]
 
   @impl true
@@ -66,6 +69,10 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:credential_mode, "env")
       |> assign(:credential_env, "DEEPSEEK_API_KEY")
       |> assign(:inventory, [])
+      |> assign(:workspace_sessions, [])
+      |> assign(:workspace_repo, ".")
+      |> assign(:workspace_result, nil)
+      |> assign(:trajectory, [])
       |> refresh()
 
     {:ok, socket}
@@ -138,6 +145,7 @@ defmodule DshBeamWeb.ConsoleLive do
       |> Enum.reject(
         &(&1.id in [
             :session,
+            :workspace,
             :llm,
             :adapter,
             :shell,
@@ -152,7 +160,9 @@ defmodule DshBeamWeb.ConsoleLive do
             :panel_llm,
             :panel_creator,
             :panel_events,
-            :panel_plugins
+            :panel_plugins,
+            :panel_workspace,
+            :panel_trajectory
           ])
       )
 
@@ -191,6 +201,44 @@ defmodule DshBeamWeb.ConsoleLive do
     end
 
     {:noreply, socket |> assign(chat_error: nil) |> refresh()}
+  end
+
+  def handle_event("workspace_create", %{"repo" => repo} = params, socket) do
+    result =
+      with {:ok, workspace} <- workspace_pid(socket.assigns.ctx),
+           repo when is_binary(repo) and repo != "" <- repo do
+        title =
+          case params["title"] do
+            "" -> nil
+            nil -> nil
+            t -> t
+          end
+
+        opts = if title, do: [title: title], else: []
+        DshBeam.Workspace.open_session(workspace, repo, opts)
+      else
+        :not_found -> {:error, :no_workspace_plugin}
+        _ -> {:error, :empty_repo}
+      end
+
+    {:noreply, socket |> assign(workspace_result: result) |> refresh()}
+  end
+
+  def handle_event("workspace_switch", %{"session" => session_key}, socket) do
+    session = session_key |> Base.decode64!() |> :erlang.binary_to_term([:safe])
+    :ok = switch_session(socket.assigns.runtime, session)
+    {:noreply, refresh(socket)}
+  end
+
+  def handle_event("workspace_close", %{"session" => session_key}, socket) do
+    session = session_key |> Base.decode64!() |> :erlang.binary_to_term([:safe])
+
+    result =
+      with {:ok, workspace} <- workspace_pid(socket.assigns.ctx) do
+        DshBeam.Workspace.close_session(workspace, session)
+      end
+
+    {:noreply, socket |> assign(workspace_result: result) |> refresh()}
   end
 
   def handle_event("llm_apply", params, socket) do
@@ -333,6 +381,27 @@ defmodule DshBeamWeb.ConsoleLive do
 
   # -- internals --
 
+  # Re-point the :session binding at a workspace session by reconfiguring the
+  # session entry and reconciling — the provider-swap path of the substrate
+  # (the guard deactivates dependents first, then the new session mounts).
+  defp switch_session(runtime, session) do
+    specs =
+      runtime
+      |> current_specs()
+      |> Enum.map(fn entry ->
+        if entry.id == :session, do: %{entry | config: [session: session]}, else: entry
+      end)
+
+    DshBeam.Runtime.reconcile(runtime, specs)
+  end
+
+  defp workspace_pid(ctx) do
+    case DshBeam.Context.get(ctx, :workspace) do
+      {:ok, workspace} when is_pid(workspace) -> {:ok, workspace}
+      _ -> :not_found
+    end
+  end
+
   defp loop_pid(runtime) do
     case DshBeam.Runtime.entries(runtime) do
       %{loop: %{pid: pid}} when is_pid(pid) -> {:ok, pid}
@@ -396,6 +465,8 @@ defmodule DshBeamWeb.ConsoleLive do
       credential_env: credential_env,
       chat_log: chat_log(socket.assigns.ctx),
       todos: todos(socket.assigns.ctx),
+      trajectory: trajectory(socket.assigns.ctx),
+      workspace_sessions: workspace_sessions(socket.assigns.ctx),
       inventory: build_inventory(runtime, entries)
     )
   end
@@ -449,6 +520,73 @@ defmodule DshBeamWeb.ConsoleLive do
 
   defp chat_entry(%{"role" => "error", "content" => content}), do: {"error", content}
   defp chat_entry(other), do: {"event", inspect(other)}
+
+  # The trajectory is the same session log grouped by turn: a "user" event opens
+  # a turn; the tool calls, results, and the answer that follow belong to it.
+  defp trajectory(ctx) do
+    case DshBeam.Context.get(ctx, :session) do
+      {:ok, session} when is_pid(session) ->
+        session
+        |> DshBeam.Session.all()
+        |> group_turns()
+        |> Enum.map(fn turn -> Enum.map(turn, &chat_entry/1) end)
+
+      _ ->
+        []
+    end
+  end
+
+  defp group_turns(events) do
+    {turns, current} =
+      Enum.reduce(events, {[], []}, fn event, {turns, current} ->
+        if event["role"] == "user" do
+          {[Enum.reverse(current) | turns], [event]}
+        else
+          {turns, [event | current]}
+        end
+      end)
+
+    (turns ++ [Enum.reverse(current)])
+    |> Enum.reject(&(&1 == []))
+    |> Enum.reverse()
+  end
+
+  # The workspace sidebar: every workspace session, with its current/current?
+  # flag and an encoded key for the switch/close events.
+  defp workspace_sessions(ctx) do
+    with {:ok, workspace} when is_pid(workspace) <- DshBeam.Context.get(ctx, :workspace),
+         sessions when is_map(sessions) <- safe_sessions(workspace) do
+      current =
+        case DshBeam.Context.get(ctx, :session) do
+          {:ok, session} when is_pid(session) -> session
+          _ -> nil
+        end
+
+      sessions
+      |> Enum.map(fn {session, meta} ->
+        %{
+          session: session,
+          session_key: encode_id(session),
+          title: meta.title || inspect(session),
+          cwd: meta.cwd,
+          current: session == current
+        }
+      end)
+      |> Enum.sort_by(& &1.title)
+    else
+      _ -> []
+    end
+  end
+
+  defp safe_sessions(workspace) do
+    if Process.alive?(workspace) do
+      DshBeam.Workspace.all_sessions(workspace)
+    else
+      %{}
+    end
+  catch
+    :exit, _ -> %{}
+  end
 
   defp module_name(source) do
     case Regex.run(~r/^\s*defmodule\s+([A-Z]\w*)/, source) do
