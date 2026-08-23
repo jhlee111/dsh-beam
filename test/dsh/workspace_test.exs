@@ -137,7 +137,7 @@ defmodule DshBeam.WorkspaceTest do
     refute Process.alive?(session)
   end
 
-  test "open_session outside a repository is refused", _context do
+  test "open_session outside a repository opens an in-place session", _context do
     {:ok, runtime} = DshBeam.Runtime.start_link([workspace_entry()], [])
     ctx = DshBeam.Runtime.context(runtime)
     {:ok, workspace} = DshBeam.Context.get(ctx, :workspace)
@@ -146,7 +146,14 @@ defmodule DshBeam.WorkspaceTest do
     File.mkdir_p!(outside)
     on_exit(fn -> File.rm_rf!(outside) end)
 
-    assert {:error, :not_a_git_repo} = DshBeam.Workspace.open_session(workspace, outside)
+    # a non-repo folder opens in-place (no worktree) rather than refusing
+    assert {:ok, session} = DshBeam.Workspace.open_session(workspace, outside)
+
+    assert %{^session => %{cwd: ^outside, repo: nil}} =
+             DshBeam.Workspace.all_sessions(workspace)
+
+    # closing an in-place session does not try to remove a worktree
+    assert :ok = DshBeam.Workspace.close_session(workspace, session)
     assert DshBeam.Workspace.all_sessions(workspace) == %{}
   end
 

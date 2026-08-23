@@ -1,21 +1,21 @@
 defmodule DshBeam.Workspace do
   @moduledoc """
-  The workspace capability: owns the sessions over a repository and lets a
+  The workspace capability: owns the sessions over a directory and lets a
   session address its peers.
 
-  A workspace groups sessions by their working directory. Each session owns its
-  own `git worktree` (a per-session checkout on a `session/<id>` branch), so two
-  sessions over one repository never share a working directory and cannot
-  clobber each other's files. `open_session/2` creates that checkout plus the
-  session log in one step; `close_session/2` tears both down.
+  A workspace groups sessions by their working directory. Opening a session
+  over a git repository checks out a fresh `git worktree` (a per-session
+  checkout on a `session/<id>` branch), so two sessions over one repository
+  never share a working directory and cannot clobber each other's files. A
+  folder that is not a git repository — or a repository whose worktree cannot
+  be created (e.g. permissions) — opens in-place instead, rooted at the folder
+  itself, because working from any folder is part of the harness. `close_session`
+  tears down the worktree when one was created.
 
   Sessions sharing a `cwd` "know" each other (the same working directory is the
   workspace): `peers/2` returns every other session there, and `relay/3` appends
   a peer message to the target session's log — the minimal port of the reference
   `agent-team` peer mailbox.
-
-  Each session's worktree is the isolation boundary (git worktree), but the
-  *workspace* is the shared directory identity that sessions group under.
   """
 
   use DshBeam.Plugin
@@ -23,7 +23,7 @@ defmodule DshBeam.Workspace do
   setting(:default_root,
     type: :string,
     default: ".",
-    doc: "The default repository directory new sessions are opened over"
+    doc: "The default directory new sessions are opened over"
   )
 
   @impl DshBeam.Plugin
@@ -104,14 +104,7 @@ defmodule DshBeam.Workspace do
 
   @impl true
   def handle_event({:call, from}, {:open_session, repo, opts}, _state, data) do
-    result =
-      with {:ok, root} <- repo_root(repo),
-           {:ok, branch, dest, title} <- plan_session(root, opts),
-           :ok <- File.mkdir_p(Path.dirname(dest)),
-           {:ok, _} <- DshBeam.Git.worktree_add(root, branch, dest),
-           {:ok, session} <- DshBeam.Session.Memory.start(title: title, cwd: dest) do
-        {:ok, session, %{cwd: dest, repo: root}}
-      end
+    result = open(repo, opts)
 
     data =
       case result do
@@ -137,9 +130,9 @@ defmodule DshBeam.Workspace do
         {:keep_state_and_data, [{:reply, from, {:error, :unknown_session}}]}
 
       %{cwd: cwd, repo: repo} ->
-        # the worktree is §6.1 outside the boundary: remove it best-effort, but
-        # never let a git failure stop the session teardown
-        _ = DshBeam.Git.worktree_remove(repo, cwd)
+        # a worktree-backed session owns a checkout to remove; an in-place one
+        # does not. Never let a git failure stop the session teardown.
+        if repo, do: DshBeam.Git.worktree_remove(repo, cwd)
 
         if Process.alive?(session), do: Process.exit(session, :shutdown)
         data = %{data | extra: unregister_session(data.extra, session)}
@@ -207,19 +200,45 @@ defmodule DshBeam.Workspace do
 
   # -- internals --
 
-  defp repo_root(dir) do
+  # Open a session over `dir`: a git worktree checkout when the folder lives
+  # inside a repository AND the checkout succeeds; otherwise an in-place
+  # session rooted at the folder itself. Working from any folder — not only a
+  # git repo — is part of the harness, so a non-repo (or a repo whose worktree
+  # cannot be created, e.g. permissions) degrades to in-place rather than
+  # refusing.
+  defp open(dir, opts) do
+    dir = Path.expand(dir)
+    title = Keyword.get(opts, :title)
+
     case DshBeam.Git.repo_root(dir) do
-      {:ok, root} -> {:ok, root}
-      :error -> {:error, :not_a_git_repo}
+      {:ok, root} ->
+        branch = Keyword.get(opts, :branch, "session/#{System.unique_integer([:positive])}")
+        dest = Keyword.get(opts, :dest, default_dest(root, branch))
+        resolved_title = title || branch
+
+        case try_worktree(root, branch, dest, resolved_title) do
+          {:ok, session, meta} -> {:ok, session, meta}
+          {:error, _reason} -> in_place_session(dir, resolved_title)
+        end
+
+      :error ->
+        in_place_session(dir, title || Path.basename(dir))
     end
   end
 
-  # The branch/dest/title of a new session, derived from opts or auto-generated.
-  defp plan_session(root, opts) do
-    branch = Keyword.get(opts, :branch, "session/#{System.unique_integer([:positive])}")
-    dest = Keyword.get(opts, :dest, default_dest(root, branch))
-    title = Keyword.get(opts, :title, branch)
-    {:ok, branch, dest, title}
+  defp try_worktree(root, branch, dest, title) do
+    with :ok <- File.mkdir_p(Path.dirname(dest)),
+         {:ok, _} <- DshBeam.Git.worktree_add(root, branch, dest),
+         {:ok, session} <- DshBeam.Session.Memory.start(title: title, cwd: dest) do
+      {:ok, session, %{cwd: dest, repo: root}}
+    end
+  end
+
+  defp in_place_session(dir, title) do
+    case DshBeam.Session.Memory.start(title: title, cwd: dir) do
+      {:ok, session} -> {:ok, session, %{cwd: dir, repo: nil}}
+      other -> other
+    end
   end
 
   defp default_dest(repo_root, branch) do

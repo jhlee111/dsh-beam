@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Workspace sessions — relaxed to any folder
+
+- Opening a session no longer requires a git repository. A folder inside a git
+  repo still gets a `git worktree` checkout when the checkout succeeds; a
+  non-repo folder, or a repo whose worktree cannot be created (permissions),
+  opens in-place rooted at the folder itself. `close_session` only removes a
+  worktree when one was created.
+
 ### Workspace folder picker
 
 - The workspace "repository" field is now a folder picker (a server-side
