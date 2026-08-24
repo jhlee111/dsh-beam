@@ -1041,7 +1041,7 @@ defmodule DshBeamWeb.ConsoleLive do
       llm_config: llm_config,
       credential_mode: credential_mode,
       credential_env: credential_env,
-      chat_log: chat_log(socket.assigns.ctx),
+      chat_log: chat_log(socket.assigns.ctx, socket.assigns.chat_busy),
       todos: todos(socket.assigns.ctx),
       trajectory: trajectory(socket.assigns.ctx, socket.assigns.trajectory_query),
       permission: permission(socket.assigns.ctx),
@@ -1083,7 +1083,7 @@ defmodule DshBeamWeb.ConsoleLive do
 
   # The chat pane renders the session log (the single source of truth), so the
   # conversation survives a page refresh and tool calls appear chronologically.
-  defp chat_log(ctx) do
+  defp chat_log(ctx, busy) do
     case alive_session(ctx) do
       {:ok, session} ->
         # idempotent: once subscribed, appends fan out {:dsh_session_event, ...}
@@ -1096,6 +1096,7 @@ defmodule DshBeamWeb.ConsoleLive do
         # ledger material, not chat content — the chat pane renders only the
         # user-visible events.
         |> Enum.reject(&(&1["role"] in ["turn_start", "turn_end", "request"]))
+        |> group_reasoning(busy)
         |> Enum.map(&chat_entry/1)
 
       _ ->
@@ -1103,14 +1104,35 @@ defmodule DshBeamWeb.ConsoleLive do
     end
   end
 
+  # Streamed reasoning is many reasoning_chunk events; fold consecutive chunks
+  # into one entry. `running` marks the live tail while the loop is still
+  # streaming (the collapsed row then follows the latest line, not the first).
+  defp group_reasoning(events, busy) do
+    {grouped, current} =
+      Enum.reduce(events, {[], nil}, fn
+        %{"role" => "reasoning_chunk", "content" => content}, {acc, current} ->
+          {acc, (current || "") <> content}
+
+        event, {acc, current} ->
+          acc = if current, do: [reasoning_entry(current, busy) | acc], else: acc
+          {[event | acc], nil}
+      end)
+
+    grouped = if current, do: [reasoning_entry(current, busy) | grouped], else: grouped
+    Enum.reverse(grouped)
+  end
+
+  defp reasoning_entry(content, busy),
+    do: %{"role" => "reasoning_chunk", "content" => content, "running" => busy}
+
   defp chat_entry(%{"role" => "user", "content" => content}),
     do: %{kind: :user, content: content}
 
   defp chat_entry(%{"role" => "assistant", "content" => content}),
     do: %{kind: :assistant, content: content}
 
-  defp chat_entry(%{"role" => "reasoning", "content" => content}),
-    do: %{kind: :reasoning, content: content}
+  defp chat_entry(%{"role" => "reasoning_chunk", "content" => content} = event),
+    do: %{kind: :reasoning, content: content, running: Map.get(event, "running", false)}
 
   defp chat_entry(%{"role" => "tool_call", "name" => name, "arguments" => args}),
     do: %{kind: :tool_call, name: name, command: tool_command(name, args)}

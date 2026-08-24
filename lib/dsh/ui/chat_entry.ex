@@ -26,12 +26,12 @@ defmodule DshBeam.Ui.ChatEntry do
           </button>
         </div>
       <% :reasoning -> %>
-        <details class="reasoning-row">
+        <details class="reasoning-row" data-running={@entry.running}>
           <summary>
             <DshBeamWeb.Icons.think size={14} class="reasoning-icon" />
             <span class="reasoning-title">Think</span>
             <span class="row-sep" aria-hidden="true"></span>
-            <span class="row-summary"><%= first_line(@entry.content) %></span>
+            <span class="row-summary"><%= reasoning_summary(@entry) %></span>
           </summary>
           <div class="reasoning-body"><%= @entry.content %></div>
         </details>
@@ -86,15 +86,26 @@ defmodule DshBeam.Ui.ChatEntry do
     |> Phoenix.HTML.raw()
   end
 
-  # The collapsed one-line summary: the first line, trimmed and truncated (the
-  # reference shows firstLine(text) when settled, latestLine while streaming).
-  defp first_line(text) do
-    line = text |> String.split("\n", parts: 2) |> hd() |> String.trim()
+  # The collapsed summary mirrors the reference ReasoningRow: while the model
+  # is still streaming it follows the LATEST line (the live tail), and once
+  # settled it shows the FIRST line.
+  defp reasoning_summary(%{running: true, content: content}), do: last_line(content)
+  defp reasoning_summary(%{content: content}), do: first_line(content)
 
-    if String.length(line) > 140 do
-      String.slice(line, 0, 140) <> "…"
-    else
-      line
-    end
+  defp first_line(text) do
+    text |> String.split("\n", parts: 2) |> hd() |> String.trim() |> truncate()
+  end
+
+  defp last_line(text) do
+    text
+    |> String.trim_trailing()
+    |> String.split("\n")
+    |> List.last()
+    |> String.trim()
+    |> truncate()
+  end
+
+  defp truncate(line) do
+    if String.length(line) > 140, do: String.slice(line, 0, 140) <> "…", else: line
   end
 end

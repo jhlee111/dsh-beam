@@ -203,14 +203,50 @@ defmodule DshBeam.AgentTest do
 
     # reasoning is a display-only event, just before the assistant answer
     assert [
-             %{"role" => "reasoning", "content" => "chain of thought"},
+             %{"role" => "reasoning_chunk", "content" => "chain of thought"},
              %{"role" => "assistant", "content" => "answer"} | _
            ] =
-             Enum.drop_while(events, &(&1["role"] != "reasoning"))
+             Enum.drop_while(events, &(&1["role"] != "reasoning_chunk"))
 
     [assistant] = Enum.filter(events, &(&1["role"] == "assistant"))
     assert assistant["usage"].input_tokens == 100
     assert assistant["usage"].output_tokens == 50
+  end
+
+  test "a streaming adapter emits reasoning chunks into the session" do
+    adapter = %{id: :adapter, plugin: StreamingLlmAdapter, config: [], disabled: false}
+
+    {:ok, runtime} =
+      DshBeam.Runtime.start_link(
+        [session_entry(), llm_entry(), adapter, loop_entry()],
+        []
+      )
+
+    %{loop: %{pid: loop}} = DshBeam.Runtime.entries(runtime)
+    ctx = DshBeam.Runtime.context(runtime)
+    {:ok, session} = DshBeam.Context.get(ctx, :session)
+
+    assert {:ok, "answer"} = DshBeam.Agent.Loop.run(loop, "think")
+
+    reasoning = DshBeam.Session.all(session) |> Enum.filter(&(&1["role"] == "reasoning_chunk"))
+    assert Enum.map(reasoning, & &1["content"]) == ["line one\n", "line two\n"]
+  end
+end
+
+defmodule StreamingLlmAdapter do
+  @moduledoc false
+  # A scripted adapter that streams reasoning through the loop's callback (as
+  # the real Req adapter does via SSE) instead of returning a full block.
+  use DshBeam.Llm.Adapter
+
+  @impl true
+  def complete(_config, _messages, opts) do
+    if stream = opts[:stream] do
+      stream.({:reasoning, "line one\n"})
+      stream.({:reasoning, "line two\n"})
+    end
+
+    {:ok, %{content: "answer", reasoning: nil, tool_calls: [], finish_reason: :stop, usage: nil}}
   end
 end
 

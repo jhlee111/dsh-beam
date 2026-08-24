@@ -36,7 +36,7 @@ defmodule DshBeam.Ui.TrajectoryProjection do
   def cell(%{"role" => "assistant", "content" => content} = event),
     do: %{kind: :message, label: "ASSISTANT", text: content <> usage_suffix(event["usage"])}
 
-  def cell(%{"role" => "reasoning", "content" => content}),
+  def cell(%{"role" => "reasoning_chunk", "content" => content}),
     do: %{kind: :reasoning, label: "THINK", text: truncate(content)}
 
   def cell(%{"role" => "tool_call", "name" => name}),
