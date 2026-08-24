@@ -11,15 +11,56 @@ defmodule DshBeam.Console do
   Entry config:
 
   - :server — start the HTTP listener (default false; the demo script sets
-    true to serve on 127.0.0.1:4001)
+    true to serve on 127.0.0.1:4888)
+
+  The listener port comes from config (`http: [port: 4888]`) and can be
+  overridden at boot with the DSH_BEAM_PORT environment variable, so the
+  console never collides with another dev server.
   """
 
   use DshBeam.Plugin
+
+  @default_port 4888
+
+  @doc "The effective console port: DSH_BEAM_PORT env var wins, else config."
+  def port do
+    configured =
+      Application.get_env(:dsh_beam, DshBeamWeb.Endpoint, [])
+      |> Keyword.get(:http, [])
+      |> Keyword.get(:port, @default_port)
+
+    case System.get_env("DSH_BEAM_PORT") do
+      nil ->
+        configured
+
+      "" ->
+        configured
+
+      str ->
+        case Integer.parse(str) do
+          {p, ""} when p in 1..65_535 ->
+            p
+
+          _ ->
+            raise ArgumentError, "invalid DSH_BEAM_PORT: #{inspect(str)} (want a port 1..65535)"
+        end
+    end
+  end
 
   @impl DshBeam.Plugin
   def mount(ctx, opts) do
     runtime = Keyword.fetch!(opts, :runtime)
     server = Keyword.get(opts, :server, false)
+
+    # Resolve the HTTP port: DSH_BEAM_PORT (if set) overrides the default
+    # from config so the console cannot collide with another dev server.
+    # The overlay is applied to the app env right before the endpoint
+    # starts — Phoenix reads it at start_link time.
+    endpoint_config =
+      Application.get_env(:dsh_beam, DshBeamWeb.Endpoint, [])
+      |> Keyword.put(:http, ip: {127, 0, 0, 1}, port: port())
+
+    Application.put_env(:dsh_beam, DshBeamWeb.Endpoint, endpoint_config)
 
     # the web subtree (pubsub + endpoint) is started unlinked: the console
     # owns it explicitly and stops it synchronously in terminate/3. Phoenix
