@@ -39,7 +39,13 @@ mix deps.get
 mix test                              # 148 tests, one per paper guarantee
 
 DEEPSEEK_API_KEY=sk-... mix run scripts/console.exs   # http://127.0.0.1:4888
-DSH_BEAM_PORT=5000 mix run scripts/console.exs        # pick a free port when 4888 is taken
+```
+
+The console serves on **`127.0.0.1:4888`** by default. If another dev server
+is already on that port, pick a free one without touching the config:
+
+```bash
+DSH_BEAM_PORT=5000 mix run scripts/console.exs        # http://127.0.0.1:5000
 ```
 
 Elixir 1.20.2 / OTP 28 (pinned via `.tool-versions`).
