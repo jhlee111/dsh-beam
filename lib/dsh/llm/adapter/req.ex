@@ -168,7 +168,14 @@ defmodule DshBeam.Llm.Adapter.Req do
     # 2-tuple on every `:status`/`:headers`/`:trailers` event — so the SSE
     # parse state cannot ride the accumulator. It lives in a separate Agent
     # instead, and the `into` fun just threads the tuple through untouched.
-    {:ok, state} = Agent.start_link(fn -> new_stream_acc() end)
+    #
+    # The Agent must be UNLINKED: this fiber traps exits (DshBeam.Plugin sets
+    # :trap_exit), and a linked Agent's `:normal` shutdown on Agent.stop/1
+    # would surface as {:EXIT, _pid, :normal}, which the default
+    # handle_dsh_exit/3 turns into {:stop, :normal} — silently killing the
+    # adapter after the first streamed reply (the next chat then reports
+    # :adapter_unavailable).
+    {:ok, state} = Agent.start(fn -> new_stream_acc() end)
 
     into = fn
       {:data, data}, acc ->
@@ -184,18 +191,21 @@ defmodule DshBeam.Llm.Adapter.Req do
     options =
       if plug = Map.get(config, :plug), do: Keyword.put(options, :plug, plug), else: options
 
-    result =
-      case opts[:cancel] do
-        nil -> request_stream(url, options)
-        token -> cancellable_stream(url, options, token, timeout)
+    try do
+      result =
+        case opts[:cancel] do
+          nil -> request_stream(url, options)
+          token -> cancellable_stream(url, options, token, timeout)
+        end
+
+      acc = state |> Agent.get(& &1) |> flush_buffer(stream)
+
+      case result do
+        {:ok, :streamed} -> stream_result(acc)
+        {:error, reason} -> {:error, reason}
       end
-
-    acc = state |> Agent.get(& &1) |> flush_buffer(stream)
-    Agent.stop(state)
-
-    case result do
-      {:ok, :streamed} -> stream_result(acc)
-      {:error, reason} -> {:error, reason}
+    after
+      Agent.stop(state)
     end
   end
 

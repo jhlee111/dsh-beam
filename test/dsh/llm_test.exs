@@ -302,6 +302,14 @@ defmodule DshBeam.LlmTest do
     assert reply.usage.input_tokens == 10
     assert reply.usage.output_tokens == 5
     assert_receive {:reasoning, "thinking…"}
+
+    # regression: a streamed reply must not kill the adapter. A linked
+    # accumulator Agent surfaces Agent.stop as {:EXIT, :normal}, which the
+    # fiber's default handle_dsh_exit/3 turns into {:stop, :normal} — so the
+    # NEXT chat would report :adapter_unavailable. A second streamed chat
+    # proves the fiber survived the first one.
+    assert {:ok, %{content: "Hello world"}} =
+             DshBeam.Llm.chat(llm, [%{"role" => "user", "content" => "hi"}], stream: stream)
   end
 
   test "the Req adapter forwards tools without crashing on the keyword opts" do
