@@ -36,7 +36,7 @@ submodule).
 ```bash
 git submodule update --init
 mix deps.get
-mix test                              # 148 tests, one per paper guarantee
+mix test                              # 150 tests, one per paper guarantee
 
 DEEPSEEK_API_KEY=sk-... mix console   # http://127.0.0.1:4888
 ```

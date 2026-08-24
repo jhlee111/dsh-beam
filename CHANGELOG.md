@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Chat history — cache-friendly tool turns
+
+- `DshBeam.Llm.Chat` now projects the session log through the same
+  `Agent.Loop.Projection` the agent loop replays, so a chat consumer sitting
+  between tool runs no longer drops `tool_call`/`tool_result` events: the full
+  prefix (assistant `tool_calls` with `""` content, then the `tool` messages)
+  replays verbatim into the model. One projection for every model request —
+  stable prefix, provider prompt-cache hits preserved (ADR-0014).
+
 ### Self-modification — hot swap
 
 - Added a `redefine_plugin` tool: the agent loop can hot-swap an already-mounted
