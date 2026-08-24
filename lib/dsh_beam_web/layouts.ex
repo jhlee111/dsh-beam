@@ -248,6 +248,51 @@ defmodule DshBeamWeb.Layouts do
             border-color: transparent; color: #fff; font-weight: 500;
           }
           .access-confirm-enable:disabled { opacity: .5; cursor: default; }
+          /* Model / effort seat (reference ModelSelect). */
+          .model-seat { position: relative; display: inline-flex; }
+          .model-trigger {
+            display: inline-flex; align-items: center; gap: 4px; height: 28px;
+            max-width: 240px; padding: 0 4px 0 8px; border-radius: 24px;
+            background: transparent; color: var(--dsw-alias-label-secondary);
+            font-size: 13px; line-height: 20px; font-weight: 500; cursor: pointer;
+          }
+          .model-trigger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+          .model-trigger:disabled { color: var(--dsw-alias-label-dimmed); cursor: default; }
+          .model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .model-effort { flex: none; color: var(--dsw-alias-label-caption); }
+          .model-chevron { flex: none; color: var(--dsw-alias-label-caption); transition: transform 120ms ease; }
+          .model-chevron.open { transform: rotate(180deg); }
+          .model-menu {
+            position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 30;
+            min-width: 260px; max-height: 320px; overflow-y: auto; padding: 4px;
+            border-radius: 10px; border: 1px solid var(--dsw-alias-border-l1, #232a36);
+            background: var(--dsw-static-neutral-bluish-850, #161a21);
+            box-shadow: var(--dsw-shadow-lv2, 0 4px 12px rgba(0, 0, 0, .4));
+          }
+          .model-cell {
+            display: flex; align-items: center; gap: 8px; width: 100%;
+            padding: 8px; border: none; border-radius: 6px; background: transparent;
+            color: var(--dsw-alias-label-primary); font-size: 13px; text-align: left; cursor: pointer;
+          }
+          .model-cell:hover { background: var(--dsw-alias-interactive-bg-hover); }
+          .model-cell-label { font-weight: 500; }
+          .model-cell-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-secondary); }
+          .model-cell-chevron { flex: none; color: var(--dsw-alias-label-caption); }
+          .model-group-title {
+            padding: 8px 8px 2px; font-size: 11px; font-weight: 600; letter-spacing: .03em;
+            text-transform: uppercase; color: var(--dsw-alias-label-tertiary);
+          }
+          .model-option {
+            display: flex; align-items: center; gap: 8px; width: 100%;
+            padding: 8px; border: none; border-radius: 6px; background: transparent;
+            color: var(--dsw-alias-label-primary); font-size: 13px; text-align: left; cursor: pointer;
+          }
+          .model-option:hover { background: var(--dsw-alias-interactive-bg-hover); }
+          .model-option.selected { color: var(--dsw-alias-state-business-primary); }
+          .model-option-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+          .model-option-name { font-weight: 500; }
+          .model-option-desc { font-size: 11px; color: var(--dsw-alias-label-secondary); }
+          .model-check { flex: none; margin-left: auto; }
           /* Back-to-bottom: a circular chevron floating just above the composer,
              revealed only while the reader is scrolled away from the newest
              message (reference ChatView .toBottom). */

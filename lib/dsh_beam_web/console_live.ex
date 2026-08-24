@@ -47,7 +47,8 @@ defmodule DshBeamWeb.ConsoleLive do
     %{id: :panel_plugins, plugin: DshBeam.Ui.Panel.Plugins, config: [], disabled: false},
     %{id: :panel_workspace, plugin: DshBeam.Ui.Panel.Workspace, config: [], disabled: false},
     %{id: :panel_trajectory, plugin: DshBeam.Ui.Panel.Trajectory, config: [], disabled: false},
-    %{id: :panel_access, plugin: DshBeam.Ui.Panel.Access, config: [], disabled: false}
+    %{id: :panel_access, plugin: DshBeam.Ui.Panel.Access, config: [], disabled: false},
+    %{id: :panel_model_select, plugin: DshBeam.Ui.Panel.ModelSelect, config: [], disabled: false}
   ]
 
   # The entries a seed/preset-apply swaps out of a composition: the agent core
@@ -74,7 +75,8 @@ defmodule DshBeamWeb.ConsoleLive do
     :panel_plugins,
     :panel_workspace,
     :panel_trajectory,
-    :panel_access
+    :panel_access,
+    :panel_model_select
   ]
 
   @impl true
@@ -130,6 +132,8 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:permission_open, false)
       |> assign(:permission_confirming, nil)
       |> assign(:permission_acknowledged, false)
+      |> assign(:model_open, false)
+      |> assign(:model_pane, :root)
       |> refresh()
 
     {:ok, socket}
@@ -220,7 +224,8 @@ defmodule DshBeamWeb.ConsoleLive do
             :panel_plugins,
             :panel_workspace,
             :panel_trajectory,
-            :panel_access
+            :panel_access,
+            :panel_model_select
           ])
       )
 
@@ -529,6 +534,40 @@ defmodule DshBeamWeb.ConsoleLive do
      socket
      |> assign(permission_confirming: nil, permission_acknowledged: false, permission_open: false)
      |> refresh()}
+  end
+
+  # -- model / effort selector (the composer's model seat) --
+
+  def handle_event("model_toggle", _params, socket) do
+    socket =
+      socket
+      |> assign(model_open: not socket.assigns.model_open)
+      |> assign(model_pane: :root)
+
+    {:noreply, refresh(socket)}
+  end
+
+  def handle_event("model_pane", %{"pane" => pane}, socket) do
+    # Literal atoms (not String.to_existing_atom) so both :model and :effort
+    # exist regardless of load order.
+    model_pane =
+      case pane do
+        "model" -> :model
+        "effort" -> :effort
+        _ -> :root
+      end
+
+    {:noreply, socket |> assign(model_pane: model_pane) |> refresh()}
+  end
+
+  def handle_event("model_select", %{"model" => model}, socket) do
+    socket = apply_model(socket, model: model)
+    {:noreply, socket |> assign(model_open: false, model_pane: :root) |> refresh()}
+  end
+
+  def handle_event("model_effort_select", %{"effort" => effort}, socket) do
+    socket = apply_model(socket, reasoning_effort: effort)
+    {:noreply, socket |> assign(model_open: false, model_pane: :root) |> refresh()}
   end
 
   def handle_event("plugin_toggle", %{"plugin" => plugin_str}, socket) do
@@ -1145,6 +1184,26 @@ defmodule DshBeamWeb.ConsoleLive do
     case alive_session(socket.assigns.ctx) do
       {:ok, session} -> DshBeam.Permission.apply(session, preset)
       _ -> :ok
+    end
+
+    socket
+  end
+
+  # The model/effort write path: re-arm the LLM provider in-memory and persist
+  # the choice to the settings store, so it survives a restart.
+  defp apply_model(socket, opts) do
+    case DshBeam.Context.get(socket.assigns.ctx, :llm) do
+      {:ok, llm} when is_pid(llm) ->
+        :ok = DshBeam.Llm.configure(llm, opts)
+
+        store = DshBeam.Runtime.settings(socket.assigns.runtime)
+
+        Enum.each(opts, fn {key, value} ->
+          DshBeam.Settings.put(store, DshBeam.Llm.Plugin, key, value)
+        end)
+
+      _ ->
+        :ok
     end
 
     socket

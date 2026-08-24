@@ -522,6 +522,33 @@ defmodule DshBeam.ConsoleTest do
     assert html =~ "Full access"
   end
 
+  test "the composer model seat selects a model and a reasoning effort",
+       %{session: session, ctx: ctx} do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    render_submit(view, "seed", %{})
+    open_chat_session(view, ctx)
+
+    html = render(view)
+    assert html =~ "model-trigger"
+    assert html =~ "deepseek-chat"
+
+    # drill into the model list and pick the reasoner
+    render_click(view, "model_toggle", %{})
+    render_click(view, "model_pane", %{"pane" => "model"})
+    html = render_click(view, "model_select", %{"model" => "deepseek-reasoner"})
+    assert html =~ "deepseek-reasoner"
+
+    {:ok, llm} = DshBeam.Context.get(ctx, :llm)
+    assert %{model: "deepseek-reasoner", reasoning_effort: "high"} = DshBeam.Llm.config(llm)
+
+    # drill into the effort list and pick a level
+    render_click(view, "model_toggle", %{})
+    render_click(view, "model_pane", %{"pane" => "effort"})
+    render_click(view, "model_effort_select", %{"effort" => "max"})
+
+    assert %{model: "deepseek-reasoner", reasoning_effort: "max"} = DshBeam.Llm.config(llm)
+  end
+
   test "crashing a sandbox child re-injects a fresh OS process", %{
     session: session,
     ctx: ctx,
