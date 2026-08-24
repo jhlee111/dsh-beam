@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### System prompt as a plugin registry
+
+- Added a `prompt_section` DSL so any plugin contributes its own guidance to
+  the assembled system prompt (the reference's `SystemPrompt` registry). The
+  agent loop now builds the system prompt from the harness identity + default
+  persona + every plugin's sections, instead of a hardcoded one-liner. The
+  self-modification tool documents its create → define → save workflow there.
+
 ### Self-modification + reusable plugins
 
 - The agent loop can now author plugins from inside a workspace: a

@@ -50,6 +50,11 @@ defmodule DshBeam.Plugin.Dsl do
     ]
   end
 
+  defmodule PromptSection do
+    @moduledoc false
+    defstruct [:name, :order, :text, :__identifier__, :__spark_metadata__]
+  end
+
   use Spark.Dsl.Extension,
     sections: [
       Section.new(:need,
@@ -163,6 +168,24 @@ defmodule DshBeam.Plugin.Dsl do
               Field.new(:select, :any,
                 doc: "an {M, f, args} / fun(assigns) deciding a :chain slot match"
               )
+            ],
+            identifier: :name
+          )
+          |> Entity.build!()
+        ]
+      )
+      |> Section.build!(),
+      Section.new(:prompt_section,
+        describe: "A system-prompt contribution this plugin adds to the assembled prompt",
+        top_level?: true,
+        entities: [
+          Entity.new(:prompt_section, PromptSection,
+            describe: "one prompt section",
+            args: [:name],
+            schema: [
+              Field.new(:name, :atom, required: true, doc: "unique section name"),
+              Field.new(:order, :integer, default: 0, doc: "sort order (ascending)"),
+              Field.new(:text, :string, required: true, doc: "the section prose")
             ],
             identifier: :name
           )

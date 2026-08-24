@@ -37,6 +37,12 @@ defmodule DshBeam.Tool.Plugin do
     }
   )
 
+  prompt_section(:self_modification,
+    order: 100,
+    text:
+      "You can extend the harness at runtime. To create a plugin: write the Elixir module source (a module using DshBeam.Plugin), then define_plugin it to compile and mount it live, and save_plugin it to persist it under ~/.dsh/plugins so it is reused in other workspaces/projects."
+  )
+
   @impl DshBeam.Plugin
   def handle_dsh_tool_call(:define_plugin, %{"source" => source}, _state) do
     case runtime() do

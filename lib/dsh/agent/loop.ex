@@ -52,7 +52,7 @@ defmodule DshBeam.Agent.Loop do
 
         system = %{
           "role" => "system",
-          "content" => "You are a helpful agent. Use tools when needed."
+          "content" => DshBeam.SystemPrompt.render()
         }
 
         # Multi-turn: the session log is the single source of truth. Read the
