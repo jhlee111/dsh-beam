@@ -137,6 +137,7 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:model_open, false)
       |> assign(:model_pane, :root)
       |> assign(:command_open, false)
+      |> assign(:trajectory_query, "")
       |> refresh()
 
     {:ok, socket}
@@ -551,6 +552,10 @@ defmodule DshBeamWeb.ConsoleLive do
      socket
      |> assign(chat_text: "/" <> name <> " ", command_open: false)
      |> refresh()}
+  end
+
+  def handle_event("trajectory_search", %{"query" => query}, socket) do
+    {:noreply, socket |> assign(trajectory_query: query) |> refresh()}
   end
 
   def handle_event("plugin_toggle", %{"plugin" => plugin_str}, socket) do
@@ -1038,7 +1043,7 @@ defmodule DshBeamWeb.ConsoleLive do
       credential_env: credential_env,
       chat_log: chat_log(socket.assigns.ctx),
       todos: todos(socket.assigns.ctx),
-      trajectory: trajectory(socket.assigns.ctx),
+      trajectory: trajectory(socket.assigns.ctx, socket.assigns.trajectory_query),
       permission: permission(socket.assigns.ctx),
       workspace_sessions: workspace_sessions,
       workspace_active: workspace_active,
@@ -1130,13 +1135,13 @@ defmodule DshBeamWeb.ConsoleLive do
 
   # The trajectory is the same session log grouped by turn: a "user" event opens
   # a turn; the tool calls, results, and the answer that follow belong to it.
-  defp trajectory(ctx) do
+  defp trajectory(ctx, query) do
     case alive_session(ctx) do
       {:ok, session} ->
         session
         |> DshBeam.Session.all()
-        |> group_turns()
-        |> Enum.map(fn turn -> Enum.map(turn, &chat_entry/1) end)
+        |> DshBeam.Ui.TrajectoryProjection.from_events()
+        |> DshBeam.Ui.TrajectoryProjection.filter(query)
 
       _ ->
         []
@@ -1293,21 +1298,6 @@ defmodule DshBeamWeb.ConsoleLive do
 
   defp dispatch_command(socket, name, _args) do
     {socket, "unknown command \"/#{name}\" (try /help)"}
-  end
-
-  defp group_turns(events) do
-    {turns, current} =
-      Enum.reduce(events, {[], []}, fn event, {turns, current} ->
-        if event["role"] == "user" do
-          {[Enum.reverse(current) | turns], [event]}
-        else
-          {turns, [event | current]}
-        end
-      end)
-
-    (turns ++ [Enum.reverse(current)])
-    |> Enum.reject(&(&1 == []))
-    |> Enum.reverse()
   end
 
   # The workspace sidebar: every workspace session, with its current/current?

@@ -447,6 +447,39 @@ defmodule DshBeamWeb.Layouts do
           .msg-error, .msg-event, .msg-busy { color: var(--dsw-static-red-400); font-size: 13px; }
           .msg-busy { color: var(--dsw-alias-label-secondary); }
           .trajectory-turn { border-top: 1px solid var(--dsw-alias-border-l2); padding: 8px 0; }
+          .trajectory-toolbar {
+            display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
+            border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; padding: 4px 8px;
+            background: var(--dsw-static-neutral-bluish-900, #0c0f14);
+          }
+          .trajectory-search-icon { display: inline-flex; color: var(--dsw-alias-label-caption); }
+          .trajectory-toolbar input {
+            flex: 1; border: none; background: transparent; outline: none;
+            color: var(--dsw-alias-label-primary); font-size: 12px; padding: 2px 0;
+          }
+          .trajectory-cells { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
+          .trajectory-cell {
+            display: flex; align-items: baseline; gap: 8px; padding: 3px 6px;
+            border-radius: 6px; font-size: 12px;
+          }
+          .trajectory-cell:hover { background: var(--dsw-alias-interactive-bg-hover); }
+          .trajectory-tag {
+            flex: none; display: inline-flex; align-items: center; gap: 5px; min-width: 92px;
+            color: var(--dsw-alias-label-secondary); font-size: 10px; font-weight: 600;
+            letter-spacing: .04em; text-transform: uppercase;
+          }
+          .tag-glyph { font-size: 12px; }
+          .trajectory-text {
+            flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap; color: var(--dsw-alias-label-primary);
+            font-family: var(--ds-font-family-code); font-size: 12px;
+          }
+          .kind-user .trajectory-tag { color: var(--dsw-static-blue-400, #60a5fa); }
+          .kind-message .trajectory-tag { color: var(--dsw-static-deepseek-400, #679efe); }
+          .kind-tool .trajectory-tag { color: var(--dsw-static-amber-400, #f0b429); }
+          .kind-command .trajectory-tag { color: var(--dsw-static-green-500, #34d399); }
+          .kind-error .trajectory-tag { color: var(--dsw-static-red-400, #fb7185); }
+          .kind-system .trajectory-tag { color: var(--dsw-static-neutral-bluish-500, #6b7a90); }
 
           /* Workspace sidebar: an explicit create form + session list. */
           .workspace-form { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
