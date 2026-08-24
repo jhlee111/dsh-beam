@@ -1,5 +1,6 @@
 # The live console demo: boots the runtime with the console plugin (HTTP
-# listener on 127.0.0.1:4001) plus the full agent composition — session, llm,
+# listener on 127.0.0.1:4888, override with DSH_BEAM_PORT) plus the full
+# agent composition — session, llm,
 # shell, tool-bash, tool-fs, and the agent loop.
 #
 #   DEEPSEEK_API_KEY=sk-... mix run scripts/console.exs
@@ -43,6 +44,12 @@ settings_path = Path.join([File.cwd!(), ".dsh", "settings.json"])
 saved = DshBeam.Creator.load_saved_plugins(runtime)
 IO.puts("loaded saved plugins: #{inspect(saved)}")
 
-IO.puts("dsh-beam console: http://127.0.0.1:4001 (runtime #{inspect(runtime)})")
-IO.puts("settings: #{settings_path}")
+IO.puts(
+  "dsh-beam console: http://127.0.0.1:#{DshBeam.Console.port()} (runtime #{inspect(runtime)})"
+)
+
+IO.puts(
+  "settings: #{settings_path} (port override: DSH_BEAM_PORT=#{System.get_env("DSH_BEAM_PORT") || "unset"})"
+)
+
 Process.sleep(:infinity)

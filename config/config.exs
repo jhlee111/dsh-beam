@@ -6,7 +6,10 @@ import Config
 # (false in tests, true in the demo script).
 config :dsh_beam, DshBeamWeb.Endpoint,
   url: [host: "localhost"],
-  http: [ip: {127, 0, 0, 1}, port: 4001],
+  # Default console port. Override at boot with DSH_BEAM_PORT if it
+  # collides with another dev server (e.g. DSH_BEAM_PORT=5000 mix run
+  # scripts/console.exs). DshBeam.Console resolves the port at mount.
+  http: [ip: {127, 0, 0, 1}, port: 4888],
   secret_key_base: "rU3TXZC/i6qAxccsnzuurTbjrtBiHIN8jytbq9qJ2QdOC5UbIvSHiC2KNRo7sIPG",
   live_view: [signing_salt: "dsh_beam_lv"],
   check_origin: false,
