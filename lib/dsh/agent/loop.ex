@@ -55,10 +55,13 @@ defmodule DshBeam.Agent.Loop do
           "content" => DshBeam.SystemPrompt.render()
         }
 
-        # Multi-turn: the session log is the single source of truth. Read the
-        # prior user/assistant turns FIRST, then record the new user turn, so
-        # the replay and the record stay consistent.
-        history = history_messages(view.session)
+        # Multi-turn: the session log is the single source of truth. Project it
+        # to the model wire shape FIRST (a deterministic, append-ordered replay
+        # of user/assistant/tool turns), then record the new user turn, so the
+        # replay and the record stay consistent. The projection preserves tool
+        # turns, so the prompt prefix is stable across requests and runs —
+        # cache-friendly, like the reference's deriveMessages.
+        history = DshBeam.Agent.Loop.Projection.from_session(view.session)
         _ = DshBeam.Session.append(view.session, %{"role" => "user", "content" => task})
 
         messages = [system | history] ++ [%{"role" => "user", "content" => task}]
@@ -92,9 +95,11 @@ defmodule DshBeam.Agent.Loop do
       {:ok, %{finish_reason: :tool_calls, tool_calls: [_ | _] = calls}} ->
         {assistant, tool_messages, steps} = dispatch(ctx, calls)
 
-        # record the tool call and its result into the session (chronological),
-        # so the chat pane shows tool execution and survives a refresh
-        append_steps(session, steps)
+        # record the whole assistant turn — the model-issued tool calls AND
+        # their results — into the session (chronological), so the chat pane
+        # shows tool execution, survives a refresh, and the NEXT turn replays
+        # the full prefix (cache-friendly, like the reference's deriveMessages).
+        append_steps(session, calls, tool_messages)
 
         # the harness's guard/repeat-tool-reminder: count consecutive identical
         # tool calls and inject an advisory nudge when a threshold is hit
@@ -136,32 +141,29 @@ defmodule DshBeam.Agent.Loop do
     messages ++ [%{"role" => "user", "content" => reminder}]
   end
 
-  # prior user/assistant turns, replayed from the session log in append order
-  defp history_messages(session) do
-    case DshBeam.Session.all(session) do
-      events when is_list(events) ->
-        Enum.filter(events, &(&1["role"] in ["user", "assistant"]))
+  # Persist a tool step: first every model-issued call (the UI card + the
+  # projection's assistant tool_calls source), then every result (the UI card +
+  # the projection's tool message source). All calls before all results keeps
+  # the projection's turn grouping correct when a model emits several calls.
+  defp append_steps(session, calls, tool_messages) do
+    Enum.each(calls, fn call ->
+      DshBeam.Session.append(session, %{
+        "role" => "tool_call",
+        "id" => call.id,
+        "name" => call.name,
+        "arguments" => decode_arguments(call.arguments),
+        "arguments_json" => call.arguments
+      })
+    end)
 
-      _ ->
-        []
-    end
-  end
-
-  defp append_steps(session, steps) do
-    Enum.each(steps, fn
-      {:tool_call, name, args} ->
-        DshBeam.Session.append(session, %{
-          "role" => "tool_call",
-          "name" => name,
-          "arguments" => args
-        })
-
-      {:tool_result, name, result} ->
-        DshBeam.Session.append(session, %{
-          "role" => "tool_result",
-          "name" => name,
-          "content" => result
-        })
+    Enum.zip(calls, tool_messages)
+    |> Enum.each(fn {call, tool_message} ->
+      DshBeam.Session.append(session, %{
+        "role" => "tool_result",
+        "tool_call_id" => tool_message["tool_call_id"],
+        "name" => call.name,
+        "content" => tool_message["content"]
+      })
     end)
 
     :ok
@@ -190,9 +192,12 @@ defmodule DshBeam.Agent.Loop do
         {tms ++ [tool_message], steps ++ [step_call, step_result]}
       end)
 
+    # content is "" (never nil) on a tool-call turn: some OpenAI-compatible
+    # gateways reject a null content, and an empty string keeps the session
+    # projection identical to what was sent (the reference does the same).
     assistant = %{
       "role" => "assistant",
-      "content" => nil,
+      "content" => "",
       "tool_calls" =>
         Enum.map(calls, fn call ->
           %{
@@ -251,5 +256,109 @@ defmodule DshBeam.Agent.Loop do
       {:ok, map} when is_map(map) -> map
       _ -> %{}
     end
+  end
+end
+
+defmodule DshBeam.Agent.Loop.Projection do
+  @moduledoc """
+  The session log → model-message projection (the reference's
+  `deriveMessages`): every model-visible event in append order becomes exactly
+  one OpenAI-compatible message.
+
+  The projection is the ONLY place that reads the session for the model, so a
+  turn replays identically across requests and across runs — the same prefix
+  in, the same prompt-cache hit out. Tool turns are preserved: a consecutive
+  run of `tool_call` events becomes one assistant `tool_calls` message, and
+  each `tool_result` becomes the `tool` message that followed it, instead of
+  being dropped. So a later turn sees what it actually did, and the prefix
+  does not shift between the last tool run and the next user turn.
+
+  Round-trip guarantee: a run that ends in a tool call appends exactly the
+  tool_call/tool_result events for that call, and projecting them back yields
+  exactly the assistant tool_calls + tool messages that were sent. The UI's
+  display projection stays independent (it reads the raw event shapes).
+  """
+
+  @doc "Project the session log to model messages, in append order."
+  def from_session(session) do
+    case DshBeam.Session.all(session) do
+      events when is_list(events) ->
+        events
+        |> Enum.reduce(%{messages: [], open: nil}, fn event, acc -> step(acc, event) end)
+        |> close_open()
+        |> Map.fetch!(:messages)
+        |> Enum.reverse()
+
+      _ ->
+        []
+    end
+  end
+
+  # -- state: messages (accumulated in reverse) + open (the live assistant
+  #    tool-call turn: its calls and the tool messages that follow it) --
+
+  defp step(acc, %{"role" => "user", "content" => content}),
+    do: push(acc, %{"role" => "user", "content" => content})
+
+  defp step(acc, %{"role" => "assistant", "content" => content}),
+    do: push(acc, %{"role" => "assistant", "content" => content})
+
+  defp step(acc, %{"role" => "tool_call"} = event),
+    do: add_call(acc, event)
+
+  defp step(acc, %{"role" => "tool_result"} = event),
+    do: add_result(acc, event)
+
+  defp step(acc, _event), do: acc
+
+  # a new non-tool message closes any open tool-call turn first, so the
+  # assistant tool_calls message precedes its tool messages in the output
+  defp push(%{open: nil} = acc, message), do: %{acc | messages: [message | acc.messages]}
+
+  defp push(acc, message) do
+    acc = close_open(acc)
+    %{acc | messages: [message | acc.messages]}
+  end
+
+  defp add_call(%{open: nil} = acc, event), do: %{acc | open: %{calls: [call(event)], tools: []}}
+
+  defp add_call(acc, event) do
+    open = %{acc.open | calls: [call(event) | acc.open.calls]}
+    %{acc | open: open}
+  end
+
+  defp add_result(%{open: %{calls: [_ | _]}} = acc, event) do
+    message = %{
+      "role" => "tool",
+      "tool_call_id" => event["tool_call_id"] || hd(acc.open.calls)["id"],
+      "content" => event["content"]
+    }
+
+    %{acc | open: %{acc.open | tools: [message | acc.open.tools]}}
+  end
+
+  defp add_result(acc, _event), do: acc
+
+  defp close_open(%{open: nil} = acc), do: acc
+
+  defp close_open(%{open: %{calls: calls, tools: tools}, messages: messages} = acc) do
+    tool_calls_message = %{
+      "role" => "assistant",
+      "content" => "",
+      "tool_calls" => Enum.reverse(calls)
+    }
+
+    %{acc | open: nil, messages: Enum.reverse(tools) ++ [tool_calls_message | messages]}
+  end
+
+  defp call(event) do
+    %{
+      "id" => event["id"] || "call_0",
+      "type" => "function",
+      "function" => %{
+        "name" => event["name"],
+        "arguments" => event["arguments_json"] || JSON.encode!(event["arguments"] || %{})
+      }
+    }
   end
 end
