@@ -126,12 +126,11 @@ hardcoded one-liner.
 The full console-vs-reference gap list lives in
 **[docs/ui-gap-review.md](docs/ui-gap-review.md)**. The remaining items:
 
-- **Session persistence** — sessions are still in-memory (ETS); a JSONL or
-  SQLite provider + roster restore is the next durability step.
 - **Custom agent-preset persistence** — only the `default_preset` survives a
   restart; duplicated presets are in-memory.
-- **Richer conversation nodes** — retry, compaction, and reasoning rows from
-  the reference are not ported; assistant markdown has no syntax highlighting.
+- **Richer conversation nodes** — retry and compaction from the reference are
+  not ported; assistant markdown has no syntax highlighting. (Reasoning rows
+  are done.)
 - **More tools** — bash / fs / todo / calc (plus the self-modification tools);
   no web search or subagent capability yet.
 - **Redefine in the UI** — `redefine_plugin` is now a tool, but the Creator

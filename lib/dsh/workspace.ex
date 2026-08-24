@@ -55,7 +55,9 @@ defmodule DshBeam.Workspace do
       end
     end
 
-    {:ok, [], %{workspace: self()}, %{by_cwd: %{}, sessions: %{}}}
+    roster_path = Keyword.get(opts, :roster_path)
+
+    {:ok, [], %{workspace: self()}, restore_roster(roster_path)}
   end
 
   @impl DshBeam.Plugin
@@ -82,7 +84,10 @@ defmodule DshBeam.Workspace do
 
   @doc """
   Open a session over `repo`: resolves the repository root, checks out a fresh
-  `session/<id>` worktree, and starts the session log in that checkout. Returns
+  `session/<id>` worktree, and starts the session log in that checkout (a
+  durable JSONL under `<cwd>/.dsh/session.jsonl`, via `DshBeam.Session.File`).
+  When the workspace is mounted with `:roster_path`, each open/close persists
+  the roster manifest there so a restart re-opens the same sessions. Returns
   `{:ok, session}` — the session handle to pass to close/relay.
   """
   def open_session(workspace, repo, opts \\ []) when is_pid(workspace) and is_binary(repo) do
@@ -136,7 +141,9 @@ defmodule DshBeam.Workspace do
     data =
       case result do
         {:ok, session, meta} ->
-          %{data | extra: register(data.extra, session, meta.cwd, meta.repo)}
+          extra = register(data.extra, session, meta.cwd, meta.repo, meta.file)
+          persist_roster(extra)
+          %{data | extra: extra}
 
         _ ->
           data
@@ -157,19 +164,22 @@ defmodule DshBeam.Workspace do
         {:keep_state_and_data, [{:reply, from, {:error, :unknown_session}}]}
 
       %{cwd: cwd, repo: repo} ->
-        # a worktree-backed session owns a checkout to remove; an in-place one
-        # does not. Never let a git failure stop the session teardown.
+        # Stop the session first so no more appends land in its log, then tear
+        # down. A worktree-backed session owns a checkout to remove; an
+        # in-place one does not. Never let a git failure stop the teardown.
+        if Process.alive?(session), do: Process.exit(session, :shutdown)
+
         if repo do
-          # L3: the live marker pins the session against boot GC; dropping it
-          # here is the explicit-close counterpart — after close, the checkout
-          # may be swept like any dead session.
-          _ = File.rm(Path.join([cwd, ".dsh", "live"]))
+          # Drop the whole `.dsh` dir — the live marker AND the session log —
+          # before removing the checkout: `git worktree remove` refuses a
+          # worktree with untracked residue.
+          _ = File.rm_rf(Path.join(cwd, ".dsh"))
           DshBeam.Git.worktree_remove(repo, cwd)
         end
 
-        if Process.alive?(session), do: Process.exit(session, :shutdown)
-        data = %{data | extra: unregister_session(data.extra, session)}
-        {:keep_state, data, [{:reply, from, :ok}]}
+        extra = unregister_session(data.extra, session)
+        persist_roster(extra)
+        {:keep_state, %{data | extra: extra}, [{:reply, from, :ok}]}
     end
   end
 
@@ -262,8 +272,8 @@ defmodule DshBeam.Workspace do
     with :ok <- File.mkdir_p(Path.dirname(dest)),
          {:ok, _} <- DshBeam.Git.worktree_add(root, branch, dest) do
       case start_live_session(dest, title) do
-        {:ok, session} ->
-          {:ok, session, %{cwd: dest, repo: root}}
+        {:ok, session, file} ->
+          {:ok, session, %{cwd: dest, repo: root, file: file}}
 
         {:error, _} = err ->
           # never leak a checkout whose session could not start: tear it down
@@ -277,8 +287,8 @@ defmodule DshBeam.Workspace do
 
   defp start_live_session(dest, title) do
     with :ok <- mark_live(dest),
-         {:ok, session} <- DshBeam.Session.Memory.start(title: title, cwd: dest) do
-      {:ok, session}
+         {:ok, session, file} <- start_session(dest, title) do
+      {:ok, session, file}
     end
   end
 
@@ -293,8 +303,8 @@ defmodule DshBeam.Workspace do
   end
 
   defp in_place_session(dir, title) do
-    case DshBeam.Session.Memory.start(title: title, cwd: dir) do
-      {:ok, session} -> {:ok, session, %{cwd: dir, repo: nil}}
+    case start_session(dir, title) do
+      {:ok, session, file} -> {:ok, session, %{cwd: dir, repo: nil, file: file}}
       other -> other
     end
   end
@@ -302,6 +312,64 @@ defmodule DshBeam.Workspace do
   defp default_dest(repo_root, branch) do
     base = Path.basename(repo_root)
     Path.join([Path.dirname(repo_root), base <> "-worktrees", branch])
+  end
+
+  # The durable session log lives next to the `.dsh/live` marker, inside the
+  # session's checkout (or the in-place folder). Each session gets a unique
+  # file so two in-place sessions over the same folder never share a log.
+  defp start_session(cwd, title) do
+    file = Path.join([cwd, ".dsh", "session-#{System.unique_integer([:positive])}.jsonl"])
+
+    with :ok <- File.mkdir_p(Path.join(cwd, ".dsh")) do
+      case DshBeam.Session.File.start(path: file, title: title, cwd: cwd) do
+        {:ok, session} -> {:ok, session, file}
+        other -> other
+      end
+    end
+  end
+
+  # -- roster persistence (opt-in via :roster_path) --
+
+  defp restore_roster(nil), do: %{by_cwd: %{}, sessions: %{}, roster_path: nil}
+
+  defp restore_roster(roster_path) do
+    extra = %{by_cwd: %{}, sessions: %{}, roster_path: roster_path}
+
+    Enum.reduce(read_roster(roster_path), extra, fn entry, acc ->
+      case entry do
+        %{"cwd" => cwd, "repo" => repo, "title" => title, "file" => file} ->
+          case DshBeam.Session.File.start(path: file, title: title, cwd: cwd) do
+            {:ok, session} -> register(acc, session, cwd, repo, file)
+            {:error, _} -> acc
+          end
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  defp persist_roster(%{roster_path: nil}), do: :ok
+
+  defp persist_roster(%{roster_path: path, sessions: sessions}) do
+    entries =
+      Enum.map(sessions, fn {session, %{cwd: cwd, repo: repo, file: file}} ->
+        %{"cwd" => cwd, "repo" => repo, "title" => session_title(session), "file" => file}
+      end)
+
+    File.mkdir_p(Path.dirname(path))
+    File.write(path, JSON.encode!(entries))
+  end
+
+  defp read_roster(path) do
+    if File.exists?(path) do
+      case JSON.decode(File.read!(path)) do
+        {:ok, entries} when is_list(entries) -> entries
+        _ -> []
+      end
+    else
+      []
+    end
   end
 
   defp session_title(session) do
@@ -317,9 +385,9 @@ defmodule DshBeam.Workspace do
     end
   end
 
-  defp register(extra, session, cwd, repo) do
+  defp register(extra, session, cwd, repo, file \\ nil) do
     by_cwd = Map.update(extra.by_cwd, cwd, [session], fn sessions -> [session | sessions] end)
-    sessions = Map.put(extra.sessions, session, %{cwd: cwd, repo: repo})
+    sessions = Map.put(extra.sessions, session, %{cwd: cwd, repo: repo, file: file})
     %{extra | by_cwd: by_cwd, sessions: sessions}
   end
 

@@ -21,15 +21,12 @@ workflow, plugin/tool/panel/ADR recipes, style, and CI. Read it first.
 The README's [Roadmap](README.md#roadmap--not-yet-done) lists what is not done
 yet. Good starting points:
 
-- **Session persistence** — a `DshBeam.Session.File` (JSONL) provider already
-  exists but is not wired up; wire it into `Workspace.open_session` and restore
-  the workspace roster on boot.
 - **Redefine in the UI** — `redefine_plugin` is now a tool, but the Creator
   settings panel still only exposes `define`; add a redefine affordance there.
 - **More tools** — web search, a subagent capability, etc. Each is just a tool
   plugin (`use DshBeam.Plugin` + `tool/3` + `handle_dsh_tool_call/3`).
-- **Richer conversation nodes** — port retry / compaction / reasoning rows from
-  the reference (`reference/deepseek-harness` submodule).
+- **Richer conversation nodes** — port retry / compaction from the reference
+  (`reference/deepseek-harness` submodule); reasoning rows are done.
 - **Plugin prompt sections** — any new capability should also declare a
   `prompt_section` so the model knows how to use it.
 
