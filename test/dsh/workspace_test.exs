@@ -157,6 +157,50 @@ defmodule DshBeam.WorkspaceTest do
     assert File.exists?(dest)
   end
 
+  test "a roster_path persists sessions and restores them on remount", %{repo: repo} do
+    roster_path =
+      Path.join(System.tmp_dir!(), "dsh_roster_#{System.unique_integer([:positive])}.json")
+
+    on_exit(fn -> File.rm_rf!(roster_path) end)
+
+    entry = %{
+      id: :workspace,
+      plugin: DshBeam.Workspace,
+      config: [roster_path: roster_path],
+      disabled: false
+    }
+
+    # first mount: open a session, append a durable event
+    {:ok, runtime1} = DshBeam.Runtime.start_link([entry], [])
+    ctx1 = DshBeam.Runtime.context(runtime1)
+    {:ok, workspace1} = DshBeam.Context.get(ctx1, :workspace)
+
+    {:ok, session1} = DshBeam.Workspace.open_session(workspace1, repo)
+    %{cwd: cwd, title: title} = DshBeam.Session.header(session1)
+    on_exit(fn -> File.rm_rf!(Path.dirname(cwd)) end)
+
+    assert {:ok, _} = DshBeam.Session.append(session1, %{"role" => "user", "content" => "hello"})
+
+    # tear down (release the session process + the runtime)
+    Process.exit(session1, :shutdown)
+    GenServer.stop(runtime1)
+
+    # second mount: the roster restores the same session and its log
+    {:ok, runtime2} = DshBeam.Runtime.start_link([entry], [])
+    ctx2 = DshBeam.Runtime.context(runtime2)
+    {:ok, workspace2} = DshBeam.Context.get(ctx2, :workspace)
+
+    sessions = DshBeam.Workspace.all_sessions(workspace2)
+    assert map_size(sessions) == 1
+
+    [{restored, %{cwd: ^cwd}}] = Enum.to_list(sessions)
+    assert DshBeam.Session.header(restored).title == title
+    assert DshBeam.Session.all(restored) == [%{"role" => "user", "content" => "hello"}]
+
+    # and the manifest is a JSON list of the roster entries
+    assert [%{"cwd" => ^cwd, "title" => ^title} | _] = JSON.decode!(File.read!(roster_path))
+  end
+
   test "open_session outside a repository opens an in-place session", _context do
     {:ok, runtime} = DshBeam.Runtime.start_link([workspace_entry()], [])
     ctx = DshBeam.Runtime.context(runtime)
