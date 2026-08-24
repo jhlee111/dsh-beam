@@ -16,6 +16,14 @@ defmodule DshBeam.Workspace do
   workspace): `peers/2` returns every other session there, and `relay/3` appends
   a peer message to the target session's log — the minimal port of the reference
   `agent-team` peer mailbox.
+
+  ## Boot GC is OPT-IN
+
+  `mount/2` never prunes on its own. Only a mount configured with
+  `boot_prune: true` **and** an explicit `repo:` (the repository to sweep)
+  runs `DshBeam.Git.prune_merged_worktrees/2` — never a `File.cwd!()`
+  guess. A bare `mix test` or a console started from an unrelated directory
+  must not be able to delete another session's worktree.
   """
 
   use DshBeam.Plugin
@@ -27,13 +35,25 @@ defmodule DshBeam.Workspace do
   )
 
   @impl DshBeam.Plugin
-  def mount(_ctx, _opts) do
-    # Boot-time GC: sweep worktrees whose session branch already merged into
-    # the default branch (a dead session), pruning their checkout + local
-    # branch. The sweep is best-effort, never touches the caller's cwd (so a
-    # console living inside a merged worktree survives its own boot), and
-    # swallows failures — it must never block the composition from mounting.
-    _ = DshBeam.Git.prune_merged_worktrees(File.cwd!(), keep: [File.cwd!()])
+  def mount(_ctx, opts) do
+    # Boot GC is OPT-IN (L4): only a mount that explicitly asks for it — with
+    # an explicit repo, never a File.cwd!() guess — may sweep. The sweep is
+    # best-effort, keeps the caller's cwd, and swallows failures: it must
+    # never block the composition from mounting, and it must never delete a
+    # worktree git itself (without --force) would refuse to remove.
+    if Keyword.get(opts, :boot_prune, false) do
+      case Keyword.get(opts, :repo) do
+        nil ->
+          # no explicit repo: refuse to guess from cwd — a wrong guess is how
+          # a test suite or console GC'd a live session's worktree
+          :ok
+
+        repo ->
+          keep = [File.cwd!() | Keyword.get(opts, :keep, [])]
+          _ = DshBeam.Git.prune_merged_worktrees(repo, keep: keep)
+          :ok
+      end
+    end
 
     {:ok, [], %{workspace: self()}, %{by_cwd: %{}, sessions: %{}}}
   end
@@ -139,7 +159,13 @@ defmodule DshBeam.Workspace do
       %{cwd: cwd, repo: repo} ->
         # a worktree-backed session owns a checkout to remove; an in-place one
         # does not. Never let a git failure stop the session teardown.
-        if repo, do: DshBeam.Git.worktree_remove(repo, cwd)
+        if repo do
+          # L3: the live marker pins the session against boot GC; dropping it
+          # here is the explicit-close counterpart — after close, the checkout
+          # may be swept like any dead session.
+          _ = File.rm(Path.join([cwd, ".dsh", "live"]))
+          DshBeam.Git.worktree_remove(repo, cwd)
+        end
 
         if Process.alive?(session), do: Process.exit(session, :shutdown)
         data = %{data | extra: unregister_session(data.extra, session)}
@@ -234,9 +260,35 @@ defmodule DshBeam.Workspace do
 
   defp try_worktree(root, branch, dest, title) do
     with :ok <- File.mkdir_p(Path.dirname(dest)),
-         {:ok, _} <- DshBeam.Git.worktree_add(root, branch, dest),
+         {:ok, _} <- DshBeam.Git.worktree_add(root, branch, dest) do
+      case start_live_session(dest, title) do
+        {:ok, session} ->
+          {:ok, session, %{cwd: dest, repo: root}}
+
+        {:error, _} = err ->
+          # never leak a checkout whose session could not start: tear it down
+          # (the branch is a fresh session/* branch, so a non-forced remove
+          # succeeds — a failed start leaves nothing dirty)
+          _ = DshBeam.Git.worktree_remove(root, dest)
+          err
+      end
+    end
+  end
+
+  defp start_live_session(dest, title) do
+    with :ok <- mark_live(dest),
          {:ok, session} <- DshBeam.Session.Memory.start(title: title, cwd: dest) do
-      {:ok, session, %{cwd: dest, repo: root}}
+      {:ok, session}
+    end
+  end
+
+  # L3: pin this checkout as a live agent session. Written immediately after
+  # the worktree is created — before any concurrent boot GC could see it —
+  # and removed by close_session/2. A marked worktree is never swept.
+  defp mark_live(dest) do
+    with :ok <- File.mkdir_p(Path.join(dest, ".dsh")),
+         :ok <- File.write(Path.join([dest, ".dsh", "live"]), "live\n") do
+      :ok
     end
   end
 

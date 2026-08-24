@@ -268,15 +268,35 @@ console.
   (`:audit`), so `CrashAudit.Plugin` exposes it without calling back into the
   runtime (which would deadlock mid-reconcile).
 
-### Boot-time worktree GC
+### Boot-time worktree GC — made conservative (regression fix)
 
-- **`DshBeam.Git.prune_merged_worktrees/2`** — sweeps dead session worktrees
-  at boot: any `session/*` worktree whose branch is already merged into the
-  default branch (its PR merged, so the checkout can never hold new work) is
-  removed along with its local branch, then stale worktree metadata is
-  pruned. A worktree is only swept when its tree is **clean** — uncommitted
-  work is never deleted — and the current working directory is always kept
-  (`keep:`, default cwd), so a console running inside a merged worktree
-  survives its own boot GC.
-- The workspace plugin runs the sweep on mount; failures are swallowed, so
-  GC never blocks the composition from mounting.
+The original boot GC (this release, earlier) deleted live session worktrees:
+it swept any merged `session/*` worktree with `git worktree remove --force`,
+keyed `keep:` off `File.cwd!()` (which is the test runner / console, not the
+agent's worktree), treated a gitignored-only `.dsh/` as "clean", and ran
+unconditionally on mount — so a bare `mix test` in the main repo GC'd another
+live session's checkout. Two sessions (2051, 5314) died exactly this way.
+
+The sweep is now conservative — a worktree is removed only when ALL hold:
+
+- branch is `session/*` **and** merged into the default branch;
+- not in `opts[:keep]` (default: the caller's cwd);
+- checkout **older** than `opts[:grace_seconds]` (default 24h) — a worktree
+  created moments ago is a live session by definition (grace period);
+- **no live marker** (`<worktree>/.dsh/live` — written by
+  `DshBeam.Workspace.open_session/3` at checkout, removed by
+  `close_session/2`); a marked worktree is never swept (live marker);
+- `git worktree remove` **without `--force`** accepts it — git itself refuses
+  a tree with modified/untracked files, so a dirty session survives (no
+  force); and `clean_worktree?/1` now checks `status --porcelain --ignored`,
+  so a tree whose only local artifacts are the gitignored `.dsh/` is never
+  treated as clean (ignored-aware clean check).
+
+- **Boot GC is now opt-in (L4):** `DshBeam.Workspace.mount/2` never prunes on
+  its own. Only a mount configured with `boot_prune: true` **and** an explicit
+  `repo:` (never a `File.cwd!()` guess) runs the sweep — a bare `mix test` or
+  a console from an unrelated cwd cannot delete another session's worktree.
+  `scripts/console.exs` opts in explicitly with `repo: File.cwd!()`.
+- `DshBeam.Git.prune_merged_worktrees/2` removes a worktree only after every
+  fence above, deletes the local branch only after the removal succeeds, and
+  still prunes stale worktree metadata best-effort.

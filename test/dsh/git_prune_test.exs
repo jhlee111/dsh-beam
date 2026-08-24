@@ -2,8 +2,10 @@ defmodule DshBeam.GitPruneTest do
   use ExUnit.Case, async: false
 
   # Exercises the boot-time worktree GC against a real throwaway repo:
-  # a merged session worktree is swept, a live (unmerged) one and the
-  # keep-path are left alone.
+  # a merged session worktree is swept only when it is old, marker-free,
+  # clean AND git (without --force) accepts the removal; everything else —
+  # live/unmerged, keep-path, dirty, young, live-marked, gitignored-only —
+  # survives.
 
   setup :git_repo
 
@@ -13,6 +15,10 @@ defmodule DshBeam.GitPruneTest do
 
     run_git(dir, ["init", "-q", "-b", "main"])
     File.write!(Path.join(dir, "README.md"), "hello")
+
+    # the repo's own gitignore — mirrors the real project: .dsh/ is ignored
+    File.write!(Path.join(dir, ".gitignore"), "/.dsh/\n")
+
     run_git(dir, ["add", "."])
     run_git(dir, ["commit", "-q", "-m", "init"])
 
@@ -32,12 +38,17 @@ defmodule DshBeam.GitPruneTest do
     dest
   end
 
+  # Age the checkout so the grace period (default 24h) does not protect it.
+  # This is what makes "old and merged" sweepable in tests.
+  defp age!(path) do
+    File.touch!(path, {{2020, 1, 1}, {0, 0, 0}})
+  end
+
   test "a session worktree whose branch is merged into the default is swept" do
-    # set up: repo + a merged session worktree (its branch is an ancestor of
-    # main because it was created at the initial commit)
     %{repo: repo} = session_context()
     dest = session_worktree(repo, "session/merged")
     # branch == initial commit == ancestor of main -> merged
+    age!(dest)
     assert File.exists?(dest)
 
     assert {:ok, [_removed]} = DshBeam.Git.prune_merged_worktrees(repo, keep: [])
@@ -56,6 +67,7 @@ defmodule DshBeam.GitPruneTest do
     File.write!(Path.join(dest, "new.txt"), "wip")
     run_git(dest, ["add", "."])
     run_git(dest, ["commit", "-q", "-m", "wip"])
+    age!(dest)
     assert File.exists?(dest)
 
     assert {:ok, []} = DshBeam.Git.prune_merged_worktrees(repo, keep: [])
@@ -66,6 +78,7 @@ defmodule DshBeam.GitPruneTest do
   test "the keep path is never removed even when merged" do
     %{repo: repo} = session_context()
     dest = session_worktree(repo, "session/keepme")
+    age!(dest)
 
     assert {:ok, []} = DshBeam.Git.prune_merged_worktrees(repo, keep: [dest])
     assert File.exists?(dest)
@@ -76,10 +89,51 @@ defmodule DshBeam.GitPruneTest do
     dest = session_worktree(repo, "session/dirty")
     # merged (created at initial commit) but dirty: boot GC must NOT delete it
     File.write!(Path.join(dest, "wip.txt"), "in progress")
+    age!(dest)
 
     assert {:ok, []} = DshBeam.Git.prune_merged_worktrees(repo, keep: [])
     assert File.exists?(dest)
     assert File.read!(Path.join(dest, "wip.txt")) == "in progress"
+  end
+
+  test "a merged session worktree younger than the grace period is kept" do
+    %{repo: repo} = session_context()
+    dest = session_worktree(repo, "session/young")
+    # merged AND clean, but created moments ago — a live session by definition
+    assert File.exists?(dest)
+
+    assert {:ok, []} = DshBeam.Git.prune_merged_worktrees(repo, keep: [])
+    assert File.exists?(dest)
+  end
+
+  test "a merged worktree with a live marker is kept" do
+    %{repo: repo} = session_context()
+    dest = session_worktree(repo, "session/marked")
+    # the agent pinned this checkout: <dest>/.dsh/live exists
+    File.mkdir_p!(Path.join(dest, ".dsh"))
+    File.write!(Path.join([dest, ".dsh", "live"]), "live\n")
+    age!(dest)
+
+    assert {:ok, []} = DshBeam.Git.prune_merged_worktrees(repo, keep: [])
+    assert File.exists?(dest)
+    assert File.exists?(Path.join([dest, ".dsh", "live"]))
+  end
+
+  test "a merged worktree with only gitignored files is NOT swept" do
+    %{repo: repo} = session_context()
+    dest = session_worktree(repo, "session/ignored")
+    # .dsh/ is gitignored, so plain status --porcelain would report this tree
+    # as clean — and git (without --force) would happily remove it. The sweep
+    # must not delete it: a live agent's session log lives in .dsh/. The
+    # --ignored check surfaces it as `!! .dsh/`, so it is treated as non-clean
+    # and survives.
+    File.mkdir_p!(Path.join(dest, ".dsh"))
+    File.write!(Path.join([dest, ".dsh", "session.log"]), "agent log\n")
+    age!(dest)
+
+    assert {:ok, []} = DshBeam.Git.prune_merged_worktrees(repo, keep: [])
+    assert File.exists?(dest)
+    assert File.exists?(Path.join([dest, ".dsh", "session.log"]))
   end
 
   test "non-session branches are never swept" do
@@ -87,6 +141,7 @@ defmodule DshBeam.GitPruneTest do
     dest = Path.join(System.tmp_dir!(), "dsh_prune_other_#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm_rf!(dest) end)
     assert {:ok, _} = DshBeam.Git.worktree_add(repo, "feature/x", dest)
+    age!(dest)
     assert File.exists?(dest)
 
     assert {:ok, []} = DshBeam.Git.prune_merged_worktrees(repo, keep: [])
