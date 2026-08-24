@@ -7,6 +7,13 @@ defmodule DshBeam.Llm.Chat do
   Both appends are revertible effects — withdrawing this fiber truncates them
   (recovery exactness), and losing either provider deactivates the chat first
   (the L-Unload guard).
+
+  History is the SAME projection the agent loop uses (`Agent.Loop.Projection`):
+  the session log is the single source of truth, and the model wire shape is a
+  deterministic, append-ordered fold of it. The projection preserves tool turns
+  (assistant `tool_calls` with `""` content, then the `tool` messages), so a
+  chat that sits between tool runs replays the full prefix verbatim — the same
+  prompt prefix in, the same provider prompt-cache hit out (ADR-0014).
   """
 
   use DshBeam.Plugin
@@ -52,16 +59,11 @@ defmodule DshBeam.Llm.Chat do
   end
 
   defp history_messages(session) do
-    # Session.all returns the raw event list (the seam's read shape)
-    case DshBeam.Session.all(session) do
-      events when is_list(events) ->
-        {:ok,
-         Enum.map(events, fn %{"role" => role, "content" => content} ->
-           %{"role" => role, "content" => content}
-         end)}
-
-      other ->
-        {:error, {:session_read, other}}
-    end
+    # The session log is the single source of truth; the model wire shape is
+    # the SAME projection the agent loop replays (Agent.Loop.Projection) — a
+    # deterministic, append-ordered fold that preserves tool turns. Mapping
+    # role/content only would drop tool_call/tool_result and shift the prompt
+    # prefix between the last tool run and the next user turn.
+    {:ok, DshBeam.Agent.Loop.Projection.from_session(session)}
   end
 end
