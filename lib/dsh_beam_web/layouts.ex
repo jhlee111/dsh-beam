@@ -187,6 +187,67 @@ defmodule DshBeamWeb.Layouts do
           }
           .composer-send:hover { background: var(--dsw-alias-button-floating-hover); }
           .composer-status { margin: 4px 0 0; font-size: 12px; }
+          /* Composer toolbar: plugin seats (Access, model, commands) live above
+             the textarea (the reference InputBar's tool row). */
+          .composer-toolbar {
+            display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+            padding: 0 2px 8px;
+          }
+          /* Permission "Access" seat (reference PermissionSelect). */
+          .access-seat { position: relative; display: inline-flex; }
+          .access-trigger {
+            display: inline-flex; align-items: center; gap: 4px; height: 28px;
+            max-width: 220px; padding: 0 4px 0 8px; border-radius: 24px;
+            background: transparent; color: var(--dsw-alias-label-secondary);
+            font-size: 13px; line-height: 20px; font-weight: 500; cursor: pointer;
+          }
+          .access-trigger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+          .access-trigger:disabled { color: var(--dsw-alias-label-dimmed); cursor: default; }
+          .access-icon { flex: none; display: inline-flex; align-items: center; }
+          .access-icon svg { width: 14px; height: 14px; }
+          .access-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .access-chevron { flex: none; color: var(--dsw-alias-label-caption); transition: transform 120ms ease; }
+          .access-chevron.open { transform: rotate(180deg); }
+          .access-menu {
+            position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 30;
+            min-width: 200px; padding: 4px; border-radius: 10px;
+            border: 1px solid var(--dsw-alias-border-l1, #232a36);
+            background: var(--dsw-static-neutral-bluish-850, #161a21);
+            box-shadow: var(--dsw-shadow-lv2, 0 4px 12px rgba(0, 0, 0, .4));
+          }
+          .access-option {
+            display: flex; align-items: center; gap: 8px; width: 100%;
+            padding: 6px 8px; border: none; border-radius: 6px; background: transparent;
+            color: var(--dsw-alias-label-primary); font-size: 13px; text-align: left; cursor: pointer;
+          }
+          .access-option:hover { background: var(--dsw-alias-interactive-bg-hover); }
+          .access-option.selected { color: var(--dsw-alias-state-business-primary); }
+          .access-opt-label { flex: 1; min-width: 0; }
+          .access-check { flex: none; margin-left: auto; }
+          /* Full-access risk confirmation modal. */
+          .access-confirm { width: min(440px, 92vw); flex-direction: column; padding: 16px; }
+          .access-confirm h2 { margin: 0 0 8px; }
+          .access-ack {
+            display: flex; align-items: center; gap: 8px; margin: 12px 0;
+            font-size: 13px; color: var(--dsw-alias-label-primary);
+            background: transparent; border: none; cursor: pointer; padding: 0; text-align: left;
+          }
+          .ack-box {
+            flex: none; display: inline-flex; align-items: center; justify-content: center;
+            width: 16px; height: 16px; border-radius: 4px;
+            border: 1px solid var(--dsw-alias-border-l3, #2b3442);
+            font-size: 12px; color: #fff;
+          }
+          .ack-box.checked {
+            background: var(--dsw-alias-state-business-primary, #4c82ff);
+            border-color: transparent;
+          }
+          .access-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+          .access-confirm-enable {
+            background: var(--dsw-alias-state-business-primary, #4c82ff);
+            border-color: transparent; color: #fff; font-weight: 500;
+          }
+          .access-confirm-enable:disabled { opacity: .5; cursor: default; }
           /* Back-to-bottom: a circular chevron floating just above the composer,
              revealed only while the reader is scrolled away from the newest
              message (reference ChatView .toBottom). */

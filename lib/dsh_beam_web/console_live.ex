@@ -46,7 +46,8 @@ defmodule DshBeamWeb.ConsoleLive do
     %{id: :panel_events, plugin: DshBeam.Ui.Panel.EventFeed, config: [], disabled: false},
     %{id: :panel_plugins, plugin: DshBeam.Ui.Panel.Plugins, config: [], disabled: false},
     %{id: :panel_workspace, plugin: DshBeam.Ui.Panel.Workspace, config: [], disabled: false},
-    %{id: :panel_trajectory, plugin: DshBeam.Ui.Panel.Trajectory, config: [], disabled: false}
+    %{id: :panel_trajectory, plugin: DshBeam.Ui.Panel.Trajectory, config: [], disabled: false},
+    %{id: :panel_access, plugin: DshBeam.Ui.Panel.Access, config: [], disabled: false}
   ]
 
   # The entries a seed/preset-apply swaps out of a composition: the agent core
@@ -72,7 +73,8 @@ defmodule DshBeamWeb.ConsoleLive do
     :panel_events,
     :panel_plugins,
     :panel_workspace,
-    :panel_trajectory
+    :panel_trajectory,
+    :panel_access
   ]
 
   @impl true
@@ -124,6 +126,10 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:picker_open, false)
       |> assign(:picker_path, nil)
       |> assign(:picker_entries, [])
+      |> assign(:permission, %{current_value: "workspace-write", options: []})
+      |> assign(:permission_open, false)
+      |> assign(:permission_confirming, nil)
+      |> assign(:permission_acknowledged, false)
       |> refresh()
 
     {:ok, socket}
@@ -213,7 +219,8 @@ defmodule DshBeamWeb.ConsoleLive do
             :panel_events,
             :panel_plugins,
             :panel_workspace,
-            :panel_trajectory
+            :panel_trajectory,
+            :panel_access
           ])
       )
 
@@ -477,6 +484,51 @@ defmodule DshBeamWeb.ConsoleLive do
   def handle_event("view_tab", %{"tab" => tab}, socket) do
     view_tab = if tab == "trajectory", do: :trajectory, else: :chat
     {:noreply, assign(socket, view_tab: view_tab) |> refresh()}
+  end
+
+  # -- permission preset ("Access" seat) --
+
+  def handle_event("permission_toggle", _params, socket) do
+    {:noreply, assign(socket, permission_open: not socket.assigns.permission_open) |> refresh()}
+  end
+
+  def handle_event("permission_select", %{"preset" => preset}, socket) do
+    # Full access gates behind a risk confirmation; safe presets apply at once.
+    socket =
+      if preset == "danger-full-access" do
+        assign(socket, permission_confirming: preset, permission_acknowledged: false)
+      else
+        apply_permission(socket, preset)
+      end
+
+    {:noreply, socket |> assign(permission_open: false) |> refresh()}
+  end
+
+  def handle_event("permission_ack", _params, socket) do
+    {:noreply,
+     assign(socket, permission_acknowledged: not socket.assigns.permission_acknowledged)
+     |> refresh()}
+  end
+
+  def handle_event("permission_confirm", _params, socket) do
+    socket =
+      if socket.assigns.permission_acknowledged && socket.assigns.permission_confirming do
+        apply_permission(socket, socket.assigns.permission_confirming)
+      else
+        socket
+      end
+
+    {:noreply,
+     socket
+     |> assign(permission_confirming: nil, permission_acknowledged: false, permission_open: false)
+     |> refresh()}
+  end
+
+  def handle_event("permission_cancel", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(permission_confirming: nil, permission_acknowledged: false, permission_open: false)
+     |> refresh()}
   end
 
   def handle_event("plugin_toggle", %{"plugin" => plugin_str}, socket) do
@@ -757,6 +809,9 @@ defmodule DshBeamWeb.ConsoleLive do
                   <button type="button" class="to-bottom" aria-label="scroll to bottom">▾</button>
                 </div>
                 <form class="composer" phx-submit="ask">
+                  <div class="composer-toolbar">
+                    <%= DshBeam.Ui.render_slot(:composer_toolbar, assigns) %>
+                  </div>
                   <textarea
                     name="text"
                     id="composer-textarea"
@@ -962,6 +1017,7 @@ defmodule DshBeamWeb.ConsoleLive do
       chat_log: chat_log(socket.assigns.ctx),
       todos: todos(socket.assigns.ctx),
       trajectory: trajectory(socket.assigns.ctx),
+      permission: permission(socket.assigns.ctx),
       workspace_sessions: workspace_sessions,
       workspace_active: workspace_active,
       inventory:
@@ -1071,6 +1127,27 @@ defmodule DshBeamWeb.ConsoleLive do
       _ ->
         :none
     end
+  end
+
+  # The permission-preset value the "Access" seat renders (the reference's
+  # `permissions` projection), folded from the current session's log.
+  defp permission(ctx) do
+    case alive_session(ctx) do
+      {:ok, session} -> DshBeam.Permission.select_for(session)
+      _ -> %{current_value: DshBeam.Permission.default_preset(), options: []}
+    end
+  end
+
+  # The single write path for a permission pick: append the durable
+  # permission_preset event to the current session (the reference's
+  # command('/permission <id>') → permission/preset log event).
+  defp apply_permission(socket, preset) do
+    case alive_session(socket.assigns.ctx) do
+      {:ok, session} -> DshBeam.Permission.apply(session, preset)
+      _ -> :ok
+    end
+
+    socket
   end
 
   defp group_turns(events) do

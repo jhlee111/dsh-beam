@@ -487,6 +487,41 @@ defmodule DshBeam.ConsoleTest do
     assert html =~ "minmax(0, 1fr) 200px"
   end
 
+  test "the composer Access seat applies a preset and gates full access",
+       %{session: session, ctx: ctx} do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    render_submit(view, "seed", %{})
+    open_chat_session(view, ctx)
+
+    # the seat shows the default preset
+    html = render(view)
+    assert html =~ "access-trigger"
+    assert html =~ "Workspace Write"
+
+    # a safe preset applies at once and folds into the session log
+    render_click(view, "permission_toggle", %{})
+    html = render_click(view, "permission_select", %{"preset" => "read-only"})
+    assert html =~ "Read Only"
+
+    {:ok, session_pid} = DshBeam.Context.get(ctx, :session)
+    assert DshBeam.Permission.current(session_pid) == "read-only"
+
+    # full access opens the risk confirmation instead of applying immediately
+    render_click(view, "permission_toggle", %{})
+    html = render_click(view, "permission_select", %{"preset" => "danger-full-access"})
+    assert html =~ "Enable Full access?"
+
+    # the enable control is inert until acknowledged
+    assert html =~ "access-confirm-enable"
+    assert html =~ "disabled"
+
+    # acknowledge, then enable
+    render_click(view, "permission_ack", %{})
+    html = render_click(view, "permission_confirm", %{})
+    assert DshBeam.Permission.current(session_pid) == "danger-full-access"
+    assert html =~ "Full access"
+  end
+
   test "crashing a sandbox child re-injects a fresh OS process", %{
     session: session,
     ctx: ctx,
