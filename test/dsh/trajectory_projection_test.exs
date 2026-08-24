@@ -61,7 +61,7 @@ defmodule DshBeam.Ui.TrajectoryProjectionTest do
   test "cell captures reasoning and a compact usage summary" do
     assert %{kind: :reasoning, label: "THINK"} =
              DshBeam.Ui.TrajectoryProjection.cell(%{
-               "role" => "reasoning",
+               "role" => "reasoning_chunk",
                "content" => "chain of thought"
              })
 

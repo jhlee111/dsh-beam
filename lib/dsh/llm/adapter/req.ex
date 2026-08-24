@@ -20,7 +20,11 @@ defmodule DshBeam.Llm.Adapter.Req do
   @impl true
   def complete(config, messages, opts) do
     with {:ok, api_key} <- DshBeam.Credential.resolve(config.credential) do
-      post(config, messages, api_key, opts)
+      if stream = opts[:stream] do
+        stream_post(config, messages, api_key, opts, stream)
+      else
+        post(config, messages, api_key, opts)
+      end
     end
   end
 
@@ -127,6 +131,163 @@ defmodule DshBeam.Llm.Adapter.Req do
   end
 
   defp parse(other), do: {:error, {:unexpected_response, other}}
+
+  # -- streaming (SSE) --
+
+  # Stream the response and emit reasoning chunks through `stream` (a fun of
+  # arity 1 receiving `{:reasoning, chunk}`) as they arrive, so the chat's
+  # "Think" row follows the model's chain-of-thought live. Content/tool-call
+  # fragments are accumulated and returned as one completed result, and
+  # `reasoning` is nil in the returned result (it was already streamed).
+  defp stream_post(config, messages, api_key, opts, stream) do
+    url = String.trim_trailing(config.base_url, "/") <> "/chat/completions"
+
+    body = %{model: config.model, messages: messages, stream: true}
+    tools = opts[:tools]
+    body = if tools in [nil, []], do: body, else: Map.put(body, :tools, tools)
+    body = put_reasoning_effort(body, config)
+    # The streaming response omits usage unless explicitly requested; the
+    # trajectory and the assistant event both need it.
+    body = Map.put(body, :stream_options, %{include_usage: true})
+
+    headers = [
+      {"authorization", "Bearer " <> api_key},
+      {"content-type", "application/json"}
+    ]
+
+    timeout = Map.get(config, :receive_timeout, @default_receive_timeout)
+
+    options = [json: body, headers: headers, receive_timeout: timeout, into: sse_fun(stream)]
+
+    options =
+      if plug = Map.get(config, :plug), do: Keyword.put(options, :plug, plug), else: options
+
+    case Req.post(url, options) do
+      {:ok, %{status: 200, body: acc}} -> stream_result(acc)
+      {:ok, %{status: status}} -> {:error, {:http, status, "stream failed"}}
+      {:error, reason} -> {:error, {:http_error, reason}}
+    end
+  end
+
+  defp put_reasoning_effort(body, config) do
+    case Map.get(config, :reasoning_effort) do
+      effort when is_binary(effort) and effort != "" -> Map.put(body, :reasoning_effort, effort)
+      _ -> body
+    end
+  end
+
+  defp sse_fun(stream) do
+    fn
+      {:data, data}, acc -> {:cont, emit_sse(data, acc, stream)}
+      _other, acc -> {:cont, acc}
+    end
+  end
+
+  # Buffer raw SSE bytes, normalize line endings, and process every complete
+  # `data: {...}\n\n` event; the trailing partial event stays buffered.
+  defp emit_sse(data, acc, stream) do
+    buffer = (acc.buffer <> data) |> String.replace("\r\n", "\n")
+    parts = String.split(buffer, "\n\n")
+
+    {last, complete} =
+      case List.pop_at(parts, -1) do
+        {last, rest} -> {last, rest}
+      end
+
+    acc = Enum.reduce(complete, acc, &process_sse_event(&1, &2, stream))
+    %{acc | buffer: last}
+  end
+
+  defp process_sse_event(line, acc, stream) do
+    # SSE data lines are `data: {...}` (a space after the colon); strip the
+    # `data:` prefix defensively (with or without the space) before decoding.
+    json = line |> String.trim() |> String.replace_prefix("data:", "") |> String.trim()
+
+    case json do
+      "[DONE]" ->
+        acc
+
+      "" ->
+        acc
+
+      _ ->
+        case JSON.decode(json) do
+          {:ok, data} -> process_sse_data(data, acc, stream)
+          _ -> acc
+        end
+    end
+  end
+
+  defp process_sse_data(data, acc, stream) do
+    delta = data |> Map.get("choices", [%{}]) |> hd() |> Map.get("delta", %{})
+
+    acc =
+      case delta["reasoning_content"] do
+        nil ->
+          acc
+
+        reasoning ->
+          stream.({:reasoning, reasoning})
+          %{acc | reasoning: acc.reasoning <> reasoning}
+      end
+
+    acc =
+      case delta["content"] do
+        nil -> acc
+        content -> %{acc | content: acc.content <> content}
+      end
+
+    acc = accumulate_tool_calls(acc, delta["tool_calls"])
+
+    choice = data |> Map.get("choices", [%{}]) |> hd()
+
+    case {choice["finish_reason"], data["usage"]} do
+      {f, u} when not is_nil(f) and not is_nil(u) -> %{acc | finish_reason: f, usage: u}
+      {f, _} when not is_nil(f) -> %{acc | finish_reason: f}
+      {_, u} when not is_nil(u) -> %{acc | usage: u}
+      _ -> acc
+    end
+  end
+
+  defp accumulate_tool_calls(acc, nil), do: acc
+
+  defp accumulate_tool_calls(acc, fragments) do
+    tool_calls =
+      Enum.reduce(fragments, acc.tool_calls, fn fragment, map ->
+        index = fragment["index"] || 0
+        fn_ = fragment["function"] || %{}
+        existing = Map.get(map, index, %{id: nil, name: nil, args: ""})
+
+        updated = %{
+          id: existing.id || fragment["id"],
+          name: existing.name || fn_["name"],
+          args: existing.args <> (fn_["arguments"] || "")
+        }
+
+        Map.put(map, index, updated)
+      end)
+
+    %{acc | tool_calls: tool_calls}
+  end
+
+  defp stream_result(acc) do
+    tool_calls =
+      acc.tool_calls
+      |> Enum.sort_by(fn {index, _} -> index end)
+      |> Enum.map(fn {_index, call} ->
+        %{id: call.id, name: call.name, arguments: if(call.args == "", do: "{}", else: call.args)}
+      end)
+
+    {:ok,
+     %{
+       content: acc.content,
+       # already emitted through the stream callback, so no full block here
+       reasoning: nil,
+       tool_calls: tool_calls,
+       finish_reason: map_finish_reason(acc.finish_reason),
+       usage: map_usage(acc.usage)
+     }}
+  end
 
   defp parse_tool_calls(nil), do: []
 

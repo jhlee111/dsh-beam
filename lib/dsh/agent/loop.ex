@@ -122,7 +122,11 @@ defmodule DshBeam.Agent.Loop do
       tools = available_tools(ctx)
       started_at = System.monotonic_time(:millisecond)
 
-      case DshBeam.Llm.chat(llm, messages, tools: tools, cancel: token) do
+      case DshBeam.Llm.chat(llm, messages,
+             tools: tools,
+             cancel: token,
+             stream: reasoning_stream(session)
+           ) do
         {:ok, %{finish_reason: :tool_calls, tool_calls: [_ | _] = calls} = reply} ->
           append_request(session, reply, started_at)
 
@@ -188,12 +192,27 @@ defmodule DshBeam.Agent.Loop do
   end
 
   # Record a reasoning block (chain-of-thought) as a display-only session event,
-  # just before the assistant answer it explains.
+  # just before the assistant answer it explains. Non-streaming adapters return
+  # the whole block at once, so it lands as a single reasoning_chunk; a
+  # streaming adapter emits many chunks through reasoning_stream/1 instead.
   defp append_reasoning(_session, nil), do: :ok
   defp append_reasoning(_session, ""), do: :ok
 
   defp append_reasoning(session, reasoning) when is_binary(reasoning) do
-    DshBeam.Session.append(session, %{"role" => "reasoning", "content" => reasoning})
+    DshBeam.Session.append(session, %{"role" => "reasoning_chunk", "content" => reasoning})
+  end
+
+  # The stream callback the adapter invokes per reasoning chunk as the model
+  # thinks; each chunk is a durable session event the chat pane folds live.
+  defp reasoning_stream(session) do
+    fn
+      {:reasoning, chunk} when is_binary(chunk) ->
+        DshBeam.Session.append(session, %{"role" => "reasoning_chunk", "content" => chunk})
+        :ok
+
+      _other ->
+        :ok
+    end
   end
 
   # The turn number is one more than the turn_start events already in the log
