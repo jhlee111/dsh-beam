@@ -1105,6 +1105,9 @@ defmodule DshBeamWeb.ConsoleLive do
   defp chat_entry(%{"role" => "assistant", "content" => content}),
     do: %{kind: :assistant, content: content}
 
+  defp chat_entry(%{"role" => "reasoning", "content" => content}),
+    do: %{kind: :reasoning, content: content}
+
   defp chat_entry(%{"role" => "tool_call", "name" => name, "arguments" => args}),
     do: %{kind: :tool_call, name: name, command: tool_command(name, args)}
 

@@ -371,6 +371,21 @@ defmodule DshBeamWeb.Layouts do
           .msg-assistant:hover .copy-action { opacity: 1; }
           .copy-action:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
           .copy-action.copied { color: var(--dsw-static-green-500, #34d399); }
+          .reasoning-row {
+            align-self: flex-start; border: 1px solid var(--dsw-alias-border-l2);
+            border-radius: 10px; padding: 6px 10px; font-size: 13px;
+            color: var(--dsw-alias-label-secondary); max-width: 100%;
+          }
+          .reasoning-row summary {
+            display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+            font-weight: 500; list-style: none; user-select: none;
+          }
+          .reasoning-row summary::-webkit-details-marker { display: none; }
+          .reasoning-icon { color: var(--dsw-static-deepseek-400, #679efe); }
+          .reasoning-body {
+            margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--dsw-alias-border-l2);
+            white-space: pre-wrap; color: var(--dsw-alias-label-tertiary);
+          }
           .role-tool { color: var(--dsw-static-green-500, #34d399); }
           .role-error { color: var(--dsw-static-red-400, #fb7185); }
           .turn-status {
@@ -476,6 +491,7 @@ defmodule DshBeamWeb.Layouts do
           }
           .kind-user .trajectory-tag { color: var(--dsw-static-blue-400, #60a5fa); }
           .kind-message .trajectory-tag { color: var(--dsw-static-deepseek-400, #679efe); }
+          .kind-reasoning .trajectory-tag { color: var(--dsw-static-purple-400, #a78bfa); }
           .kind-tool .trajectory-tag { color: var(--dsw-static-amber-400, #f0b429); }
           .kind-command .trajectory-tag { color: var(--dsw-static-green-500, #34d399); }
           .kind-error .trajectory-tag { color: var(--dsw-static-red-400, #fb7185); }

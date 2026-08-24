@@ -49,6 +49,8 @@ defmodule DshBeam.Ui.Panel.Trajectory do
                         <DshBeamWeb.Icons.user size={13} />
                       <% :message -> %>
                         <DshBeamWeb.Icons.sparkle size={13} />
+                      <% :reasoning -> %>
+                        <DshBeamWeb.Icons.think size={13} />
                       <% :tool -> %>
                         <span class="tag-glyph">❯</span>
                       <% :command -> %>

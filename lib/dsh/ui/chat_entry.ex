@@ -23,6 +23,14 @@ defmodule DshBeam.Ui.ChatEntry do
             <DshBeamWeb.Icons.copy />
           </button>
         </div>
+      <% :reasoning -> %>
+        <details class="reasoning-row">
+          <summary>
+            <DshBeamWeb.Icons.think size={14} class="reasoning-icon" />
+            <span>Think</span>
+          </summary>
+          <div class="reasoning-body"><%= @entry.content %></div>
+        </details>
       <% :tool_call -> %>
         <div class="tool-card">
           <span class="tool-label">

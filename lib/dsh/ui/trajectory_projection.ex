@@ -24,8 +24,11 @@ defmodule DshBeam.Ui.TrajectoryProjection do
   def cell(%{"role" => "user", "content" => content}),
     do: %{kind: :user, label: "USER", text: content}
 
-  def cell(%{"role" => "assistant", "content" => content}),
-    do: %{kind: :message, label: "ASSISTANT", text: content}
+  def cell(%{"role" => "assistant", "content" => content} = event),
+    do: %{kind: :message, label: "ASSISTANT", text: content <> usage_suffix(event["usage"])}
+
+  def cell(%{"role" => "reasoning", "content" => content}),
+    do: %{kind: :reasoning, label: "THINK", text: truncate(content)}
 
   def cell(%{"role" => "tool_call", "name" => name}),
     do: %{kind: :tool, label: "TOOL", text: name}
@@ -86,4 +89,20 @@ defmodule DshBeam.Ui.TrajectoryProjection do
   end
 
   defp truncate(text), do: inspect(text)
+
+  # A compact "in/out" token summary for a usage map, or "" when absent.
+  defp usage_suffix(nil), do: ""
+
+  defp usage_suffix(usage) when is_map(usage) do
+    input = usage[:input_tokens] || 0
+    output = usage[:output_tokens] || 0
+
+    if input == 0 and output == 0 do
+      ""
+    else
+      " · #{input} in / #{output} out"
+    end
+  end
+
+  defp usage_suffix(_), do: ""
 end

@@ -57,4 +57,25 @@ defmodule DshBeam.Ui.TrajectoryProjectionTest do
 
     assert DshBeam.Ui.TrajectoryProjection.filter(turns, "zzz") == []
   end
+
+  test "cell captures reasoning and a compact usage summary" do
+    assert %{kind: :reasoning, label: "THINK"} =
+             DshBeam.Ui.TrajectoryProjection.cell(%{
+               "role" => "reasoning",
+               "content" => "chain of thought"
+             })
+
+    cell =
+      DshBeam.Ui.TrajectoryProjection.cell(%{
+        "role" => "assistant",
+        "content" => "answer",
+        "usage" => %{input_tokens: 100, output_tokens: 50}
+      })
+
+    assert cell.text == "answer · 100 in / 50 out"
+
+    # no usage → no suffix
+    assert DshBeam.Ui.TrajectoryProjection.cell(%{"role" => "assistant", "content" => "answer"}).text ==
+             "answer"
+  end
 end
