@@ -59,6 +59,10 @@ defmodule DshBeam.Ui.Panel.Trajectory do
                         <span class="tag-glyph">⚙</span>
                       <% :error -> %>
                         <span class="tag-glyph">⚠</span>
+                      <% :request -> %>
+                        <span class="tag-glyph">◷</span>
+                      <% :turn_end -> %>
+                        <span class="tag-glyph">✓</span>
                       <% _ -> %>
                         <span class="tag-glyph">·</span>
                     <% end %>

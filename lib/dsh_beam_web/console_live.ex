@@ -1092,6 +1092,10 @@ defmodule DshBeamWeb.ConsoleLive do
 
         session
         |> DshBeam.Session.all()
+        # structural events (turn_start/request/turn_end) are trajectory
+        # ledger material, not chat content — the chat pane renders only the
+        # user-visible events.
+        |> Enum.reject(&(&1["role"] in ["turn_start", "turn_end", "request"]))
         |> Enum.map(&chat_entry/1)
 
       _ ->

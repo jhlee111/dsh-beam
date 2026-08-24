@@ -78,4 +78,55 @@ defmodule DshBeam.Ui.TrajectoryProjectionTest do
     assert DshBeam.Ui.TrajectoryProjection.cell(%{"role" => "assistant", "content" => "answer"}).text ==
              "answer"
   end
+
+  test "from_events groups by turn_start and surfaces request/turn_end cells" do
+    events = [
+      %{"role" => "turn_start", "turn" => 1},
+      %{"role" => "user", "content" => "task"},
+      %{
+        "role" => "request",
+        "usage" => %{input_tokens: 10, output_tokens: 5},
+        "started_at" => 100,
+        "completed_at" => 180
+      },
+      %{"role" => "assistant", "content" => "done"},
+      %{"role" => "turn_end", "reason" => "completed"},
+      %{"role" => "turn_start", "turn" => 2},
+      %{"role" => "user", "content" => "task 2"},
+      %{"role" => "assistant", "content" => "answer"},
+      %{"role" => "turn_end", "reason" => "completed"}
+    ]
+
+    assert [
+             [turn1_user, turn1_request, turn1_assistant, turn1_end],
+             [turn2_user, turn2_assistant, turn2_end]
+           ] =
+             DshBeam.Ui.TrajectoryProjection.from_events(events)
+
+    # turn_start is a pure boundary: no cell
+    assert turn1_user.kind == :user
+
+    # request cell: duration + usage
+    assert turn1_request.kind == :request
+    assert turn1_request.text == "80ms · 10 in / 5 out"
+
+    assert turn1_end.kind == :turn_end
+    assert turn1_end.text == "completed"
+  end
+
+  test "cell maps a request to its duration + usage summary" do
+    cell =
+      DshBeam.Ui.TrajectoryProjection.cell(%{
+        "role" => "request",
+        "usage" => nil,
+        "started_at" => 1000,
+        "completed_at" => 1250
+      })
+
+    assert cell.kind == :request
+    assert cell.text == "250ms"
+
+    assert DshBeam.Ui.TrajectoryProjection.cell(%{"role" => "turn_end", "reason" => "aborted"}).text ==
+             "aborted"
+  end
 end

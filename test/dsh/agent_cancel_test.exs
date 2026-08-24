@@ -21,6 +21,12 @@ defmodule DshBeam.Agent.CancelTest do
 
   defp loop_entry, do: %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false}
 
+  # Structural events (turn_start/request/turn_end) wrap the content; the
+  # stop-path assertions below care only about the user-visible events.
+  defp content_events(events) do
+    Enum.reject(events, &(&1["role"] in ["turn_start", "turn_end", "request"]))
+  end
+
   test "a token starts un-cancelled and flips to cancelled" do
     token = DshBeam.Agent.Cancel.new()
     refute DshBeam.Agent.Cancel.cancelled?(token)
@@ -53,7 +59,7 @@ defmodule DshBeam.Agent.CancelTest do
     assert [
              %{"role" => "user", "content" => "task"},
              %{"role" => "error", "content" => "stopped by user"}
-           ] = DshBeam.Session.all(session)
+           ] = content_events(DshBeam.Session.all(session))
 
     refute_received {:model_entered, _}
   end
@@ -94,7 +100,7 @@ defmodule DshBeam.Agent.CancelTest do
              %{"role" => "tool_call", "name" => "cancel_echo"},
              %{"role" => "tool_result", "content" => "Error: tool call aborted before dispatch"},
              %{"role" => "error", "content" => "stopped by user"}
-           ] = DshBeam.Session.all(session)
+           ] = content_events(DshBeam.Session.all(session))
   end
 
   test "the Req adapter aborts an in-flight request when the token is cancelled" do

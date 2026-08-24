@@ -515,6 +515,8 @@ defmodule DshBeamWeb.Layouts do
           .kind-command .trajectory-tag { color: var(--dsw-static-green-500, #34d399); }
           .kind-error .trajectory-tag { color: var(--dsw-static-red-400, #fb7185); }
           .kind-system .trajectory-tag { color: var(--dsw-static-neutral-bluish-500, #6b7a90); }
+          .kind-request .trajectory-tag { color: var(--dsw-static-cyan-400, #22d3ee); }
+          .kind-turn_end .trajectory-tag { color: var(--dsw-static-green-500, #34d399); }
 
           /* Workspace sidebar: an explicit create form + session list. */
           .workspace-form { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }

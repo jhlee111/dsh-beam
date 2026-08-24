@@ -75,26 +75,33 @@ defmodule DshBeam.Agent.Loop do
 
         # Multi-turn: the session log is the single source of truth. Project it
         # to the model wire shape FIRST (a deterministic, append-ordered replay
-        # of user/assistant/tool turns), then record the new user turn, so the
-        # replay and the record stay consistent. The projection preserves tool
-        # turns, so the prompt prefix is stable across requests and runs —
-        # cache-friendly, like the reference's deriveMessages.
+        # of user/assistant/tool turns), then record the new turn (turn_start +
+        # user) so the replay and the record stay consistent. The projection
+        # preserves tool turns, so the prompt prefix is stable across requests
+        # and runs — cache-friendly, like the reference's deriveMessages.
         history = DshBeam.Agent.Loop.Projection.from_session(view.session)
+        turn = next_turn(view.session)
+
+        _ = DshBeam.Session.append(view.session, %{"role" => "turn_start", "turn" => turn})
         _ = DshBeam.Session.append(view.session, %{"role" => "user", "content" => task})
 
         messages = [system | history] ++ [%{"role" => "user", "content" => task}]
 
-        loop(
-          data.ctx,
-          view.llm,
-          view.session,
-          messages,
-          0,
-          max_steps,
-          [],
-          DshBeam.Guard.RepeatToolReminder.new(),
-          token
-        )
+        result =
+          loop(
+            data.ctx,
+            view.llm,
+            view.session,
+            messages,
+            0,
+            max_steps,
+            [],
+            DshBeam.Guard.RepeatToolReminder.new(),
+            token
+          )
+
+        _ = append_turn_end(view.session, result)
+        result
 
       _ ->
         {:error, :capabilities_unavailable}
@@ -113,9 +120,12 @@ defmodule DshBeam.Agent.Loop do
       {:error, :stopped, Enum.reverse(trace)}
     else
       tools = available_tools(ctx)
+      started_at = System.monotonic_time(:millisecond)
 
       case DshBeam.Llm.chat(llm, messages, tools: tools, cancel: token) do
-        {:ok, %{finish_reason: :tool_calls, tool_calls: [_ | _] = calls}} ->
+        {:ok, %{finish_reason: :tool_calls, tool_calls: [_ | _] = calls} = reply} ->
+          append_request(session, reply, started_at)
+
           {assistant, tool_messages, steps} = dispatch(ctx, calls, token)
 
           # record the whole assistant turn — the model-issued tool calls AND
@@ -142,6 +152,8 @@ defmodule DshBeam.Agent.Loop do
           )
 
         {:ok, %{content: content} = reply} ->
+          append_request(session, reply, started_at)
+
           # Reasoning is display-only (never re-sent to the model); usage rides
           # the assistant event so the trajectory can show per-turn tokens.
           append_reasoning(session, Map.get(reply, :reasoning))
@@ -182,6 +194,38 @@ defmodule DshBeam.Agent.Loop do
 
   defp append_reasoning(session, reasoning) when is_binary(reasoning) do
     DshBeam.Session.append(session, %{"role" => "reasoning", "content" => reasoning})
+  end
+
+  # The turn number is one more than the turn_start events already in the log
+  # (the log is the single source of truth for the ordinal).
+  defp next_turn(session) do
+    count = session |> DshBeam.Session.all() |> Enum.count(&(&1["role"] == "turn_start"))
+    count + 1
+  end
+
+  # Record one model request's durable facts: token usage and wall-clock timing
+  # (the reference's request/context). Errors and cancellation record their own
+  # terminal event instead, so no request row is appended on those paths.
+  defp append_request(session, reply, started_at) do
+    DshBeam.Session.append(session, %{
+      "role" => "request",
+      "usage" => Map.get(reply, :usage),
+      "started_at" => started_at,
+      "completed_at" => System.monotonic_time(:millisecond)
+    })
+  end
+
+  # Close the turn with its outcome (the reference's turn/end reason).
+  defp append_turn_end(session, result) do
+    reason =
+      case result do
+        {:ok, _, _} -> "completed"
+        {:error, :stopped, _trace} -> "aborted"
+        {:error, :max_steps} -> "max_steps"
+        {:error, reason} -> inspect(reason)
+      end
+
+    DshBeam.Session.append(session, %{"role" => "turn_end", "reason" => reason})
   end
 
   defp track_repeats(repeat, calls) do
