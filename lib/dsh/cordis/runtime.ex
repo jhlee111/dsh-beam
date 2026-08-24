@@ -33,13 +33,15 @@ defmodule DshBeam.Runtime do
   @type entry :: %{id: term(), plugin: module(), config: keyword(), disabled: boolean()}
 
   def start_link(entries, opts) do
-    # :settings_path is a dsh-beam option, not a GenServer option: thread it
-    # into the init data so the settings store can persist overrides to disk.
-    # When absent (the default, and what tests use) the store stays in-memory.
+    # :settings_path and :audit_path are dsh-beam options, not GenServer
+    # options: thread them into the init data so the settings store can
+    # persist overrides to disk and the crash audit trail can land next to
+    # it. When absent (the default, and what tests use) they stay in-memory /
+    # default-path respectively.
     GenServer.start_link(
       __MODULE__,
-      {entries, Keyword.get(opts, :settings_path)},
-      Keyword.drop(opts, [:settings_path])
+      {entries, Keyword.get(opts, :settings_path), Keyword.get(opts, :audit_path)},
+      Keyword.drop(opts, [:settings_path, :audit_path])
     )
   end
 
@@ -48,6 +50,9 @@ defmodule DshBeam.Runtime do
   def entries(runtime), do: GenServer.call(runtime, :entries)
 
   def settings(runtime), do: GenServer.call(runtime, :settings)
+
+  @doc "The crash audit GenServer owned by this runtime (nil when none was configured)."
+  def audit(runtime), do: GenServer.call(runtime, :audit)
 
   def reconcile(runtime, entries) do
     GenServer.call(runtime, {:reconcile, entries})
@@ -71,11 +76,26 @@ defmodule DshBeam.Runtime do
   def subscribe(runtime), do: GenServer.call(runtime, :subscribe)
 
   @impl true
-  def init({entries, settings_path}) do
+  def init({entries, settings_path, audit_path}) do
     {:ok, ctx} = DshBeam.Context.start_link([])
     {:ok, sup} = DynamicSupervisor.start_link(strategy: :one_for_one)
     {:ok, settings} = DshBeam.Settings.start_link(path: settings_path)
-    state = %{ctx: ctx, sup: sup, settings: settings, entries: %{}, subscribers: %{}}
+
+    # The crash audit trail is opt-in (the console passes :audit_path): when
+    # absent the runtime records nothing, so library users and tests stay
+    # side-effect-free. The audit is linked to the runtime and dies with it —
+    # the durable record is the file, which the next runtime re-attaches to.
+    audit = if audit_path, do: start_audit!(audit_path), else: nil
+
+    state = %{
+      ctx: ctx,
+      sup: sup,
+      settings: settings,
+      audit: audit,
+      entries: %{},
+      subscribers: %{}
+    }
+
     {:ok, state, {:continue, {:apply, entries}}}
   end
 
@@ -96,6 +116,8 @@ defmodule DshBeam.Runtime do
   def handle_call(:entries, _from, state), do: {:reply, state.entries, state}
 
   def handle_call(:settings, _from, state), do: {:reply, state.settings, state}
+
+  def handle_call(:audit, _from, state), do: {:reply, state.audit, state}
 
   def handle_call(:subscribe, {owner, _tag}, state) do
     case state.subscribers do
@@ -182,6 +204,7 @@ defmodule DshBeam.Runtime do
     cond do
       intentional_exit?(reason) ->
         Logger.warning("plugin #{inspect(id)} exited (#{inspect(reason)}); not re-injecting")
+        audit_record(state, :exited, id, reason)
         put_record(state, id, %{rec | pid: nil, timer: nil, error: {:exited, reason}})
 
       rec.restarts < @max_restarts ->
@@ -191,6 +214,8 @@ defmodule DshBeam.Runtime do
           "plugin #{inspect(id)} crashed; re-injecting (attempt #{attempt}/#{@max_restarts})"
         )
 
+        audit_record(state, :crashed, id, reason)
+
         timer =
           Process.send_after(self(), {:dsh_reinject, id, attempt, 0}, reinject_delay(attempt))
 
@@ -198,6 +223,7 @@ defmodule DshBeam.Runtime do
 
       true ->
         Logger.error("plugin #{inspect(id)} exceeded restart limit (#{@max_restarts}); giving up")
+        audit_record(state, :crash_loop, id, reason)
         put_record(state, id, %{rec | pid: nil, timer: nil, error: :crash_loop})
     end
   end
@@ -316,6 +342,7 @@ defmodule DshBeam.Runtime do
 
       {:error, reason} ->
         Logger.warning("plugin #{inspect(entry.id)} failed to start: #{inspect(reason)}")
+        audit_record(state, :start_failed, entry.id, reason)
 
         failed = %{
           spec: entry,
@@ -391,5 +418,16 @@ defmodule DshBeam.Runtime do
         {:ok, value} <- [DshBeam.Settings.get(store, plugin, setting.name)],
         into: [],
         do: {setting.name, value}
+  end
+
+  defp start_audit!(path) do
+    {:ok, audit} = DshBeam.CrashAudit.start_link(path: path)
+    audit
+  end
+
+  defp audit_record(%{audit: nil}, _kind, _id, _reason), do: :ok
+
+  defp audit_record(%{audit: audit}, kind, id, reason) do
+    DshBeam.CrashAudit.record(audit, kind, id, reason)
   end
 end
