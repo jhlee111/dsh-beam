@@ -267,3 +267,16 @@ console.
 - The runtime now injects the audit pid into every entry's mount config
   (`:audit`), so `CrashAudit.Plugin` exposes it without calling back into the
   runtime (which would deadlock mid-reconcile).
+
+### Boot-time worktree GC
+
+- **`DshBeam.Git.prune_merged_worktrees/2`** — sweeps dead session worktrees
+  at boot: any `session/*` worktree whose branch is already merged into the
+  default branch (its PR merged, so the checkout can never hold new work) is
+  removed along with its local branch, then stale worktree metadata is
+  pruned. A worktree is only swept when its tree is **clean** — uncommitted
+  work is never deleted — and the current working directory is always kept
+  (`keep:`, default cwd), so a console running inside a merged worktree
+  survives its own boot GC.
+- The workspace plugin runs the sweep on mount; failures are swallowed, so
+  GC never blocks the composition from mounting.
