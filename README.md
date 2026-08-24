@@ -7,6 +7,14 @@ reactive coeffects, and the L-Unload guard.
 A plugin is the unit of everything — a tool, a UI panel, a safety guard, a
 capability — and the substrate makes them compose, swap, and roll back.
 
+> ## ⚠️ USE AT YOUR OWN RISK
+>
+> There are **no guard rails yet** — no approval, permission, or confirmation
+> plugins. `define_plugin` / `redefine_plugin` and `bash` run trusted code
+> **in-process** and can do anything the process can. Want to fix that? A
+> **guard rail plugin** is the top item on the
+> [plugin wish list](CONTRIBUTING.md#plugin-wish-list).
+
 ## Quick start
 
 ```bash
@@ -100,8 +108,10 @@ hardcoded one-liner.
   the reference are not ported; assistant markdown has no syntax highlighting.
 - **More tools** — bash / fs / todo / calc (plus the self-modification tools);
   no web search or subagent capability yet.
-- **Redefine exposure** — `DshBeam.Creator.redefine/3` (transactional hot swap)
-  exists but is not yet exposed to the agent loop or UI.
+- **Redefine in the UI** — `redefine_plugin` is now a tool, but the Creator
+  settings panel still only exposes `define`.
+- **Guard rails** — none yet: no approval/permission plugin. See the
+  [plugin wish list](CONTRIBUTING.md#plugin-wish-list).
 
 ## reference/ submodule
 
