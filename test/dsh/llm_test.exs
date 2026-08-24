@@ -250,6 +250,60 @@ defmodule DshBeam.LlmTest do
     assert usage.reasoning_tokens == 10
   end
 
+  test "the Req adapter streams SSE into content, usage, and the reasoning callback" do
+    # A chunked plug replays raw SSE bytes through the adapter's `into` fun, so
+    # the streaming parse path (buffer/split/emit) is exercised without a live
+    # network. This is the regression for the `into: fun` accumulator being a
+    # `{request, response}` tuple rather than the parse-state map.
+    test = self()
+
+    sse = [
+      ~s|data: {"choices":[{"delta":{"reasoning_content":"thinking…"}}]}\n\n|,
+      ~s|data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n|,
+      ~s|data: {"choices":[{"delta":{"content":" world"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}\n\n|,
+      "data: [DONE]\n\n"
+    ]
+
+    plug = fn conn ->
+      conn = Plug.Conn.send_chunked(conn, 200)
+
+      Enum.reduce(sse, conn, fn chunk, conn ->
+        {:ok, conn} = Plug.Conn.chunk(conn, chunk)
+        conn
+      end)
+    end
+
+    config = [
+      base_url: "https://api.deepseek.com",
+      credential: {:literal, "test-key"},
+      model: "deepseek-reasoner"
+    ]
+
+    {:ok, runtime} =
+      DshBeam.Runtime.start_link(
+        [llm_entry(config), adapter_entry(DshBeam.Llm.Adapter.Req, plug: plug)],
+        []
+      )
+
+    ctx = DshBeam.Runtime.context(runtime)
+    {:ok, llm} = DshBeam.Context.get(ctx, :llm)
+
+    stream = fn
+      {:reasoning, chunk} -> send(test, {:reasoning, chunk})
+      _other -> :ok
+    end
+
+    assert {:ok, reply} =
+             DshBeam.Llm.chat(llm, [%{"role" => "user", "content" => "hi"}], stream: stream)
+
+    assert reply.content == "Hello world"
+    assert reply.reasoning == nil
+    assert reply.finish_reason == :stop
+    assert reply.usage.input_tokens == 10
+    assert reply.usage.output_tokens == 5
+    assert_receive {:reasoning, "thinking…"}
+  end
+
   test "the Req adapter forwards tools without crashing on the keyword opts" do
     # regression: chat/3 passes opts as a keyword list [tools: ...]; the adapter
     # must read it with opts[:tools], not the map-only opts.tools (BadMapError).

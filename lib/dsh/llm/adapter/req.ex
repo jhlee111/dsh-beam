@@ -84,10 +84,16 @@ defmodule DshBeam.Llm.Adapter.Req do
     # alias monitor behind Task.yield still tracks its result.
     task = Task.async(fn -> Req.post(url, options) end)
     Process.unlink(task.pid)
-    poll(task, token, System.monotonic_time(:millisecond) + timeout + 1000)
+
+    poll(
+      task,
+      token,
+      System.monotonic_time(:millisecond) + timeout + 1000,
+      &normalize_req/1
+    )
   end
 
-  defp poll(task, token, deadline) do
+  defp poll(task, token, deadline, normalizer) do
     cond do
       DshBeam.Agent.Cancel.cancelled?(token) ->
         Task.shutdown(task, :brutal_kill)
@@ -101,9 +107,9 @@ defmodule DshBeam.Llm.Adapter.Req do
         case Task.yield(task, 25) do
           # Task.yield wraps the task's own return value, so the Req result
           # (already an {:ok, response} | {:error, reason}) is one level down.
-          {:ok, result} -> normalize_req(result)
+          {:ok, result} -> normalizer.(result)
           {:exit, reason} -> {:error, {:http_error, reason}}
-          nil -> poll(task, token, deadline)
+          nil -> poll(task, token, deadline, normalizer)
         end
     end
   end
@@ -157,15 +163,39 @@ defmodule DshBeam.Llm.Adapter.Req do
 
     timeout = Map.get(config, :receive_timeout, @default_receive_timeout)
 
-    options = [json: body, headers: headers, receive_timeout: timeout, into: sse_fun(stream)]
+    # Req's `into: fun` accumulator is a `{request, response}` tuple (never a
+    # map) in BOTH the Finch and Plug transports, and the wrapper matches that
+    # 2-tuple on every `:status`/`:headers`/`:trailers` event — so the SSE
+    # parse state cannot ride the accumulator. It lives in a separate Agent
+    # instead, and the `into` fun just threads the tuple through untouched.
+    {:ok, state} = Agent.start_link(fn -> new_stream_acc() end)
+
+    into = fn
+      {:data, data}, acc ->
+        Agent.update(state, fn s -> emit_sse(data, s, stream) end)
+        {:cont, acc}
+
+      _other, acc ->
+        {:cont, acc}
+    end
+
+    options = [json: body, headers: headers, receive_timeout: timeout, into: into]
 
     options =
       if plug = Map.get(config, :plug), do: Keyword.put(options, :plug, plug), else: options
 
-    case Req.post(url, options) do
-      {:ok, %{status: 200, body: acc}} -> stream_result(acc)
-      {:ok, %{status: status}} -> {:error, {:http, status, "stream failed"}}
-      {:error, reason} -> {:error, {:http_error, reason}}
+    result =
+      case opts[:cancel] do
+        nil -> request_stream(url, options)
+        token -> cancellable_stream(url, options, token, timeout)
+      end
+
+    acc = state |> Agent.get(& &1) |> flush_buffer(stream)
+    Agent.stop(state)
+
+    case result do
+      {:ok, :streamed} -> stream_result(acc)
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -176,12 +206,39 @@ defmodule DshBeam.Llm.Adapter.Req do
     end
   end
 
-  defp sse_fun(stream) do
-    fn
-      {:data, data}, acc -> {:cont, emit_sse(data, acc, stream)}
-      _other, acc -> {:cont, acc}
+  defp new_stream_acc do
+    %{
+      buffer: "",
+      reasoning: "",
+      content: "",
+      tool_calls: %{},
+      finish_reason: nil,
+      usage: nil
+    }
+  end
+
+  # The final SSE event is not guaranteed to end in a blank line, so flush the
+  # trailing buffered event (if any) before the result is assembled.
+  defp flush_buffer(%{buffer: ""} = acc, _stream), do: acc
+  defp flush_buffer(acc, stream), do: process_sse_event(acc.buffer, %{acc | buffer: ""}, stream)
+
+  defp request_stream(url, options) do
+    case Req.post(url, options) do
+      {:ok, %{status: 200}} -> {:ok, :streamed}
+      {:ok, %{status: status}} -> {:error, {:http, status, "stream failed"}}
+      {:error, reason} -> {:error, {:http_error, reason}}
     end
   end
+
+  defp cancellable_stream(url, options, token, timeout) do
+    task = Task.async(fn -> Req.post(url, options) end)
+    Process.unlink(task.pid)
+    poll(task, token, System.monotonic_time(:millisecond) + timeout + 1000, &stream_req_result/1)
+  end
+
+  defp stream_req_result({:ok, %{status: 200}}), do: {:ok, :streamed}
+  defp stream_req_result({:ok, %{status: status}}), do: {:error, {:http, status, "stream failed"}}
+  defp stream_req_result({:error, reason}), do: {:error, {:http_error, reason}}
 
   # Buffer raw SSE bytes, normalize line endings, and process every complete
   # `data: {...}\n\n` event; the trailing partial event stays buffered.
