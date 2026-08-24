@@ -1,13 +1,14 @@
 defmodule DshBeam.Tool.Plugin do
   @moduledoc """
   The self-modification tool: the agent loop can author a plugin from inside a
-  workspace and either mount it live (`define_plugin`) or save it as a
-  reusable plugin file for other workspaces/projects (`save_plugin`).
+  workspace, mount it live (`define_plugin`), hot-swap an already-mounted one
+  (`redefine_plugin`), or save it as a reusable plugin file for other
+  workspaces/projects (`save_plugin`).
 
-  `define_plugin` is the trusted in-process path (DshBeam.Creator.define) — the
-  source becomes atoms and runs in-process, exactly like the Creator settings
-  surface. `save_plugin` writes to the global `~/.dsh/plugins` store that the
-  console loads on boot.
+  `define_plugin`/`redefine_plugin` are the trusted in-process paths
+  (DshBeam.Creator.define/redefine) — the source becomes atoms and runs
+  in-process, exactly like the Creator settings surface. `save_plugin` writes
+  to the global `~/.dsh/plugins` store that the console loads on boot.
   """
 
   use DshBeam.Plugin
@@ -37,10 +38,25 @@ defmodule DshBeam.Tool.Plugin do
     }
   )
 
+  tool(:redefine_plugin,
+    description:
+      "Hot-swap an already-mounted plugin: compile new source for the same module name and replace the running one transactionally (rolls back on a failed start)",
+    parameters: %{
+      "type" => "object",
+      "properties" => %{
+        "source" => %{
+          "type" => "string",
+          "description" => "full Elixir module source (same module name as the mounted one)"
+        }
+      },
+      "required" => ["source"]
+    }
+  )
+
   prompt_section(:self_modification,
     order: 100,
     text:
-      "You can extend the harness at runtime. To create a plugin: write the Elixir module source (a module using DshBeam.Plugin), then define_plugin it to compile and mount it live, and save_plugin it to persist it under ~/.dsh/plugins so it is reused in other workspaces/projects."
+      "You can extend the harness at runtime. To create a plugin: write the Elixir module source (a module using DshBeam.Plugin), then define_plugin it to compile and mount it live, and save_plugin it to persist it under ~/.dsh/plugins so it is reused in other workspaces/projects. To change a plugin that is already mounted, use redefine_plugin with the new source (same module name) — it hot-swaps the running plugin transactionally."
   )
 
   @impl DshBeam.Plugin
@@ -53,6 +69,13 @@ defmodule DshBeam.Tool.Plugin do
 
   def handle_dsh_tool_call(:save_plugin, %{"name" => name, "source" => source}, _state) do
     DshBeam.Creator.save_plugin(name, source)
+  end
+
+  def handle_dsh_tool_call(:redefine_plugin, %{"source" => source}, _state) do
+    case runtime() do
+      {:ok, runtime} -> DshBeam.Creator.redefine(runtime, source)
+      :none -> {:error, :no_runtime}
+    end
   end
 
   # The runtime the console owns (and the loop runs in). The console registers

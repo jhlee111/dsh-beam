@@ -24,14 +24,31 @@ yet. Good starting points:
 - **Session persistence** — a `DshBeam.Session.File` (JSONL) provider already
   exists but is not wired up; wire it into `Workspace.open_session` and restore
   the workspace roster on boot.
-- **Hot-swap exposure** — `DshBeam.Creator.redefine/3` (transactional module
-  replacement) exists but is not exposed to the agent loop or the UI.
+- **Redefine in the UI** — `redefine_plugin` is now a tool, but the Creator
+  settings panel still only exposes `define`; add a redefine affordance there.
 - **More tools** — web search, a subagent capability, etc. Each is just a tool
   plugin (`use DshBeam.Plugin` + `tool/3` + `handle_dsh_tool_call/3`).
 - **Richer conversation nodes** — port retry / compaction / reasoning rows from
   the reference (`reference/deepseek-harness` submodule).
 - **Plugin prompt sections** — any new capability should also declare a
   `prompt_section` so the model knows how to use it.
+
+## Plugin wish list
+
+Plugins we'd love someone to write (roughly in priority order). Each is just a
+plugin (`use DshBeam.Plugin` + `tool/3` / `ui_slot` / `need`/`provide`):
+
+- **Guard rail / approval** — confirm before destructive or self-modifying
+  actions (`define_plugin`, `redefine_plugin`, arbitrary `bash`). **The top
+  ask**, given "use at your own risk" (see the README).
+- **Permission presets** — per-tool allow/deny lists (the reference's
+  `permission-presets`).
+- **Web search** — a search + fetch capability (a tool plugin).
+- **Subagent** — delegate a task to a sub-agent (a capability + tool).
+- **Persistent terminal** — a long-lived shell session instead of one-shot bash.
+- **Compaction** — summarize older turns to bound context.
+- **Skill registry** — a named skill catalog + loader tool.
+- **Hook bridge** — Claude Code / Codex hook integration.
 
 ## Workflow
 

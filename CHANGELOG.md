@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Self-modification — hot swap
+
+- Added a `redefine_plugin` tool: the agent loop can hot-swap an already-mounted
+  plugin transactionally (compile new source for the same module name; a failed
+  start rolls back). The `self_modification` prompt section now documents the
+  create → define → redefine → save workflow.
+
 ### System prompt as a plugin registry
 
 - Added a `prompt_section` DSL so any plugin contributes its own guidance to
