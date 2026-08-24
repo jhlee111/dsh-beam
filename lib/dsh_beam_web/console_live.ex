@@ -46,7 +46,10 @@ defmodule DshBeamWeb.ConsoleLive do
     %{id: :panel_events, plugin: DshBeam.Ui.Panel.EventFeed, config: [], disabled: false},
     %{id: :panel_plugins, plugin: DshBeam.Ui.Panel.Plugins, config: [], disabled: false},
     %{id: :panel_workspace, plugin: DshBeam.Ui.Panel.Workspace, config: [], disabled: false},
-    %{id: :panel_trajectory, plugin: DshBeam.Ui.Panel.Trajectory, config: [], disabled: false}
+    %{id: :panel_trajectory, plugin: DshBeam.Ui.Panel.Trajectory, config: [], disabled: false},
+    %{id: :panel_access, plugin: DshBeam.Ui.Panel.Access, config: [], disabled: false},
+    %{id: :panel_model_select, plugin: DshBeam.Ui.Panel.ModelSelect, config: [], disabled: false},
+    %{id: :panel_command, plugin: DshBeam.Ui.Panel.Command, config: [], disabled: false}
   ]
 
   # The entries a seed/preset-apply swaps out of a composition: the agent core
@@ -72,7 +75,10 @@ defmodule DshBeamWeb.ConsoleLive do
     :panel_events,
     :panel_plugins,
     :panel_workspace,
-    :panel_trajectory
+    :panel_trajectory,
+    :panel_access,
+    :panel_model_select,
+    :panel_command
   ]
 
   @impl true
@@ -124,6 +130,14 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:picker_open, false)
       |> assign(:picker_path, nil)
       |> assign(:picker_entries, [])
+      |> assign(:permission, %{current_value: "workspace-write", options: []})
+      |> assign(:permission_open, false)
+      |> assign(:permission_confirming, nil)
+      |> assign(:permission_acknowledged, false)
+      |> assign(:model_open, false)
+      |> assign(:model_pane, :root)
+      |> assign(:command_open, false)
+      |> assign(:trajectory_query, "")
       |> refresh()
 
     {:ok, socket}
@@ -213,7 +227,10 @@ defmodule DshBeamWeb.ConsoleLive do
             :panel_events,
             :panel_plugins,
             :panel_workspace,
-            :panel_trajectory
+            :panel_trajectory,
+            :panel_access,
+            :panel_model_select,
+            :panel_command
           ])
       )
 
@@ -222,48 +239,12 @@ defmodule DshBeamWeb.ConsoleLive do
   end
 
   def handle_event("ask", %{"text" => text}, socket) do
-    case loop_pid(socket.assigns.runtime) do
-      {:ok, loop} ->
-        # Run the whole model↔tool loop off the LiveView process: the loop
-        # makes a real HTTP call (up to the receive_timeout budget, default
-        # 300s), which must not block the event handler and freeze the chat
-        # pane. The result is pushed back as a message and rendered in
-        # handle_info/2. A per-turn cancellation token rides alongside: the
-        # loop polls it at its step boundaries, and the adapter polls it
-        # while the transport runs, so "stop" truly halts the turn.
-        from = self()
+    case DshBeam.Command.parse(text) do
+      {:command, name, args} ->
+        run_command(socket, name, args)
 
-        turn = make_ref()
-        token = DshBeam.Agent.Cancel.new()
-
-        {:ok, task} =
-          Task.start(fn ->
-            result = DshBeam.Agent.Loop.run_trace(loop, text, token)
-            send(from, {:chat_result, turn, text, result})
-          end)
-
-        # Watchdog: a result (or the user's stop) cancels the turn-scoped
-        # guard implicitly — a stale guard finds chat_turn already reset and
-        # is ignored. Only a truly hung loop is cleared here.
-        Process.send_after(self(), {:chat_guard, turn}, @chat_result_timeout_ms)
-
-        {:noreply,
-         socket
-         |> assign(
-           chat_text: "",
-           chat_busy: true,
-           chat_task: task,
-           chat_turn: turn,
-           chat_token: token,
-           chat_started_at: System.system_time(:second)
-         )
-         |> refresh()}
-
-      :not_found ->
-        {:noreply,
-         socket
-         |> assign(chat_text: "", chat_error: ":no_loop_plugin")
-         |> refresh()}
+      {:not_command, _} ->
+        ask_agent(socket, text)
     end
   end
 
@@ -477,6 +458,104 @@ defmodule DshBeamWeb.ConsoleLive do
   def handle_event("view_tab", %{"tab" => tab}, socket) do
     view_tab = if tab == "trajectory", do: :trajectory, else: :chat
     {:noreply, assign(socket, view_tab: view_tab) |> refresh()}
+  end
+
+  # -- permission preset ("Access" seat) --
+
+  def handle_event("permission_toggle", _params, socket) do
+    {:noreply, assign(socket, permission_open: not socket.assigns.permission_open) |> refresh()}
+  end
+
+  def handle_event("permission_select", %{"preset" => preset}, socket) do
+    # Full access gates behind a risk confirmation; safe presets apply at once.
+    socket =
+      if preset == "danger-full-access" do
+        assign(socket, permission_confirming: preset, permission_acknowledged: false)
+      else
+        apply_permission(socket, preset)
+      end
+
+    {:noreply, socket |> assign(permission_open: false) |> refresh()}
+  end
+
+  def handle_event("permission_ack", _params, socket) do
+    {:noreply,
+     assign(socket, permission_acknowledged: not socket.assigns.permission_acknowledged)
+     |> refresh()}
+  end
+
+  def handle_event("permission_confirm", _params, socket) do
+    socket =
+      if socket.assigns.permission_acknowledged && socket.assigns.permission_confirming do
+        apply_permission(socket, socket.assigns.permission_confirming)
+      else
+        socket
+      end
+
+    {:noreply,
+     socket
+     |> assign(permission_confirming: nil, permission_acknowledged: false, permission_open: false)
+     |> refresh()}
+  end
+
+  def handle_event("permission_cancel", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(permission_confirming: nil, permission_acknowledged: false, permission_open: false)
+     |> refresh()}
+  end
+
+  # -- model / effort selector (the composer's model seat) --
+
+  def handle_event("model_toggle", _params, socket) do
+    socket =
+      socket
+      |> assign(model_open: not socket.assigns.model_open)
+      |> assign(model_pane: :root)
+
+    {:noreply, refresh(socket)}
+  end
+
+  def handle_event("model_pane", %{"pane" => pane}, socket) do
+    # Literal atoms (not String.to_existing_atom) so both :model and :effort
+    # exist regardless of load order.
+    model_pane =
+      case pane do
+        "model" -> :model
+        "effort" -> :effort
+        _ -> :root
+      end
+
+    {:noreply, socket |> assign(model_pane: model_pane) |> refresh()}
+  end
+
+  def handle_event("model_select", %{"model" => model}, socket) do
+    socket = apply_model(socket, model: model)
+    {:noreply, socket |> assign(model_open: false, model_pane: :root) |> refresh()}
+  end
+
+  def handle_event("model_effort_select", %{"effort" => effort}, socket) do
+    socket = apply_model(socket, reasoning_effort: effort)
+    {:noreply, socket |> assign(model_open: false, model_pane: :root) |> refresh()}
+  end
+
+  # -- slash-command menu --
+
+  def handle_event("command_toggle", _params, socket) do
+    {:noreply, assign(socket, command_open: not socket.assigns.command_open) |> refresh()}
+  end
+
+  def handle_event("command_pick", %{"command" => name}, socket) do
+    # Pick inserts the "/name " claim token into the draft; the user completes
+    # the args and submits, which the ask handler routes through run_command.
+    {:noreply,
+     socket
+     |> assign(chat_text: "/" <> name <> " ", command_open: false)
+     |> refresh()}
+  end
+
+  def handle_event("trajectory_search", %{"query" => query}, socket) do
+    {:noreply, socket |> assign(trajectory_query: query) |> refresh()}
   end
 
   def handle_event("plugin_toggle", %{"plugin" => plugin_str}, socket) do
@@ -757,6 +836,9 @@ defmodule DshBeamWeb.ConsoleLive do
                   <button type="button" class="to-bottom" aria-label="scroll to bottom">▾</button>
                 </div>
                 <form class="composer" phx-submit="ask">
+                  <div class="composer-toolbar">
+                    <%= DshBeam.Ui.render_slot(:composer_toolbar, assigns) %>
+                  </div>
                   <textarea
                     name="text"
                     id="composer-textarea"
@@ -961,7 +1043,8 @@ defmodule DshBeamWeb.ConsoleLive do
       credential_env: credential_env,
       chat_log: chat_log(socket.assigns.ctx),
       todos: todos(socket.assigns.ctx),
-      trajectory: trajectory(socket.assigns.ctx),
+      trajectory: trajectory(socket.assigns.ctx, socket.assigns.trajectory_query),
+      permission: permission(socket.assigns.ctx),
       workspace_sessions: workspace_sessions,
       workspace_active: workspace_active,
       inventory:
@@ -1022,6 +1105,9 @@ defmodule DshBeamWeb.ConsoleLive do
   defp chat_entry(%{"role" => "assistant", "content" => content}),
     do: %{kind: :assistant, content: content}
 
+  defp chat_entry(%{"role" => "reasoning", "content" => content}),
+    do: %{kind: :reasoning, content: content}
+
   defp chat_entry(%{"role" => "tool_call", "name" => name, "arguments" => args}),
     do: %{kind: :tool_call, name: name, command: tool_command(name, args)}
 
@@ -1030,6 +1116,12 @@ defmodule DshBeamWeb.ConsoleLive do
 
   defp chat_entry(%{"role" => "error", "content" => content}),
     do: %{kind: :error, content: content}
+
+  defp chat_entry(%{"role" => "command_run", "name" => name, "args" => args}),
+    do: %{kind: :command_run, name: name, args: args}
+
+  defp chat_entry(%{"role" => "command_done", "name" => name, "content" => content}),
+    do: %{kind: :command_done, name: name, content: content}
 
   defp chat_entry(other), do: %{kind: :event, content: inspect(other)}
 
@@ -1046,13 +1138,13 @@ defmodule DshBeamWeb.ConsoleLive do
 
   # The trajectory is the same session log grouped by turn: a "user" event opens
   # a turn; the tool calls, results, and the answer that follow belong to it.
-  defp trajectory(ctx) do
+  defp trajectory(ctx, query) do
     case alive_session(ctx) do
       {:ok, session} ->
         session
         |> DshBeam.Session.all()
-        |> group_turns()
-        |> Enum.map(fn turn -> Enum.map(turn, &chat_entry/1) end)
+        |> DshBeam.Ui.TrajectoryProjection.from_events()
+        |> DshBeam.Ui.TrajectoryProjection.filter(query)
 
       _ ->
         []
@@ -1073,19 +1165,142 @@ defmodule DshBeamWeb.ConsoleLive do
     end
   end
 
-  defp group_turns(events) do
-    {turns, current} =
-      Enum.reduce(events, {[], []}, fn event, {turns, current} ->
-        if event["role"] == "user" do
-          {[Enum.reverse(current) | turns], [event]}
-        else
-          {turns, [event | current]}
-        end
-      end)
+  # The permission-preset value the "Access" seat renders (the reference's
+  # `permissions` projection), folded from the current session's log.
+  defp permission(ctx) do
+    case alive_session(ctx) do
+      {:ok, session} -> DshBeam.Permission.select_for(session)
+      _ -> %{current_value: DshBeam.Permission.default_preset(), options: []}
+    end
+  end
 
-    (turns ++ [Enum.reverse(current)])
-    |> Enum.reject(&(&1 == []))
-    |> Enum.reverse()
+  # The single write path for a permission pick: append the durable
+  # permission_preset event to the current session (the reference's
+  # command('/permission <id>') → permission/preset log event).
+  defp apply_permission(socket, preset) do
+    case alive_session(socket.assigns.ctx) do
+      {:ok, session} -> DshBeam.Permission.apply(session, preset)
+      _ -> :ok
+    end
+
+    socket
+  end
+
+  # The model/effort write path: re-arm the LLM provider in-memory and persist
+  # the choice to the settings store, so it survives a restart.
+  defp apply_model(socket, opts) do
+    case DshBeam.Context.get(socket.assigns.ctx, :llm) do
+      {:ok, llm} when is_pid(llm) ->
+        :ok = DshBeam.Llm.configure(llm, opts)
+
+        store = DshBeam.Runtime.settings(socket.assigns.runtime)
+
+        Enum.each(opts, fn {key, value} ->
+          DshBeam.Settings.put(store, DshBeam.Llm.Plugin, key, value)
+        end)
+
+      _ ->
+        :ok
+    end
+
+    socket
+  end
+
+  # Slash-command execution: append a durable command_run/command_done pair
+  # (the reference's command/run + command/done log events) around the
+  # dispatch, then re-render. The result string becomes the command card body.
+  # Run the whole model↔tool loop off the LiveView process: the loop makes a
+  # real HTTP call (up to the receive_timeout budget, default 300s), which must
+  # not block the event handler and freeze the chat pane. The result is pushed
+  # back as a message and rendered in handle_info/2. A per-turn cancellation
+  # token rides alongside: the loop polls it at its step boundaries, and the
+  # adapter polls it while the transport runs, so "stop" truly halts the turn.
+  defp ask_agent(socket, text) do
+    case loop_pid(socket.assigns.runtime) do
+      {:ok, loop} ->
+        from = self()
+
+        turn = make_ref()
+        token = DshBeam.Agent.Cancel.new()
+
+        {:ok, task} =
+          Task.start(fn ->
+            result = DshBeam.Agent.Loop.run_trace(loop, text, token)
+            send(from, {:chat_result, turn, text, result})
+          end)
+
+        # Watchdog: a result (or the user's stop) cancels the turn-scoped guard
+        # implicitly — a stale guard finds chat_turn already reset and is
+        # ignored. Only a truly hung loop is cleared here.
+        Process.send_after(self(), {:chat_guard, turn}, @chat_result_timeout_ms)
+
+        {:noreply,
+         socket
+         |> assign(
+           chat_text: "",
+           chat_busy: true,
+           chat_task: task,
+           chat_turn: turn,
+           chat_token: token,
+           chat_started_at: System.system_time(:second)
+         )
+         |> refresh()}
+
+      :not_found ->
+        {:noreply, socket |> assign(chat_text: "", chat_error: ":no_loop_plugin") |> refresh()}
+    end
+  end
+
+  defp run_command(socket, name, args) do
+    session = alive_session(socket.assigns.ctx)
+
+    append_command_event(session, %{"role" => "command_run", "name" => name, "args" => args})
+
+    {socket, result} = dispatch_command(socket, name, args)
+
+    append_command_event(session, %{"role" => "command_done", "name" => name, "content" => result})
+
+    {:noreply, socket |> assign(chat_text: "", chat_error: nil) |> refresh()}
+  end
+
+  defp append_command_event({:ok, session}, event), do: DshBeam.Session.append(session, event)
+  defp append_command_event(_none, _event), do: :ok
+
+  defp dispatch_command(socket, "permission", args) do
+    presets = ["read-only", "workspace-write", "danger-full-access"]
+
+    if args in presets do
+      apply_permission(socket, args)
+      {socket, "preset #{args}"}
+    else
+      {socket, "unknown preset \"#{args}\" (available: #{Enum.join(presets, ", ")})"}
+    end
+  end
+
+  defp dispatch_command(socket, "model", args) do
+    if DshBeam.Llm.Models.find_model(args) do
+      apply_model(socket, model: args)
+      {socket, "model #{args}"}
+    else
+      {socket, "unknown model \"#{args}\""}
+    end
+  end
+
+  defp dispatch_command(socket, "clear", _args) do
+    case alive_session(socket.assigns.ctx) do
+      {:ok, session} -> DshBeam.Session.clear(session)
+      _ -> :ok
+    end
+
+    {socket, "conversation cleared"}
+  end
+
+  defp dispatch_command(socket, "help", _args) do
+    {socket, "commands: " <> Enum.join(DshBeam.Command.names(), ", ")}
+  end
+
+  defp dispatch_command(socket, name, _args) do
+    {socket, "unknown command \"/#{name}\" (try /help)"}
   end
 
   # The workspace sidebar: every workspace session, with its current/current?

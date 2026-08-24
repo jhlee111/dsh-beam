@@ -168,6 +168,35 @@ defmodule DshBeam.AgentTest do
              %{"role" => "assistant", "content" => "final answer"}
            ]
   end
+
+  test "the loop records a reasoning block and usage from the reply" do
+    adapter = %{id: :adapter, plugin: ReasoningLlmAdapter, config: [], disabled: false}
+
+    {:ok, runtime} =
+      DshBeam.Runtime.start_link(
+        [session_entry(), llm_entry(), adapter, loop_entry()],
+        []
+      )
+
+    %{loop: %{pid: loop}} = DshBeam.Runtime.entries(runtime)
+    ctx = DshBeam.Runtime.context(runtime)
+    {:ok, session} = DshBeam.Context.get(ctx, :session)
+
+    assert {:ok, "answer"} = DshBeam.Agent.Loop.run(loop, "think")
+
+    events = DshBeam.Session.all(session)
+
+    # reasoning is a display-only event, just before the assistant answer
+    assert [
+             %{"role" => "reasoning", "content" => "chain of thought"},
+             %{"role" => "assistant", "content" => "answer"} | _
+           ] =
+             Enum.drop_while(events, &(&1["role"] != "reasoning"))
+
+    [assistant] = Enum.filter(events, &(&1["role"] == "assistant"))
+    assert assistant["usage"].input_tokens == 100
+    assert assistant["usage"].output_tokens == 50
+  end
 end
 
 defmodule LoopEchoTool do
@@ -181,6 +210,31 @@ defmodule LoopEchoTool do
 
   @impl DshBeam.Plugin
   def handle_dsh_tool_call(:loop_echo, %{"text" => text}, _state), do: {:ok, "echo:" <> text}
+end
+
+defmodule ReasoningLlmAdapter do
+  @moduledoc false
+  # Scripted adapter returning a reasoning block and disjoint usage, to assert
+  # the loop records them as a reasoning event + usage on the assistant event.
+  use DshBeam.Llm.Adapter
+
+  @impl true
+  def complete(_config, _messages, _opts) do
+    {:ok,
+     %{
+       content: "answer",
+       reasoning: "chain of thought",
+       tool_calls: [],
+       finish_reason: :stop,
+       usage: %{
+         input_tokens: 100,
+         output_tokens: 50,
+         cache_read_tokens: 20,
+         cache_write_tokens: 0,
+         reasoning_tokens: 30
+       }
+     }}
+  end
 end
 
 defmodule LoopLlmAdapter do

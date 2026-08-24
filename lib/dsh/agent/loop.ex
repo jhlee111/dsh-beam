@@ -141,8 +141,18 @@ defmodule DshBeam.Agent.Loop do
             token
           )
 
-        {:ok, %{content: content}} ->
-          _ = DshBeam.Session.append(session, %{"role" => "assistant", "content" => content})
+        {:ok, %{content: content} = reply} ->
+          # Reasoning is display-only (never re-sent to the model); usage rides
+          # the assistant event so the trajectory can show per-turn tokens.
+          append_reasoning(session, Map.get(reply, :reasoning))
+
+          _ =
+            DshBeam.Session.append(session, %{
+              "role" => "assistant",
+              "content" => content,
+              "usage" => Map.get(reply, :usage)
+            })
+
           {:ok, content, Enum.reverse(trace)}
 
         {:error, :cancelled} ->
@@ -163,6 +173,15 @@ defmodule DshBeam.Agent.Loop do
   defp abort(session) do
     _ = DshBeam.Session.append(session, %{"role" => "error", "content" => "stopped by user"})
     :ok
+  end
+
+  # Record a reasoning block (chain-of-thought) as a display-only session event,
+  # just before the assistant answer it explains.
+  defp append_reasoning(_session, nil), do: :ok
+  defp append_reasoning(_session, ""), do: :ok
+
+  defp append_reasoning(session, reasoning) when is_binary(reasoning) do
+    DshBeam.Session.append(session, %{"role" => "reasoning", "content" => reasoning})
   end
 
   defp track_repeats(repeat, calls) do

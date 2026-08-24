@@ -19,7 +19,18 @@ defmodule DshBeam.Ui.ChatEntry do
         <div class="msg-assistant">
           <span class="role-icon role-assistant" aria-hidden="true">✦</span>
           <div class="markdown"><%= markdown(@entry.content) %></div>
+          <button type="button" class="copy-action" data-copy={@entry.content} aria-label="copy">
+            <DshBeamWeb.Icons.copy />
+          </button>
         </div>
+      <% :reasoning -> %>
+        <details class="reasoning-row">
+          <summary>
+            <DshBeamWeb.Icons.think size={14} class="reasoning-icon" />
+            <span>Think</span>
+          </summary>
+          <div class="reasoning-body"><%= @entry.content %></div>
+        </details>
       <% :tool_call -> %>
         <div class="tool-card">
           <span class="tool-label">
@@ -40,6 +51,20 @@ defmodule DshBeam.Ui.ChatEntry do
         <div class="msg-error">
           <span class="role-icon role-error" aria-hidden="true">⚠</span>
           <code><%= @entry.content %></code>
+        </div>
+      <% :command_run -> %>
+        <div class="command-card">
+          <span class="tool-label">
+            <span class="role-icon role-tool" aria-hidden="true">❯</span>
+            /<%= @entry.name %><%= if @entry.args != "", do: " " <> @entry.args %>
+          </span>
+        </div>
+      <% :command_done -> %>
+        <div class="command-card command-done">
+          <span class="tool-label">
+            <span class="role-icon role-tool" aria-hidden="true">⏎</span>
+            /<%= @entry.name %> · <%= @entry.content %>
+          </span>
         </div>
       <% _ -> %>
         <div class="msg-event"><code><%= @entry.content %></code></div>

@@ -57,6 +57,12 @@ defmodule DshBeam.Llm.Plugin do
     doc: "How long to wait for the model's reply (ms) before timing out"
   )
 
+  setting(:reasoning_effort,
+    type: :string,
+    default: "high",
+    doc: "The reasoning model's effort level (low/high/max); ignored for non-reasoning models"
+  )
+
   @impl DshBeam.Plugin
   def mount(_ctx, opts) do
     {:ok, [:llm_adapter], %{llm: self()}, %{config: default_config(opts)}}
@@ -88,7 +94,7 @@ defmodule DshBeam.Llm.Plugin do
         # like a :plug ride the top level), never the registry fields
         adapter_config =
           data.extra.config
-          |> Map.take([:base_url, :model, :credential, :receive_timeout])
+          |> Map.take([:base_url, :model, :credential, :receive_timeout, :reasoning_effort])
           |> Map.merge(data.extra.config.adapter_config)
 
         :gen_statem.call(adapter, {:complete, adapter_config, messages, opts})
@@ -104,6 +110,7 @@ defmodule DshBeam.Llm.Plugin do
       model: Keyword.get(opts, :model, "deepseek-chat"),
       credential: Keyword.get(opts, :credential, {:env, "DEEPSEEK_API_KEY"}),
       receive_timeout: Keyword.get(opts, :receive_timeout, 300_000),
+      reasoning_effort: Keyword.get(opts, :reasoning_effort, "high"),
       adapter_config: Keyword.get(opts, :adapter_config, %{})
     }
   end
@@ -121,6 +128,9 @@ defmodule DshBeam.Llm.Plugin do
 
       {:receive_timeout, value}, acc when is_integer(value) and value > 0 ->
         %{acc | receive_timeout: value}
+
+      {:reasoning_effort, value}, acc when is_binary(value) ->
+        %{acc | reasoning_effort: value}
 
       {:adapter_config, value}, acc when is_map(value) ->
         %{acc | adapter_config: value}

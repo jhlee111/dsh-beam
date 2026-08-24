@@ -187,6 +187,137 @@ defmodule DshBeamWeb.Layouts do
           }
           .composer-send:hover { background: var(--dsw-alias-button-floating-hover); }
           .composer-status { margin: 4px 0 0; font-size: 12px; }
+          /* Composer toolbar: plugin seats (Access, model, commands) live above
+             the textarea (the reference InputBar's tool row). */
+          .composer-toolbar {
+            display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+            padding: 0 2px 8px;
+          }
+          /* Permission "Access" seat (reference PermissionSelect). */
+          .access-seat { position: relative; display: inline-flex; }
+          .access-trigger {
+            display: inline-flex; align-items: center; gap: 4px; height: 28px;
+            max-width: 220px; padding: 0 4px 0 8px; border-radius: 24px;
+            background: transparent; color: var(--dsw-alias-label-secondary);
+            font-size: 13px; line-height: 20px; font-weight: 500; cursor: pointer;
+          }
+          .access-trigger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+          .access-trigger:disabled { color: var(--dsw-alias-label-dimmed); cursor: default; }
+          .access-icon { flex: none; display: inline-flex; align-items: center; }
+          .access-icon svg { width: 14px; height: 14px; }
+          .access-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .access-chevron { flex: none; color: var(--dsw-alias-label-caption); transition: transform 120ms ease; }
+          .access-chevron.open { transform: rotate(180deg); }
+          .access-menu {
+            position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 30;
+            min-width: 200px; padding: 4px; border-radius: 10px;
+            border: 1px solid var(--dsw-alias-border-l1, #232a36);
+            background: var(--dsw-static-neutral-bluish-850, #161a21);
+            box-shadow: var(--dsw-shadow-lv2, 0 4px 12px rgba(0, 0, 0, .4));
+          }
+          .access-option {
+            display: flex; align-items: center; gap: 8px; width: 100%;
+            padding: 6px 8px; border: none; border-radius: 6px; background: transparent;
+            color: var(--dsw-alias-label-primary); font-size: 13px; text-align: left; cursor: pointer;
+          }
+          .access-option:hover { background: var(--dsw-alias-interactive-bg-hover); }
+          .access-option.selected { color: var(--dsw-alias-state-business-primary); }
+          .access-opt-label { flex: 1; min-width: 0; }
+          .access-check { flex: none; margin-left: auto; }
+          /* Full-access risk confirmation modal. */
+          .access-confirm { width: min(440px, 92vw); flex-direction: column; padding: 16px; }
+          .access-confirm h2 { margin: 0 0 8px; }
+          .access-ack {
+            display: flex; align-items: center; gap: 8px; margin: 12px 0;
+            font-size: 13px; color: var(--dsw-alias-label-primary);
+            background: transparent; border: none; cursor: pointer; padding: 0; text-align: left;
+          }
+          .ack-box {
+            flex: none; display: inline-flex; align-items: center; justify-content: center;
+            width: 16px; height: 16px; border-radius: 4px;
+            border: 1px solid var(--dsw-alias-border-l3, #2b3442);
+            font-size: 12px; color: #fff;
+          }
+          .ack-box.checked {
+            background: var(--dsw-alias-state-business-primary, #4c82ff);
+            border-color: transparent;
+          }
+          .access-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+          .access-confirm-enable {
+            background: var(--dsw-alias-state-business-primary, #4c82ff);
+            border-color: transparent; color: #fff; font-weight: 500;
+          }
+          .access-confirm-enable:disabled { opacity: .5; cursor: default; }
+          /* Model / effort seat (reference ModelSelect). */
+          .model-seat { position: relative; display: inline-flex; }
+          .model-trigger {
+            display: inline-flex; align-items: center; gap: 4px; height: 28px;
+            max-width: 240px; padding: 0 4px 0 8px; border-radius: 24px;
+            background: transparent; color: var(--dsw-alias-label-secondary);
+            font-size: 13px; line-height: 20px; font-weight: 500; cursor: pointer;
+          }
+          .model-trigger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+          .model-trigger:disabled { color: var(--dsw-alias-label-dimmed); cursor: default; }
+          .model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .model-effort { flex: none; color: var(--dsw-alias-label-caption); }
+          .model-chevron { flex: none; color: var(--dsw-alias-label-caption); transition: transform 120ms ease; }
+          .model-chevron.open { transform: rotate(180deg); }
+          .model-menu {
+            position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 30;
+            min-width: 260px; max-height: 320px; overflow-y: auto; padding: 4px;
+            border-radius: 10px; border: 1px solid var(--dsw-alias-border-l1, #232a36);
+            background: var(--dsw-static-neutral-bluish-850, #161a21);
+            box-shadow: var(--dsw-shadow-lv2, 0 4px 12px rgba(0, 0, 0, .4));
+          }
+          .model-cell {
+            display: flex; align-items: center; gap: 8px; width: 100%;
+            padding: 8px; border: none; border-radius: 6px; background: transparent;
+            color: var(--dsw-alias-label-primary); font-size: 13px; text-align: left; cursor: pointer;
+          }
+          .model-cell:hover { background: var(--dsw-alias-interactive-bg-hover); }
+          .model-cell-label { font-weight: 500; }
+          .model-cell-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-secondary); }
+          .model-cell-chevron { flex: none; color: var(--dsw-alias-label-caption); }
+          .model-group-title {
+            padding: 8px 8px 2px; font-size: 11px; font-weight: 600; letter-spacing: .03em;
+            text-transform: uppercase; color: var(--dsw-alias-label-tertiary);
+          }
+          .model-option {
+            display: flex; align-items: center; gap: 8px; width: 100%;
+            padding: 8px; border: none; border-radius: 6px; background: transparent;
+            color: var(--dsw-alias-label-primary); font-size: 13px; text-align: left; cursor: pointer;
+          }
+          .model-option:hover { background: var(--dsw-alias-interactive-bg-hover); }
+          .model-option.selected { color: var(--dsw-alias-state-business-primary); }
+          .model-option-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+          .model-option-name { font-weight: 500; }
+          .model-option-desc { font-size: 11px; color: var(--dsw-alias-label-secondary); }
+          .model-check { flex: none; margin-left: auto; }
+          /* Slash-command menu (reference ui-commands "＋" trigger). */
+          .command-seat { position: relative; display: inline-flex; }
+          .command-trigger {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 28px; height: 28px; border-radius: 8px;
+            border: 1px solid var(--dsw-alias-border-l2);
+            background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer;
+          }
+          .command-trigger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+          .command-trigger:disabled { color: var(--dsw-alias-label-dimmed); cursor: default; }
+          .command-menu {
+            position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 30;
+            min-width: 240px; max-height: 320px; overflow-y: auto; padding: 4px;
+            border-radius: 10px; border: 1px solid var(--dsw-alias-border-l1, #232a36);
+            background: var(--dsw-static-neutral-bluish-850, #161a21);
+            box-shadow: var(--dsw-shadow-lv2, 0 4px 12px rgba(0, 0, 0, .4));
+          }
+          .command-option {
+            display: flex; align-items: baseline; gap: 8px; width: 100%;
+            padding: 6px 8px; border: none; border-radius: 6px; background: transparent;
+            color: var(--dsw-alias-label-primary); font-size: 13px; text-align: left; cursor: pointer;
+          }
+          .command-option:hover { background: var(--dsw-alias-interactive-bg-hover); }
+          .command-option-name { flex: none; font-family: var(--ds-font-family-code); font-weight: 600; }
+          .command-option-desc { flex: 1; min-width: 0; color: var(--dsw-alias-label-secondary); font-size: 12px; }
           /* Back-to-bottom: a circular chevron floating just above the composer,
              revealed only while the reader is scrolled away from the newest
              message (reference ChatView .toBottom). */
@@ -231,6 +362,30 @@ defmodule DshBeamWeb.Layouts do
             width: 20px; height: 24px; font-size: 13px; line-height: 1;
           }
           .role-assistant { color: var(--dsw-static-deepseek-400, #679efe); }
+          .copy-action {
+            flex: none; display: inline-flex; align-items: center; justify-content: center;
+            width: 24px; height: 24px; margin-top: 1px; border: none; border-radius: 6px;
+            background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer;
+            opacity: 0; transition: opacity 120ms ease;
+          }
+          .msg-assistant:hover .copy-action { opacity: 1; }
+          .copy-action:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+          .copy-action.copied { color: var(--dsw-static-green-500, #34d399); }
+          .reasoning-row {
+            align-self: flex-start; border: 1px solid var(--dsw-alias-border-l2);
+            border-radius: 10px; padding: 6px 10px; font-size: 13px;
+            color: var(--dsw-alias-label-secondary); max-width: 100%;
+          }
+          .reasoning-row summary {
+            display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+            font-weight: 500; list-style: none; user-select: none;
+          }
+          .reasoning-row summary::-webkit-details-marker { display: none; }
+          .reasoning-icon { color: var(--dsw-static-deepseek-400, #679efe); }
+          .reasoning-body {
+            margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--dsw-alias-border-l2);
+            white-space: pre-wrap; color: var(--dsw-alias-label-tertiary);
+          }
           .role-tool { color: var(--dsw-static-green-500, #34d399); }
           .role-error { color: var(--dsw-static-red-400, #fb7185); }
           .turn-status {
@@ -289,6 +444,12 @@ defmodule DshBeamWeb.Layouts do
             letter-spacing: .03em; text-transform: uppercase;
           }
           .tool-command { font-family: var(--ds-font-family-code); font-size: 13px; word-break: break-all; }
+          .command-card {
+            border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px;
+            padding: 8px 12px; background: var(--dsw-alias-bg-layer-1, #1a1f27);
+            font-family: var(--ds-font-family-code); font-size: 13px;
+          }
+          .command-card.command-done { color: var(--dsw-alias-label-secondary); }
           .tool-result {
             border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px;
             background: var(--dsw-static-neutral-bluish-900, #0c0f14); overflow: hidden;
@@ -301,6 +462,40 @@ defmodule DshBeamWeb.Layouts do
           .msg-error, .msg-event, .msg-busy { color: var(--dsw-static-red-400); font-size: 13px; }
           .msg-busy { color: var(--dsw-alias-label-secondary); }
           .trajectory-turn { border-top: 1px solid var(--dsw-alias-border-l2); padding: 8px 0; }
+          .trajectory-toolbar {
+            display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
+            border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; padding: 4px 8px;
+            background: var(--dsw-static-neutral-bluish-900, #0c0f14);
+          }
+          .trajectory-search-icon { display: inline-flex; color: var(--dsw-alias-label-caption); }
+          .trajectory-toolbar input {
+            flex: 1; border: none; background: transparent; outline: none;
+            color: var(--dsw-alias-label-primary); font-size: 12px; padding: 2px 0;
+          }
+          .trajectory-cells { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
+          .trajectory-cell {
+            display: flex; align-items: baseline; gap: 8px; padding: 3px 6px;
+            border-radius: 6px; font-size: 12px;
+          }
+          .trajectory-cell:hover { background: var(--dsw-alias-interactive-bg-hover); }
+          .trajectory-tag {
+            flex: none; display: inline-flex; align-items: center; gap: 5px; min-width: 92px;
+            color: var(--dsw-alias-label-secondary); font-size: 10px; font-weight: 600;
+            letter-spacing: .04em; text-transform: uppercase;
+          }
+          .tag-glyph { font-size: 12px; }
+          .trajectory-text {
+            flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap; color: var(--dsw-alias-label-primary);
+            font-family: var(--ds-font-family-code); font-size: 12px;
+          }
+          .kind-user .trajectory-tag { color: var(--dsw-static-blue-400, #60a5fa); }
+          .kind-message .trajectory-tag { color: var(--dsw-static-deepseek-400, #679efe); }
+          .kind-reasoning .trajectory-tag { color: var(--dsw-static-purple-400, #a78bfa); }
+          .kind-tool .trajectory-tag { color: var(--dsw-static-amber-400, #f0b429); }
+          .kind-command .trajectory-tag { color: var(--dsw-static-green-500, #34d399); }
+          .kind-error .trajectory-tag { color: var(--dsw-static-red-400, #fb7185); }
+          .kind-system .trajectory-tag { color: var(--dsw-static-neutral-bluish-500, #6b7a90); }
 
           /* Workspace sidebar: an explicit create form + session list. */
           .workspace-form { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
@@ -708,6 +903,21 @@ defmodule DshBeamWeb.Layouts do
           });
           liveSocket.connect();
           window.addEventListener("phx:page-loading-stop", () => liveSocket.enableDebug());
+
+          // Delegated copy: a .copy-action click writes its data-copy to the
+          // clipboard and flips to a checkmark for a second (reference
+          // MessageIconActions copy). Delegated so it survives morphdom without
+          // a per-message hook id.
+          document.addEventListener('click', (event) => {
+            const btn = event.target.closest('.copy-action');
+            if (!btn) return;
+            const text = btn.dataset.copy || '';
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text);
+            }
+            btn.classList.add('copied');
+            setTimeout(() => btn.classList.remove('copied'), 1000);
+          });
         </script>
       </body>
     </html>

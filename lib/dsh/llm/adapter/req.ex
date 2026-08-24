@@ -31,6 +31,14 @@ defmodule DshBeam.Llm.Adapter.Req do
     tools = opts[:tools]
     body = if tools in [nil, []], do: body, else: Map.put(body, :tools, tools)
 
+    # A reasoning model forwards its effort level (low/high/max) verbatim;
+    # a non-reasoning model omits the field entirely.
+    body =
+      case Map.get(config, :reasoning_effort) do
+        effort when is_binary(effort) and effort != "" -> Map.put(body, :reasoning_effort, effort)
+        _ -> body
+      end
+
     headers = [
       {"authorization", "Bearer " <> api_key},
       {"content-type", "application/json"}
@@ -109,6 +117,9 @@ defmodule DshBeam.Llm.Adapter.Req do
     {:ok,
      %{
        content: message["content"],
+       # DeepSeek's reasoner returns its chain-of-thought in reasoning_content;
+       # captured for the chat "Think" row, never sent back to the model.
+       reasoning: message["reasoning_content"],
        tool_calls: parse_tool_calls(message["tool_calls"]),
        finish_reason: map_finish_reason(choice["finish_reason"]),
        usage: map_usage(response["usage"])

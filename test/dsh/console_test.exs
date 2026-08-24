@@ -487,6 +487,97 @@ defmodule DshBeam.ConsoleTest do
     assert html =~ "minmax(0, 1fr) 200px"
   end
 
+  test "the composer Access seat applies a preset and gates full access",
+       %{session: session, ctx: ctx} do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    render_submit(view, "seed", %{})
+    open_chat_session(view, ctx)
+
+    # the seat shows the default preset
+    html = render(view)
+    assert html =~ "access-trigger"
+    assert html =~ "Workspace Write"
+
+    # a safe preset applies at once and folds into the session log
+    render_click(view, "permission_toggle", %{})
+    html = render_click(view, "permission_select", %{"preset" => "read-only"})
+    assert html =~ "Read Only"
+
+    {:ok, session_pid} = DshBeam.Context.get(ctx, :session)
+    assert DshBeam.Permission.current(session_pid) == "read-only"
+
+    # full access opens the risk confirmation instead of applying immediately
+    render_click(view, "permission_toggle", %{})
+    html = render_click(view, "permission_select", %{"preset" => "danger-full-access"})
+    assert html =~ "Enable Full access?"
+
+    # the enable control is inert until acknowledged
+    assert html =~ "access-confirm-enable"
+    assert html =~ "disabled"
+
+    # acknowledge, then enable
+    render_click(view, "permission_ack", %{})
+    html = render_click(view, "permission_confirm", %{})
+    assert DshBeam.Permission.current(session_pid) == "danger-full-access"
+    assert html =~ "Full access"
+  end
+
+  test "the composer model seat selects a model and a reasoning effort",
+       %{session: session, ctx: ctx} do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    render_submit(view, "seed", %{})
+    open_chat_session(view, ctx)
+
+    html = render(view)
+    assert html =~ "model-trigger"
+    assert html =~ "deepseek-chat"
+
+    # drill into the model list and pick the reasoner
+    render_click(view, "model_toggle", %{})
+    render_click(view, "model_pane", %{"pane" => "model"})
+    html = render_click(view, "model_select", %{"model" => "deepseek-reasoner"})
+    assert html =~ "deepseek-reasoner"
+
+    {:ok, llm} = DshBeam.Context.get(ctx, :llm)
+    assert %{model: "deepseek-reasoner", reasoning_effort: "high"} = DshBeam.Llm.config(llm)
+
+    # drill into the effort list and pick a level
+    render_click(view, "model_toggle", %{})
+    render_click(view, "model_pane", %{"pane" => "effort"})
+    render_click(view, "model_effort_select", %{"effort" => "max"})
+
+    assert %{model: "deepseek-reasoner", reasoning_effort: "max"} = DshBeam.Llm.config(llm)
+  end
+
+  test "a slash command is routed to the command runner, not the agent loop",
+       %{session: session, ctx: ctx} do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    render_submit(view, "seed", %{})
+    open_chat_session(view, ctx)
+
+    # /permission applies the preset and records a command card pair
+    render_submit(view, "ask", %{"text" => "/permission read-only"})
+    {:ok, session_pid} = DshBeam.Context.get(ctx, :session)
+    assert DshBeam.Permission.current(session_pid) == "read-only"
+
+    html = render(view)
+    assert html =~ "command-card"
+    assert html =~ "/permission"
+
+    # /model reconfigures the llm provider
+    render_submit(view, "ask", %{"text" => "/model deepseek-reasoner"})
+    {:ok, llm} = DshBeam.Context.get(ctx, :llm)
+    assert %{model: "deepseek-reasoner"} = DshBeam.Llm.config(llm)
+
+    # /help reports the catalog without touching the model/loop
+    render_submit(view, "ask", %{"text" => "/help"})
+    assert render(view) =~ "commands:"
+
+    # the command events were appended to the session log
+    assert Enum.any?(DshBeam.Session.all(session_pid), &(&1["role"] == "command_run"))
+    assert Enum.any?(DshBeam.Session.all(session_pid), &(&1["role"] == "command_done"))
+  end
+
   test "crashing a sandbox child re-injects a fresh OS process", %{
     session: session,
     ctx: ctx,
