@@ -146,6 +146,9 @@ defmodule DshBeam.Llm.Adapter.Req do
     tools = opts[:tools]
     body = if tools in [nil, []], do: body, else: Map.put(body, :tools, tools)
     body = put_reasoning_effort(body, config)
+    # The streaming response omits usage unless explicitly requested; the
+    # trajectory and the assistant event both need it.
+    body = Map.put(body, :stream_options, %{include_usage: true})
 
     headers = [
       {"authorization", "Bearer " <> api_key},
@@ -196,14 +199,18 @@ defmodule DshBeam.Llm.Adapter.Req do
   end
 
   defp process_sse_event(line, acc, stream) do
-    case line |> String.trim_leading("data: ") |> String.trim() do
+    # SSE data lines are `data: {...}` (a space after the colon); strip the
+    # `data:` prefix defensively (with or without the space) before decoding.
+    json = line |> String.trim() |> String.replace_prefix("data:", "") |> String.trim()
+
+    case json do
       "[DONE]" ->
         acc
 
       "" ->
         acc
 
-      json ->
+      _ ->
         case JSON.decode(json) do
           {:ok, data} -> process_sse_data(data, acc, stream)
           _ -> acc
