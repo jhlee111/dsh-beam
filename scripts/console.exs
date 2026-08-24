@@ -22,7 +22,12 @@ entries = [
   %{id: :console, plugin: DshBeam.Console, config: [server: true], disabled: false},
   %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
   %{id: :workspace, plugin: DshBeam.Workspace,
-       config: [boot_prune: true, repo: File.cwd!(), keep: [File.cwd!()]],
+       config: [
+         boot_prune: true,
+         repo: File.cwd!(),
+         keep: [File.cwd!()],
+         roster_path: Path.join([System.user_home!(), ".dsh", "workspace-roster.json"])
+       ],
        disabled: false},
   %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [], disabled: false},
   %{id: :adapter, plugin: DshBeam.Llm.Adapter.Req, config: [], disabled: false},
