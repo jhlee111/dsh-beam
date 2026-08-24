@@ -232,3 +232,38 @@ console.
 ### Tests
 
 - 140 tests, one per paper guarantee + the milestone's verification criteria.
+
+### Crash audit log + supervised orchestrator
+
+- **`DshBeam.CrashAudit`** — a durable, append-only JSONL record of every
+  plugin failure the orchestrator observes (`:crashed`, `:crash_loop`,
+  `:start_failed`, `:exited`), written next to the settings store
+  (`.dsh/crash-audit.log`, gitignored) and fanned out to live subscribers
+  (`{:crash_audit, event}`). A crash is no longer only in the runtime's
+  in-memory entry record — it survives a console restart, so "what died and
+  why" can be diagnosed afterwards (the `erl_crash.dump` postmortem problem).
+  The runtime owns the audit (opt-in via `audit_path:`); the new
+  `DshBeam.CrashAudit.Plugin` exposes it to the composition as `:crash_audit`.
+- **Supervised orchestrator** — `scripts/console.exs` now starts the runtime
+  under a `one_for_one` Supervisor (`DshBeam.Console.Supervisor`), so a crash
+  of the runtime itself — the one process nothing else watched — re-spawns
+  the whole composition instead of taking the console down. The audit trail
+  is started before the runtime and outlives runtime re-injections.
+- **`DshBeam.Runtime.audit/1`** — accessor for the owned audit pid (`nil`
+  when no `audit_path` was configured; tests/library users stay
+  side-effect-free).
+
+### Crash audit events inside the session log
+
+- **`DshBeam.CrashAudit.SessionBridge`** — a fiber that depends on `:session`
+  and `:crash_audit` and interleaves every crash event as a
+  `%{"role" => "crash_audit", kind, id, reason, timestamp}` row in the
+  session log, so a crashed plugin is visible *inside the conversation* — the
+  chat/trajectory projections read the same append-only log, so the crash
+  shows up as a row in the UI, not only in `.dsh/crash-audit.log`.
+- The bridge drains the retained audit window on activation (missed events
+  during boot are caught up) and dedupes by `{timestamp, kind, id}`, so a
+  restarted/re-activated bridge never appends a crash twice.
+- The runtime now injects the audit pid into every entry's mount config
+  (`:audit`), so `CrashAudit.Plugin` exposes it without calling back into the
+  runtime (which would deadlock mid-reconcile).
