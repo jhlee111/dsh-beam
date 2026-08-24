@@ -20,6 +20,12 @@ defmodule DshBeamWeb.ConsoleLive do
   end
   """
 
+  # Ceiling for one chat turn, independent of the per-request Req budget
+  # (receive_timeout, default 300s): if the loop fiber hangs OUTSIDE Req — a
+  # blocked gen_statem call the transport timeout cannot see — the watchdog
+  # clears the pane instead of leaving it busy forever.
+  @chat_result_timeout_ms 600_000
+
   @demo_entries [
     %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
     %{id: :workspace, plugin: DshBeam.Workspace, config: [], disabled: false},
@@ -87,6 +93,7 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:chat_log, [])
       |> assign(:chat_busy, false)
       |> assign(:chat_task, nil)
+      |> assign(:chat_turn, nil)
       |> assign(:chat_started_at, nil)
       |> assign(:chat_error, nil)
       |> assign(:todos, [])
@@ -216,16 +223,24 @@ defmodule DshBeamWeb.ConsoleLive do
     case loop_pid(socket.assigns.runtime) do
       {:ok, loop} ->
         # Run the whole model↔tool loop off the LiveView process: the loop
-        # makes a real (up to 2-minute) HTTP call, which must not block the
-        # event handler and freeze the chat pane. The result is pushed back
-        # as a message and rendered in handle_info/2.
+        # makes a real HTTP call (up to the receive_timeout budget, default
+        # 300s), which must not block the event handler and freeze the chat
+        # pane. The result is pushed back as a message and rendered in
+        # handle_info/2.
         from = self()
+
+        turn = make_ref()
 
         {:ok, task} =
           Task.start(fn ->
             result = DshBeam.Agent.Loop.run_trace(loop, text)
-            send(from, {:chat_result, text, result})
+            send(from, {:chat_result, turn, text, result})
           end)
+
+        # Watchdog: a result (or the user's stop) cancels the turn-scoped
+        # guard implicitly — a stale guard finds chat_turn already reset and
+        # is ignored. Only a truly hung loop is cleared here.
+        Process.send_after(self(), {:chat_guard, turn}, @chat_result_timeout_ms)
 
         {:noreply,
          socket
@@ -233,6 +248,7 @@ defmodule DshBeamWeb.ConsoleLive do
            chat_text: "",
            chat_busy: true,
            chat_task: task,
+           chat_turn: turn,
            chat_started_at: System.system_time(:second)
          )
          |> refresh()}
@@ -260,7 +276,9 @@ defmodule DshBeamWeb.ConsoleLive do
     end
 
     {:noreply,
-     socket |> assign(chat_busy: false, chat_task: nil, chat_started_at: nil) |> refresh()}
+     socket
+     |> assign(chat_busy: false, chat_task: nil, chat_turn: nil, chat_started_at: nil)
+     |> refresh()}
   end
 
   def handle_event("clear_chat", _params, socket) do
@@ -326,13 +344,33 @@ defmodule DshBeamWeb.ConsoleLive do
         {_mode, value} -> {:env, value}
       end
 
+    receive_timeout =
+      case params["receive_timeout"] do
+        raw when is_binary(raw) and raw != "" ->
+          case Integer.parse(raw) do
+            {value, ""} when value > 0 -> value
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end
+
     result =
       case DshBeam.Context.get(socket.assigns.ctx, :llm) do
         {:ok, llm} ->
           opts = [base_url: base_url, model: model]
           opts = if credential, do: Keyword.put(opts, :credential, credential), else: opts
+
+          opts =
+            if receive_timeout,
+              do: Keyword.put(opts, :receive_timeout, receive_timeout),
+              else: opts
+
           configure_result = DshBeam.Llm.configure(llm, opts)
-          persisted = persist_llm(socket.assigns.runtime, base_url, model, credential)
+
+          persisted =
+            persist_llm(socket.assigns.runtime, base_url, model, credential, receive_timeout)
 
           case {configure_result, persisted} do
             {:ok, true} -> {:ok, "saved + persisted (next boot applies the stored config)"}
@@ -539,25 +577,62 @@ defmodule DshBeamWeb.ConsoleLive do
   defp parse_setting(_setting, _raw), do: :invalid
 
   @impl true
-  def handle_info({:chat_result, _text, result}, socket) do
-    # The loop already wrote every step (user → tool_call → tool_result →
-    # assistant, or error) to the session, so re-reading it renders the turn.
-    # Only a hard failure (the loop fiber died mid-call) surfaces here.
+  def handle_info({:chat_result, turn, _text, result}, socket) do
+    # Turn-scoped: ignore a result for a turn that already settled (the user
+    # stopped it, or the watchdog fired) so it can never clobber a newer ask.
     socket =
-      case result do
-        {:ok, _answer, _trace} ->
-          assign(socket, chat_busy: false, chat_task: nil, chat_started_at: nil)
+      if socket.assigns.chat_turn == turn do
+        case result do
+          {:ok, _answer, _trace} ->
+            assign(socket, chat_busy: false, chat_task: nil, chat_turn: nil, chat_started_at: nil)
 
-        {:error, reason} ->
-          assign(socket,
-            chat_busy: false,
-            chat_task: nil,
-            chat_started_at: nil,
-            chat_error: inspect(reason)
-          )
+          {:error, reason} ->
+            assign(socket,
+              chat_busy: false,
+              chat_task: nil,
+              chat_turn: nil,
+              chat_started_at: nil,
+              chat_error: inspect(reason)
+            )
+        end
+      else
+        socket
       end
 
     {:noreply, refresh(socket)}
+  end
+
+  # Watchdog: the loop fiber hung (blocked outside the Req transport budget)
+  # — kill the task and settle the pane with a visible timeout error instead
+  # of leaving chat_busy true forever.
+  def handle_info({:chat_guard, turn}, socket) do
+    if socket.assigns.chat_turn == turn do
+      if is_pid(socket.assigns.chat_task), do: Process.exit(socket.assigns.chat_task, :kill)
+
+      case DshBeam.Context.get(socket.assigns.ctx, :session) do
+        {:ok, session} when is_pid(session) ->
+          DshBeam.Session.append(session, %{
+            "role" => "error",
+            "content" => "chat timed out after #{@chat_result_timeout_ms}ms (loop task killed)"
+          })
+
+        _ ->
+          :ok
+      end
+
+      {:noreply,
+       socket
+       |> assign(
+         chat_busy: false,
+         chat_task: nil,
+         chat_turn: nil,
+         chat_started_at: nil,
+         chat_error: "timed out after #{@chat_result_timeout_ms}ms"
+       )
+       |> refresh()}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_info({:dsh_event, event}, socket) do
@@ -774,13 +849,15 @@ defmodule DshBeamWeb.ConsoleLive do
     end
   end
 
-  defp persist_llm(runtime, base_url, model, credential) do
+  defp persist_llm(runtime, base_url, model, credential, receive_timeout) do
     store = DshBeam.Runtime.settings(runtime)
 
     :ok == DshBeam.Settings.put(store, DshBeam.Llm.Plugin, :base_url, base_url) and
       :ok == DshBeam.Settings.put(store, DshBeam.Llm.Plugin, :model, model) and
       (is_nil(credential) or
-         :ok == DshBeam.Settings.put(store, DshBeam.Llm.Plugin, :credential, credential))
+         :ok == DshBeam.Settings.put(store, DshBeam.Llm.Plugin, :credential, credential)) and
+      (is_nil(receive_timeout) or
+         :ok == DshBeam.Settings.put(store, DshBeam.Llm.Plugin, :receive_timeout, receive_timeout))
   end
 
   defp loop_pid(runtime) do

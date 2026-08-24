@@ -7,9 +7,15 @@ defmodule DshBeam.Llm.Adapter.Req do
 
   `use DshBeam.Llm.Adapter` makes this module both a plugin (providing
   `:llm_adapter`) and the transport contract's implementation (ADR-0015).
+
+  The response budget comes from the adapter config's `:receive_timeout` (the
+  LLM provider's typed setting, default 120s): a slow reasoning model can be
+  given a longer budget without recompiling anything.
   """
 
   use DshBeam.Llm.Adapter
+
+  @default_receive_timeout 300_000
 
   @impl true
   def complete(config, messages, opts) do
@@ -30,7 +36,8 @@ defmodule DshBeam.Llm.Adapter.Req do
       {"content-type", "application/json"}
     ]
 
-    options = [json: body, headers: headers, receive_timeout: 120_000]
+    timeout = Map.get(config, :receive_timeout, @default_receive_timeout)
+    options = [json: body, headers: headers, receive_timeout: timeout]
 
     # A :plug in the adapter config replaces the transport (Req.Test.json):
     # the HTTP layer is the mock boundary for offline tests.
