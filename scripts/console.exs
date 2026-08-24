@@ -21,7 +21,9 @@ settings_path = Path.join([File.cwd!(), ".dsh", "settings.json"])
 entries = [
   %{id: :console, plugin: DshBeam.Console, config: [server: true], disabled: false},
   %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
-  %{id: :workspace, plugin: DshBeam.Workspace, config: [], disabled: false},
+  %{id: :workspace, plugin: DshBeam.Workspace,
+       config: [boot_prune: true, repo: File.cwd!(), keep: [File.cwd!()]],
+       disabled: false},
   %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [], disabled: false},
   %{id: :adapter, plugin: DshBeam.Llm.Adapter.Req, config: [], disabled: false},
   %{id: :shell, plugin: DshBeam.Shell.Plugin, config: [], disabled: false},
