@@ -12,7 +12,7 @@ capability — and the substrate makes them compose, swap, and roll back.
 ```bash
 git submodule update --init
 mix deps.get
-mix test                              # 140 tests, one per paper guarantee
+mix test                              # 148 tests, one per paper guarantee
 
 DEEPSEEK_API_KEY=sk-... mix run scripts/console.exs   # http://127.0.0.1:4001
 ```
@@ -30,6 +30,8 @@ Start here, then follow the links:
 - **[PLAN.md](PLAN.md)** — the research question, the OTP mapping, the milestone
   history, and the conclusion (where OTP isolation and the paper's model
   reinforce vs collide).
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — how to contribute, and where to help
+  (the roadmap items as starting points).
 - **[REVIEW.md](REVIEW.md)** — the review history and fix log.
 
 ## What's inside
@@ -51,13 +53,55 @@ reference/          the TS harness as a git submodule (porting source)
 
 ## The console
 
-One page shows the whole harness: the composition (fiber states, restarts,
-kill/crash), bindings, the event feed, the workspace sidebar (list/create/
-switch/close git-worktree sessions), the chat pane (agent loop, multi-turn,
-real-time tool trace), the trajectory panel (session events grouped by turn),
-the todo panel (the agent's plan as a session projection), the llm settings,
-the plugin inventory, and a creator/sandbox editor with **export plugin
-(.exs)** — an edited plugin becomes a deployable script.
+The console now mirrors the reference DeepSeek Harness web UI, built entirely
+as `ui_slot` plugins (panels register into slots — the shell never edits them):
+
+- **Three-column shell** — sidebar | conversation | details, dark theme
+  (`body[data-ds-dark-theme]`), a collapsible sidebar (280px ↔ 56px rail), and
+  a **draggable sidebar resize** handle.
+- **Workspace sidebar** — a server-side folder picker (browse the filesystem),
+  session list with a subtle current-indicator dot, folder-name titles, and
+  wrapping paths. Sessions open any folder: a `git worktree` when possible,
+  **in-place otherwise** (no `:not_a_git_repo` refusal).
+- **Conversation** — Chat / Trajectory tabs; user bubble, assistant **markdown**
+  (Earmark), terminal-style **tool cards** (bash command verbatim), role icons,
+  the "Deep diving…" turn status + elapsed clock, **back-to-bottom** + stream
+  follow, and an **auto-growing composer** with an in-card send/stop. Chat is
+  gated on an active workspace session.
+- **Settings modal** — Models (provider card + API-key form), Plugins
+  (configurable accordion cards), Agent presets (Demo/Agent/Chat, set-default /
+  apply / duplicate / delete), General (default preset + workspace root), plus
+  Composition / Bindings / Events / Creator (define + export plugin).
+
+### Self-modification
+
+The agent loop can author and reuse plugins from inside any workspace:
+`define_plugin` compiles + mounts a plugin live (in-process), and `save_plugin`
+persists its source to `~/.dsh/plugins`, which the console **loads on boot** —
+so a plugin made in one project is available in every other.
+
+### System prompt as a plugin registry
+
+A `prompt_section` DSL lets any plugin contribute its own guidance; the agent
+loop assembles the model-facing prompt from the harness identity + persona +
+every plugin's sections (the reference's `SystemPrompt` registry), instead of a
+hardcoded one-liner.
+
+## Roadmap — not yet done
+
+- **Session persistence** — sessions are still in-memory (ETS); a JSONL or
+  SQLite provider + roster restore is the next durability step.
+- **Custom agent-preset persistence** — only the `default_preset` survives a
+  restart; duplicated presets are in-memory.
+- **True loop "stop"** — the send/stop control is best-effort (it unblocks the
+  pane; the synchronous loop fiber may still finish).
+- **Details-column resize** — only the sidebar is draggable today.
+- **Richer conversation nodes** — retry, compaction, and reasoning rows from
+  the reference are not ported; assistant markdown has no syntax highlighting.
+- **More tools** — bash / fs / todo / calc (plus the self-modification tools);
+  no web search or subagent capability yet.
+- **Redefine exposure** — `DshBeam.Creator.redefine/3` (transactional hot swap)
+  exists but is not yet exposed to the agent loop or UI.
 
 ## reference/ submodule
 
