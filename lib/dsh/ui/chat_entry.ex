@@ -19,6 +19,9 @@ defmodule DshBeam.Ui.ChatEntry do
         <div class="msg-assistant">
           <span class="role-icon role-assistant" aria-hidden="true">✦</span>
           <div class="markdown"><%= markdown(@entry.content) %></div>
+          <button type="button" class="copy-action" data-copy={@entry.content} aria-label="copy">
+            <DshBeamWeb.Icons.copy />
+          </button>
         </div>
       <% :tool_call -> %>
         <div class="tool-card">

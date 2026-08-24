@@ -362,6 +362,15 @@ defmodule DshBeamWeb.Layouts do
             width: 20px; height: 24px; font-size: 13px; line-height: 1;
           }
           .role-assistant { color: var(--dsw-static-deepseek-400, #679efe); }
+          .copy-action {
+            flex: none; display: inline-flex; align-items: center; justify-content: center;
+            width: 24px; height: 24px; margin-top: 1px; border: none; border-radius: 6px;
+            background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer;
+            opacity: 0; transition: opacity 120ms ease;
+          }
+          .msg-assistant:hover .copy-action { opacity: 1; }
+          .copy-action:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+          .copy-action.copied { color: var(--dsw-static-green-500, #34d399); }
           .role-tool { color: var(--dsw-static-green-500, #34d399); }
           .role-error { color: var(--dsw-static-red-400, #fb7185); }
           .turn-status {
@@ -845,6 +854,21 @@ defmodule DshBeamWeb.Layouts do
           });
           liveSocket.connect();
           window.addEventListener("phx:page-loading-stop", () => liveSocket.enableDebug());
+
+          // Delegated copy: a .copy-action click writes its data-copy to the
+          // clipboard and flips to a checkmark for a second (reference
+          // MessageIconActions copy). Delegated so it survives morphdom without
+          // a per-message hook id.
+          document.addEventListener('click', (event) => {
+            const btn = event.target.closest('.copy-action');
+            if (!btn) return;
+            const text = btn.dataset.copy || '';
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text);
+            }
+            btn.classList.add('copied');
+            setTimeout(() => btn.classList.remove('copied'), 1000);
+          });
         </script>
       </body>
     </html>
