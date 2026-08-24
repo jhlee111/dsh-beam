@@ -205,13 +205,15 @@ defmodule DshBeam.ConsoleTest do
     # page refresh re-reads it: the chat pane is derived, not accumulated
     {:ok, session_pid} = DshBeam.Context.get(ctx, :session)
 
+    structural = ["turn_start", "turn_end", "request"]
+    content = Enum.reject(DshBeam.Session.all(session_pid), &(&1["role"] in structural))
+
     assert [
              %{"role" => "user"},
              %{"role" => "tool_call"},
              %{"role" => "tool_result"},
              %{"role" => "assistant"}
-           ] =
-             DshBeam.Session.all(session_pid)
+           ] = content
 
     # the rendered pane mirrors the session (tool call + result + answer)
     assert render(view) =~ "tool_call"

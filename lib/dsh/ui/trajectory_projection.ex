@@ -2,10 +2,15 @@ defmodule DshBeam.Ui.TrajectoryProjection do
   @moduledoc """
   The trajectory view's projection — the reference `deriveTrajectoryLayout`
   (turn → groups → cells), on the BEAM. It folds the flat session log into
-  turns (a `user` event opens a turn) of typed cells, each carrying a
-  `kind`/`label`/`text` the `DshBeam.Ui.Panel.Trajectory` renders as a compact
-  kind-tagged ledger. Pure and testable; `filter/2` narrows it by a search
-  query without touching the log.
+  turns of typed cells, each carrying a `kind`/`label`/`text` the
+  `DshBeam.Ui.Panel.Trajectory` renders as a compact kind-tagged ledger.
+
+  A turn opens at a `turn_start` event (falling back to `user` for logs that
+  predate the structural events); the agent loop also records a per-model-call
+  `request` event (token usage + wall-clock timing) and a `turn_end` event
+  (outcome reason). `turn_start` is a pure boundary and produces no cell.
+  Pure and testable; `filter/2` narrows it by a search query without touching
+  the log.
   """
 
   @typedoc "One trajectory cell."
@@ -16,7 +21,11 @@ defmodule DshBeam.Ui.TrajectoryProjection do
   def from_events(events) do
     events
     |> group_turns()
-    |> Enum.map(&Enum.map(&1, fn event -> cell(event) end))
+    |> Enum.map(fn turn ->
+      turn
+      |> Enum.reject(&(&1["role"] == "turn_start"))
+      |> Enum.map(&cell/1)
+    end)
   end
 
   @doc "Map one session event to a trajectory cell."
@@ -48,6 +57,17 @@ defmodule DshBeam.Ui.TrajectoryProjection do
   def cell(%{"role" => "error", "content" => content}),
     do: %{kind: :error, label: "ERROR", text: content}
 
+  def cell(%{
+        "role" => "request",
+        "usage" => usage,
+        "started_at" => started_at,
+        "completed_at" => completed_at
+      }),
+      do: %{kind: :request, label: "REQUEST", text: request_text(usage, started_at, completed_at)}
+
+  def cell(%{"role" => "turn_end", "reason" => reason}),
+    do: %{kind: :turn_end, label: "END", text: reason}
+
   def cell(other), do: %{kind: :other, label: "EVENT", text: inspect(other)}
 
   @doc """
@@ -68,9 +88,13 @@ defmodule DshBeam.Ui.TrajectoryProjection do
   end
 
   defp group_turns(events) do
+    # A turn opens at turn_start; logs that predate the structural events fall
+    # back to the user event as the boundary.
+    boundary = if Enum.any?(events, &(&1["role"] == "turn_start")), do: "turn_start", else: "user"
+
     {turns, current} =
       Enum.reduce(events, {[], []}, fn event, {turns, current} ->
-        if event["role"] == "user" do
+        if event["role"] == boundary do
           {[Enum.reverse(current) | turns], [event]}
         else
           {turns, [event | current]}
@@ -89,6 +113,12 @@ defmodule DshBeam.Ui.TrajectoryProjection do
   end
 
   defp truncate(text), do: inspect(text)
+
+  # One request's compact summary: wall-clock duration plus token usage.
+  defp request_text(usage, started_at, completed_at) do
+    duration = completed_at - started_at
+    "#{duration}ms" <> usage_suffix(usage)
+  end
 
   # A compact "in/out" token summary for a usage map, or "" when absent.
   defp usage_suffix(nil), do: ""

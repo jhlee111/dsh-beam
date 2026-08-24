@@ -21,6 +21,12 @@ defmodule DshBeam.AgentTest do
 
   defp loop_entry, do: %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false}
 
+  # The loop now records structural events (turn_start/request/turn_end); the
+  # content assertions below care only about the user-visible events.
+  defp content_events(events) do
+    Enum.reject(events, &(&1["role"] in ["turn_start", "turn_end", "request"]))
+  end
+
   test "the loop dispatches a tool call and answers" do
     {:ok, runtime} =
       DshBeam.Runtime.start_link(
@@ -54,7 +60,7 @@ defmodule DshBeam.AgentTest do
     # the tool call and result recorded chronologically: user, tool_call,
     # tool_result, assistant.
     {:ok, session} = DshBeam.Context.get(ctx, :session)
-    assert DshBeam.Session.count(session) == 4
+    assert content_events(DshBeam.Session.all(session)) |> length() == 4
 
     assert [
              %{"role" => "user"},
@@ -62,7 +68,15 @@ defmodule DshBeam.AgentTest do
              %{"role" => "tool_result"},
              %{"role" => "assistant"}
            ] =
-             DshBeam.Session.all(session)
+             content_events(DshBeam.Session.all(session))
+
+    # the structural events wrap the content: one turn, one request per model
+    # call (the scripted adapter is called twice), and a completed turn_end
+    assert DshBeam.Session.all(session) |> Enum.count(&(&1["role"] == "turn_start")) == 1
+    assert DshBeam.Session.all(session) |> Enum.count(&(&1["role"] == "request")) == 2
+
+    assert [%{"role" => "turn_end", "reason" => "completed"}] =
+             DshBeam.Session.all(session) |> Enum.filter(&(&1["role"] == "turn_end"))
   end
 
   test "run_trace/2 returns the loop's step trace" do
@@ -121,11 +135,12 @@ defmodule DshBeam.AgentTest do
     assert Enum.any?(first_messages, &(&1["role"] == "user" and &1["content"] == "second task"))
 
     # the session log accumulated both turns: turn 1 = user, tool_call,
-    # tool_result, assistant (4 events); turn 2 = user, assistant (the scripted
-    # model sees the replayed tool turn and answers directly) — 6 events total
+    # tool_result, assistant (4 content events); turn 2 = user, assistant — 6
+    # content events total, plus two turn_start/turn_end pairs.
     ctx = DshBeam.Runtime.context(runtime)
     {:ok, session} = DshBeam.Context.get(ctx, :session)
-    assert DshBeam.Session.count(session) == 6
+    assert content_events(DshBeam.Session.all(session)) |> length() == 6
+    assert DshBeam.Session.all(session) |> Enum.count(&(&1["role"] == "turn_start")) == 2
   end
 
   test "the projection round-trips a tool turn into the model wire shape" do
