@@ -7,6 +7,22 @@ reactive coeffects, and the L-Unload guard.
 A plugin is the unit of everything — a tool, a UI panel, a safety guard, a
 capability — and the substrate makes them compose, swap, and roll back.
 
+## Origins
+
+The idea and the plugin architecture are not ours. They come from two sources
+this PoC re-implements on Elixir/OTP:
+
+- **[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)** — the
+  open-source TypeScript agent harness by [DeepSeek AI](https://deepseek.com),
+  where *everything is a plugin*.
+- **[_A Programming Paradigm for Spatiotemporal Composability_](https://github.com/cordiverse/paper)**
+  — the paper behind [Cordis](https://github.com/cordiverse/cordis), the
+  substrate the harness is built on (revertible effects + reactive coeffects).
+
+`dsh-beam` is an independent Elixir/OTP re-implementation for study. The TS
+harness it is ported from lives in `reference/deepseek-harness` (a git
+submodule).
+
 > ## ⚠️ USE AT YOUR OWN RISK
 >
 > There are **no guard rails yet** — no approval, permission, or confirmation
