@@ -72,7 +72,9 @@ entries = [
     name: DshBeam.Console.Supervisor
   )
 
-{:ok, runtime} = DshBeam.Console.Runtime
+# The supervisor owns the runtime process; address it by its registered name
+# so the handle stays valid across a restart (a pid would go stale).
+runtime = DshBeam.Console.Runtime
 
 # Load saved plugins (~/.dsh/plugins/*.exs) so a plugin saved in one workspace
 # is available in every other project the console opens.
