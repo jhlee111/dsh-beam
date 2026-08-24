@@ -327,6 +327,7 @@ defmodule DshBeam.Runtime do
       |> Keyword.merge(entry.config)
       |> Keyword.put_new(:id, entry.id)
       |> Keyword.put_new(:runtime, self())
+      |> Keyword.put_new(:audit, state.audit)
 
     spec = %{
       id: {DshBeam.Plugin, entry.id},

@@ -4,20 +4,22 @@ defmodule DshBeam.CrashAudit.Plugin do
   read or subscribe to the crash trail through the composition instead of
   reaching for a global path.
 
-  Provides `:crash_audit` — the audit GenServer owned by the runtime (the
-  runtime resolves it from the `:runtime` config every entry receives, so no
-  audit pid has to be threaded through the entries). Read it with
-  `DshBeam.CrashAudit.all/1` or live-subscribe with
-  `DshBeam.CrashAudit.subscribe/1`. When the runtime was started without an
-  `:audit_path` the provided value is `nil` (the audit is opt-in).
+  Provides `:crash_audit` — the audit GenServer owned by the runtime. The
+  runtime injects the audit pid into every entry's config (`:audit`), so this
+  plugin does not have to call back into the runtime at mount time (that
+  would deadlock: the runtime is busy applying the composition). When the
+  runtime was started without an `:audit_path` the provided value is `nil`
+  (the audit is opt-in).
+
+  Read it with `DshBeam.CrashAudit.all/1` or live-subscribe with
+  `DshBeam.CrashAudit.subscribe/1`.
   """
 
   use DshBeam.Plugin
 
   @impl DshBeam.Plugin
-  def mount(ctx, opts) do
-    runtime = Keyword.fetch!(opts, :runtime)
-    audit = DshBeam.Runtime.audit(runtime)
-    {:ok, [], %{crash_audit: audit}, %{audit: audit, ctx: ctx}}
+  def mount(_ctx, opts) do
+    audit = Keyword.get(opts, :audit)
+    {:ok, [], %{crash_audit: audit}, %{audit: audit}}
   end
 end

@@ -252,3 +252,18 @@ console.
 - **`DshBeam.Runtime.audit/1`** — accessor for the owned audit pid (`nil`
   when no `audit_path` was configured; tests/library users stay
   side-effect-free).
+
+### Crash audit events inside the session log
+
+- **`DshBeam.CrashAudit.SessionBridge`** — a fiber that depends on `:session`
+  and `:crash_audit` and interleaves every crash event as a
+  `%{"role" => "crash_audit", kind, id, reason, timestamp}` row in the
+  session log, so a crashed plugin is visible *inside the conversation* — the
+  chat/trajectory projections read the same append-only log, so the crash
+  shows up as a row in the UI, not only in `.dsh/crash-audit.log`.
+- The bridge drains the retained audit window on activation (missed events
+  during boot are caught up) and dedupes by `{timestamp, kind, id}`, so a
+  restarted/re-activated bridge never appends a crash twice.
+- The runtime now injects the audit pid into every entry's mount config
+  (`:audit`), so `CrashAudit.Plugin` exposes it without calling back into the
+  runtime (which would deadlock mid-reconcile).

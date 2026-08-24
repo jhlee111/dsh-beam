@@ -61,6 +61,11 @@ defmodule DshBeam.CrashAudit do
     GenServer.call(audit, :subscribe)
   end
 
+  @doc "Unsubscribe the caller: stop receiving {:crash_audit, event} messages."
+  def unsubscribe(audit) do
+    GenServer.call(audit, :unsubscribe)
+  end
+
   @impl true
   def init(opts) do
     path = Keyword.get(opts, :path) || default_path()
@@ -101,6 +106,17 @@ defmodule DshBeam.CrashAudit do
       _ ->
         ref = Process.monitor(owner)
         {:reply, :ok, %{state | subscribers: Map.put(state.subscribers, owner, ref)}}
+    end
+  end
+
+  def handle_call(:unsubscribe, {owner, _tag}, state) do
+    case Map.pop(state.subscribers, owner) do
+      {nil, subscribers} ->
+        {:reply, :ok, %{state | subscribers: subscribers}}
+
+      {ref, subscribers} ->
+        Process.demonitor(ref, [:flush])
+        {:reply, :ok, %{state | subscribers: subscribers}}
     end
   end
 
