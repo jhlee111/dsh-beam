@@ -25,7 +25,8 @@ mix test
 ## The live console
 
 ```bash
-DEEPSEEK_API_KEY=sk-... mix run scripts/console.exs   # http://127.0.0.1:4001
+DEEPSEEK_API_KEY=sk-... mix run scripts/console.exs   # http://127.0.0.1:4888
+DSH_BEAM_PORT=5000 mix run scripts/console.exs        # DSH_BEAM_PORT overrides the default port
 ```
 
 - The page seeds the full agent composition (`session`, `llm`, `shell`, `bash`,
