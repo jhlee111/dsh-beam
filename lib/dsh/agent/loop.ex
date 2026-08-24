@@ -25,7 +25,12 @@ defmodule DshBeam.Agent.Loop do
 
   @doc "Run one task through the model↔tool loop. Returns {:ok, answer}."
   def run(loop, task) when is_pid(loop) and is_binary(task) do
-    case :gen_statem.call(loop, {:run, task}) do
+    run(loop, task, nil)
+  end
+
+  @doc "Run one task under a cancellation token. Returns {:ok, answer}."
+  def run(loop, task, token) when is_pid(loop) and is_binary(task) do
+    case :gen_statem.call(loop, {:run, task, token}) do
       {:ok, answer, _trace} -> {:ok, answer}
       other -> other
     end
@@ -33,19 +38,32 @@ defmodule DshBeam.Agent.Loop do
 
   @doc "Run one task and return {:ok, answer, trace} (the loop's steps)."
   def run_trace(loop, task) when is_pid(loop) and is_binary(task) do
-    :gen_statem.call(loop, {:run_trace, task})
+    run_trace(loop, task, nil)
+  end
+
+  @doc "Run one task under a cancellation token, returning the step trace."
+  def run_trace(loop, task, token) when is_pid(loop) and is_binary(task) do
+    :gen_statem.call(loop, {:run_trace, task, token})
   end
 
   @impl true
   def handle_event({:call, from}, {:run, task}, _state, data) do
-    {:keep_state_and_data, [{:reply, from, run_loop(data, task)}]}
+    {:keep_state_and_data, [{:reply, from, run_loop(data, task, nil)}]}
+  end
+
+  def handle_event({:call, from}, {:run, task, token}, _state, data) do
+    {:keep_state_and_data, [{:reply, from, run_loop(data, task, token)}]}
   end
 
   def handle_event({:call, from}, {:run_trace, task}, _state, data) do
-    {:keep_state_and_data, [{:reply, from, run_loop(data, task)}]}
+    {:keep_state_and_data, [{:reply, from, run_loop(data, task, nil)}]}
   end
 
-  defp run_loop(data, task) do
+  def handle_event({:call, from}, {:run_trace, task, token}, _state, data) do
+    {:keep_state_and_data, [{:reply, from, run_loop(data, task, token)}]}
+  end
+
+  defp run_loop(data, task, token) do
     case DshBeam.Context.resolve(data.ctx) do
       {:active, view} ->
         max_steps = Keyword.get(data.config, :max_steps, 20)
@@ -74,7 +92,8 @@ defmodule DshBeam.Agent.Loop do
           0,
           max_steps,
           [],
-          DshBeam.Guard.RepeatToolReminder.new()
+          DshBeam.Guard.RepeatToolReminder.new(),
+          token
         )
 
       _ ->
@@ -82,49 +101,68 @@ defmodule DshBeam.Agent.Loop do
     end
   end
 
-  defp loop(_ctx, _llm, session, _messages, step, max_steps, _trace, _repeat)
+  defp loop(_ctx, _llm, session, _messages, step, max_steps, _trace, _repeat, _token)
        when step >= max_steps do
     _ = DshBeam.Session.append(session, %{"role" => "error", "content" => "max_steps"})
     {:error, :max_steps}
   end
 
-  defp loop(ctx, llm, session, messages, step, max_steps, trace, repeat) do
-    tools = available_tools(ctx)
+  defp loop(ctx, llm, session, messages, step, max_steps, trace, repeat, token) do
+    if DshBeam.Agent.Cancel.cancelled?(token) do
+      abort(session)
+      {:error, :stopped, Enum.reverse(trace)}
+    else
+      tools = available_tools(ctx)
 
-    case DshBeam.Llm.chat(llm, messages, tools: tools) do
-      {:ok, %{finish_reason: :tool_calls, tool_calls: [_ | _] = calls}} ->
-        {assistant, tool_messages, steps} = dispatch(ctx, calls)
+      case DshBeam.Llm.chat(llm, messages, tools: tools, cancel: token) do
+        {:ok, %{finish_reason: :tool_calls, tool_calls: [_ | _] = calls}} ->
+          {assistant, tool_messages, steps} = dispatch(ctx, calls, token)
 
-        # record the whole assistant turn — the model-issued tool calls AND
-        # their results — into the session (chronological), so the chat pane
-        # shows tool execution, survives a refresh, and the NEXT turn replays
-        # the full prefix (cache-friendly, like the reference's deriveMessages).
-        append_steps(session, calls, tool_messages)
+          # record the whole assistant turn — the model-issued tool calls AND
+          # their results — into the session (chronological), so the chat pane
+          # shows tool execution, survives a refresh, and the NEXT turn replays
+          # the full prefix (cache-friendly, like the reference's deriveMessages).
+          append_steps(session, calls, tool_messages)
 
-        # the harness's guard/repeat-tool-reminder: count consecutive identical
-        # tool calls and inject an advisory nudge when a threshold is hit
-        {repeat, reminder} = track_repeats(repeat, calls)
-        messages = maybe_remind(messages ++ [assistant | tool_messages], reminder)
+          # the harness's guard/repeat-tool-reminder: count consecutive identical
+          # tool calls and inject an advisory nudge when a threshold is hit
+          {repeat, reminder} = track_repeats(repeat, calls)
+          messages = maybe_remind(messages ++ [assistant | tool_messages], reminder)
 
-        loop(
-          ctx,
-          llm,
-          session,
-          messages,
-          step + 1,
-          max_steps,
-          Enum.reverse(steps) ++ trace,
-          repeat
-        )
+          loop(
+            ctx,
+            llm,
+            session,
+            messages,
+            step + 1,
+            max_steps,
+            Enum.reverse(steps) ++ trace,
+            repeat,
+            token
+          )
 
-      {:ok, %{content: content}} ->
-        _ = DshBeam.Session.append(session, %{"role" => "assistant", "content" => content})
-        {:ok, content, Enum.reverse(trace)}
+        {:ok, %{content: content}} ->
+          _ = DshBeam.Session.append(session, %{"role" => "assistant", "content" => content})
+          {:ok, content, Enum.reverse(trace)}
 
-      {:error, reason} ->
-        _ = DshBeam.Session.append(session, %{"role" => "error", "content" => inspect(reason)})
-        {:error, reason}
+        {:error, :cancelled} ->
+          abort(session)
+          {:error, :stopped, Enum.reverse(trace)}
+
+        {:error, reason} ->
+          _ = DshBeam.Session.append(session, %{"role" => "error", "content" => inspect(reason)})
+          {:error, reason}
+      end
     end
+  end
+
+  # Record a user-initiated stop as a terminal turn event. The loop is the
+  # single writer of the turn's session events, so the UI only signals the
+  # token and the loop authors this row (the reference's `turn/end` reason
+  # `aborted`).
+  defp abort(session) do
+    _ = DshBeam.Session.append(session, %{"role" => "error", "content" => "stopped by user"})
+    :ok
   end
 
   defp track_repeats(repeat, calls) do
@@ -184,10 +222,10 @@ defmodule DshBeam.Agent.Loop do
     end)
   end
 
-  defp dispatch(ctx, calls) do
+  defp dispatch(ctx, calls, token) do
     {tool_messages, steps} =
       calls
-      |> Enum.map(&invoke_tool(ctx, &1))
+      |> Enum.map(&invoke_tool(ctx, &1, token))
       |> Enum.reduce({[], []}, fn {tool_message, step_call, step_result}, {tms, steps} ->
         {tms ++ [tool_message], steps ++ [step_call, step_result]}
       end)
@@ -211,31 +249,43 @@ defmodule DshBeam.Agent.Loop do
     {assistant, tool_messages, steps}
   end
 
-  defp invoke_tool(ctx, %{id: id, name: name, arguments: arguments}) do
-    args = decode_arguments(arguments)
+  defp invoke_tool(ctx, %{id: id, name: name, arguments: arguments}, token) do
+    # A token cancelled while the model's tool calls are being dispatched skips
+    # the remaining calls: each records a synthetic "aborted before dispatch"
+    # result (the reference's appendSkippedToolCall) so the session replay stays
+    # valid, and the loop's next step boundary turns it into a stop.
+    if DshBeam.Agent.Cancel.cancelled?(token) do
+      result_string = "Error: tool call aborted before dispatch"
 
-    result_string =
-      case safe_atom(name) do
-        nil ->
-          "error: unknown tool #{name}"
+      tool_message = %{"role" => "tool", "tool_call_id" => id, "content" => result_string}
 
-        tool_name ->
-          case DshBeam.Context.get(ctx, tool_name) do
-            {:ok, provider} ->
-              # the harness's guard/timeout-policy: read the tool's declared
-              # cooperative budget and bound the call so a hung tool cannot
-              # stall the loop
-              DshBeam.Guard.TimeoutPolicy.invoke(provider, tool_name, args, timeout(tool_name))
-              |> result_string()
+      {tool_message, {:tool_call, name, %{}}, {:tool_result, name, result_string}}
+    else
+      args = decode_arguments(arguments)
 
-            :not_found ->
-              "error: tool #{name} not available"
-          end
-      end
+      result_string =
+        case safe_atom(name) do
+          nil ->
+            "error: unknown tool #{name}"
 
-    tool_message = %{"role" => "tool", "tool_call_id" => id, "content" => result_string}
+          tool_name ->
+            case DshBeam.Context.get(ctx, tool_name) do
+              {:ok, provider} ->
+                # the harness's guard/timeout-policy: read the tool's declared
+                # cooperative budget and bound the call so a hung tool cannot
+                # stall the loop
+                DshBeam.Guard.TimeoutPolicy.invoke(provider, tool_name, args, timeout(tool_name))
+                |> result_string()
 
-    {tool_message, {:tool_call, name, args}, {:tool_result, name, result_string}}
+              :not_found ->
+                "error: tool #{name} not available"
+            end
+        end
+
+      tool_message = %{"role" => "tool", "tool_call_id" => id, "content" => result_string}
+
+      {tool_message, {:tool_call, name, args}, {:tool_result, name, result_string}}
+    end
   end
 
   defp safe_atom(name) do

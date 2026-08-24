@@ -44,12 +44,64 @@ defmodule DshBeam.Llm.Adapter.Req do
     options =
       if plug = Map.get(config, :plug), do: Keyword.put(options, :plug, plug), else: options
 
+    case opts[:cancel] do
+      nil ->
+        request(url, options)
+
+      token ->
+        # A cooperative cancel token turns the blocking transport into a
+        # cancellable worker task: the adapter polls the token while the
+        # request runs and brutal-kills the task on cancellation, so a user
+        # stop aborts an in-flight model call instead of waiting it out.
+        cancellable_request(url, options, token, timeout)
+    end
+  end
+
+  defp request(url, options) do
     case Req.post(url, options) do
       {:ok, %{status: 200, body: response_body}} -> parse(response_body)
       {:ok, %{status: status, body: response_body}} -> {:error, {:http, status, response_body}}
       {:error, reason} -> {:error, {:http_error, reason}}
     end
   end
+
+  defp cancellable_request(url, options, token, timeout) do
+    # The transport runs detached from the adapter fiber: unlinked so a kill
+    # (or an unexpected transport crash) never surfaces as a linked-process
+    # exit that would tear the adapter down via the default exit hook. The
+    # alias monitor behind Task.yield still tracks its result.
+    task = Task.async(fn -> Req.post(url, options) end)
+    Process.unlink(task.pid)
+    poll(task, token, System.monotonic_time(:millisecond) + timeout + 1000)
+  end
+
+  defp poll(task, token, deadline) do
+    cond do
+      DshBeam.Agent.Cancel.cancelled?(token) ->
+        Task.shutdown(task, :brutal_kill)
+        {:error, :cancelled}
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        Task.shutdown(task, :brutal_kill)
+        {:error, {:http_error, :timeout}}
+
+      true ->
+        case Task.yield(task, 25) do
+          # Task.yield wraps the task's own return value, so the Req result
+          # (already an {:ok, response} | {:error, reason}) is one level down.
+          {:ok, result} -> normalize_req(result)
+          {:exit, reason} -> {:error, {:http_error, reason}}
+          nil -> poll(task, token, deadline)
+        end
+    end
+  end
+
+  defp normalize_req({:ok, %{status: 200, body: response_body}}), do: parse(response_body)
+
+  defp normalize_req({:ok, %{status: status, body: response_body}}),
+    do: {:error, {:http, status, response_body}}
+
+  defp normalize_req({:error, reason}), do: {:error, {:http_error, reason}}
 
   defp parse(%{"choices" => [choice | _]} = response) do
     message = choice["message"] || %{}

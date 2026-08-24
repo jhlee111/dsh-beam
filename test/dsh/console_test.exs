@@ -469,6 +469,24 @@ defmodule DshBeam.ConsoleTest do
     assert render(view) =~ "{:exited, :killed}"
   end
 
+  test "the details column resizes through its handle hook", %{session: session} do
+    {:ok, view, html} = live(build_conn(), "/", session: session)
+
+    # the handle renders and the default 280px details track is in the grid
+    assert html =~ "details-handle"
+    assert html =~ "minmax(0, 1fr) 280px"
+
+    html = render_hook(view, "resize_details", %{"width" => "400"})
+    assert html =~ "minmax(0, 1fr) 400px"
+
+    # out-of-range widths clamp to the [200, 560] band
+    html = render_hook(view, "resize_details", %{"width" => "900"})
+    assert html =~ "minmax(0, 1fr) 560px"
+
+    html = render_hook(view, "resize_details", %{"width" => "10"})
+    assert html =~ "minmax(0, 1fr) 200px"
+  end
+
   test "crashing a sandbox child re-injects a fresh OS process", %{
     session: session,
     ctx: ctx,

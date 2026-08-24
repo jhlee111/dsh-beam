@@ -94,6 +94,7 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:chat_busy, false)
       |> assign(:chat_task, nil)
       |> assign(:chat_turn, nil)
+      |> assign(:chat_token, nil)
       |> assign(:chat_started_at, nil)
       |> assign(:chat_error, nil)
       |> assign(:todos, [])
@@ -119,6 +120,7 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:presets_result, nil)
       |> assign(:sidebar_collapsed, false)
       |> assign(:sidebar_width, 280)
+      |> assign(:details_width, 280)
       |> assign(:picker_open, false)
       |> assign(:picker_path, nil)
       |> assign(:picker_entries, [])
@@ -226,14 +228,17 @@ defmodule DshBeamWeb.ConsoleLive do
         # makes a real HTTP call (up to the receive_timeout budget, default
         # 300s), which must not block the event handler and freeze the chat
         # pane. The result is pushed back as a message and rendered in
-        # handle_info/2.
+        # handle_info/2. A per-turn cancellation token rides alongside: the
+        # loop polls it at its step boundaries, and the adapter polls it
+        # while the transport runs, so "stop" truly halts the turn.
         from = self()
 
         turn = make_ref()
+        token = DshBeam.Agent.Cancel.new()
 
         {:ok, task} =
           Task.start(fn ->
-            result = DshBeam.Agent.Loop.run_trace(loop, text)
+            result = DshBeam.Agent.Loop.run_trace(loop, text, token)
             send(from, {:chat_result, turn, text, result})
           end)
 
@@ -249,6 +254,7 @@ defmodule DshBeamWeb.ConsoleLive do
            chat_busy: true,
            chat_task: task,
            chat_turn: turn,
+           chat_token: token,
            chat_started_at: System.system_time(:second)
          )
          |> refresh()}
@@ -262,22 +268,26 @@ defmodule DshBeamWeb.ConsoleLive do
   end
 
   def handle_event("stop_chat", _params, socket) do
-    # Best-effort stop: the model call runs in a spawned Task, so killing it
-    # unblocks the pane immediately; the loop fiber may still finish its
-    # in-flight round-trip and write the answer to the session.
+    # Cooperative stop: cancel the token so the loop halts at its next step
+    # boundary (and the adapter aborts the in-flight model call), then kill
+    # the caller task so the pane unblocks immediately. The loop authors the
+    # "stopped by user" session event itself, so the transcript stays a
+    # single-writer append-only log.
     if is_pid(socket.assigns.chat_task), do: Process.exit(socket.assigns.chat_task, :kill)
 
-    case DshBeam.Context.get(socket.assigns.ctx, :session) do
-      {:ok, session} when is_pid(session) ->
-        DshBeam.Session.append(session, %{"role" => "error", "content" => "stopped by user"})
-
-      _ ->
-        :ok
+    if socket.assigns.chat_token do
+      DshBeam.Agent.Cancel.cancel(socket.assigns.chat_token)
     end
 
     {:noreply,
      socket
-     |> assign(chat_busy: false, chat_task: nil, chat_turn: nil, chat_started_at: nil)
+     |> assign(
+       chat_busy: false,
+       chat_task: nil,
+       chat_turn: nil,
+       chat_token: nil,
+       chat_started_at: nil
+     )
      |> refresh()}
   end
 
@@ -435,6 +445,11 @@ defmodule DshBeamWeb.ConsoleLive do
     {:noreply, assign(socket, sidebar_width: width) |> refresh()}
   end
 
+  def handle_event("resize_details", %{"width" => width}, socket) do
+    width = width |> to_string() |> String.to_integer() |> max(200) |> min(560)
+    {:noreply, assign(socket, details_width: width) |> refresh()}
+  end
+
   def handle_event("browse_dir", _params, socket) do
     root = Path.expand(socket.assigns.workspace_repo || ".")
 
@@ -584,13 +599,20 @@ defmodule DshBeamWeb.ConsoleLive do
       if socket.assigns.chat_turn == turn do
         case result do
           {:ok, _answer, _trace} ->
-            assign(socket, chat_busy: false, chat_task: nil, chat_turn: nil, chat_started_at: nil)
+            assign(socket,
+              chat_busy: false,
+              chat_task: nil,
+              chat_turn: nil,
+              chat_token: nil,
+              chat_started_at: nil
+            )
 
           {:error, reason} ->
             assign(socket,
               chat_busy: false,
               chat_task: nil,
               chat_turn: nil,
+              chat_token: nil,
               chat_started_at: nil,
               chat_error: inspect(reason)
             )
@@ -609,6 +631,8 @@ defmodule DshBeamWeb.ConsoleLive do
     if socket.assigns.chat_turn == turn do
       if is_pid(socket.assigns.chat_task), do: Process.exit(socket.assigns.chat_task, :kill)
 
+      if socket.assigns.chat_token, do: DshBeam.Agent.Cancel.cancel(socket.assigns.chat_token)
+
       case DshBeam.Context.get(socket.assigns.ctx, :session) do
         {:ok, session} when is_pid(session) ->
           DshBeam.Session.append(session, %{
@@ -626,6 +650,7 @@ defmodule DshBeamWeb.ConsoleLive do
          chat_busy: false,
          chat_task: nil,
          chat_turn: nil,
+         chat_token: nil,
          chat_started_at: nil,
          chat_error: "timed out after #{@chat_result_timeout_ms}ms"
        )
@@ -653,7 +678,7 @@ defmodule DshBeamWeb.ConsoleLive do
     ~H"""
     <div
       class="frame"
-      style={"grid-template-columns: " <> (if @sidebar_collapsed, do: "56px", else: "#{@sidebar_width}px") <> " minmax(0, 1fr) 280px"}
+      style={"grid-template-columns: " <> (if @sidebar_collapsed, do: "56px", else: "#{@sidebar_width}px") <> " minmax(0, 1fr) #{@details_width}px"}
     >
       <div class="frame-sidebar">
         <div class={"sidebar-root #{if @sidebar_collapsed, do: "collapsed"}"}>
@@ -685,6 +710,14 @@ defmodule DshBeamWeb.ConsoleLive do
         >
         </div>
       <% end %>
+
+      <div
+        class="details-handle"
+        id="details-handle"
+        phx-hook="DetailsResize"
+        style={"right: #{@details_width - 4}px"}
+      >
+      </div>
 
       <div class="frame-center">
         <div class="conv-root" data-phase="active">

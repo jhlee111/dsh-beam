@@ -46,6 +46,11 @@ defmodule DshBeamWeb.Layouts do
             cursor: col-resize; z-index: 10; touch-action: none;
           }
           .sidebar-handle:hover { background: var(--dsw-alias-interactive-bg-hover); }
+          .details-handle {
+            position: absolute; top: 0; bottom: 0; width: 8px;
+            cursor: col-resize; z-index: 10; touch-action: none;
+          }
+          .details-handle:hover { background: var(--dsw-alias-interactive-bg-hover); }
 
           /* Sidebar column shell (reference ui-sidebar SidebarRoot): brand row,
              workspace browsing region, footer settings seat. */
@@ -506,7 +511,11 @@ defmodule DshBeamWeb.Layouts do
                 return parseFloat(cols[0]) || 280;
               };
               this.setWidth = (w) => {
-                this.frame.style.gridTemplateColumns = `${w}px minmax(0, 1fr) 280px`;
+                // Preserve the (now-draggable) details column while resizing
+                // the sidebar, so the two handles never fight over the track.
+                const cols = getComputedStyle(this.frame).gridTemplateColumns.split(' ');
+                const details = cols[2] || '280px';
+                this.frame.style.gridTemplateColumns = `${w}px minmax(0, 1fr) ${details}`;
                 this.el.style.left = `${w - 4}px`;
               };
               this.onDown = (e) => {
@@ -529,6 +538,60 @@ defmodule DshBeamWeb.Layouts do
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
                 this.pushEvent('resize_sidebar', { width: Math.round(this.currentWidth()) });
+              };
+
+              this.el.addEventListener('pointerdown', this.onDown);
+              this.el.addEventListener('pointermove', this.onMove);
+              this.el.addEventListener('pointerup', this.onUp);
+              this.el.addEventListener('pointercancel', this.onUp);
+            },
+            destroyed() {
+              this.el.removeEventListener('pointerdown', this.onDown);
+              this.el.removeEventListener('pointermove', this.onMove);
+              this.el.removeEventListener('pointerup', this.onUp);
+              this.el.removeEventListener('pointercancel', this.onUp);
+            }
+          };
+
+          // Resizes the details column via its boundary handle. Dragging left
+          // widens it, right narrows it; the settled width is pushed back so
+          // it survives a re-render.
+          let DetailsResize = {
+            mounted() {
+              this.frame = this.el.closest('.frame');
+              this.dragging = false;
+              this.startX = 0;
+              this.startWidth = 0;
+
+              this.currentWidth = () => {
+                const cols = getComputedStyle(this.frame).gridTemplateColumns.split(' ');
+                return parseFloat(cols[2]) || 280;
+              };
+              this.setWidth = (w) => {
+                const cols = getComputedStyle(this.frame).gridTemplateColumns.split(' ');
+                const sidebar = cols[0] || '280px';
+                this.frame.style.gridTemplateColumns = `${sidebar} minmax(0, 1fr) ${w}px`;
+              };
+              this.onDown = (e) => {
+                e.preventDefault();
+                this.dragging = true;
+                this.startX = e.clientX;
+                this.startWidth = this.currentWidth();
+                this.el.setPointerCapture(e.pointerId);
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+              };
+              this.onMove = (e) => {
+                if (!this.dragging) return;
+                const w = Math.min(560, Math.max(200, this.startWidth - (e.clientX - this.startX)));
+                this.setWidth(w);
+              };
+              this.onUp = () => {
+                if (!this.dragging) return;
+                this.dragging = false;
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+                this.pushEvent('resize_details', { width: Math.round(this.currentWidth()) });
               };
 
               this.el.addEventListener('pointerdown', this.onDown);
@@ -641,7 +704,7 @@ defmodule DshBeamWeb.Layouts do
           let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
           let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
             params: { _csrf_token: csrfToken },
-            hooks: { ElapsedClock, ScrollFollow, AutoGrow, SidebarResize }
+            hooks: { ElapsedClock, ScrollFollow, AutoGrow, SidebarResize, DetailsResize }
           });
           liveSocket.connect();
           window.addEventListener("phx:page-loading-stop", () => liveSocket.enableDebug());
