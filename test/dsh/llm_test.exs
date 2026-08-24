@@ -81,6 +81,72 @@ defmodule DshBeam.LlmTest do
     assert length(history) == 3
   end
 
+  test "the chat consumer replays a tool turn through the projection" do
+    llm = llm_entry(model: "stub-model", adapter_config: %{parent: self()})
+
+    {:ok, runtime} =
+      DshBeam.Runtime.start_link(
+        [session_entry(), llm, adapter_entry(StubLlmAdapter, parent: self()), chat_entry()],
+        []
+      )
+
+    ctx = DshBeam.Runtime.context(runtime)
+    wait_until(fn -> match?({:ok, _}, DshBeam.Context.get(ctx, :session)) end)
+
+    {:ok, session} = DshBeam.Context.get(ctx, :session)
+    {:ok, chat} = DshBeam.Context.get(ctx, :chat)
+
+    # seed the log with a tool turn exactly as the agent loop records it
+    # (tool_call + tool_result chronologically, then the assistant answer)
+    DshBeam.Session.append(session, %{"role" => "user", "content" => "first"})
+
+    DshBeam.Session.append(session, %{
+      "role" => "tool_call",
+      "id" => "c1",
+      "name" => "loop_echo",
+      "arguments" => %{"text" => "hi"},
+      "arguments_json" => ~s({"text":"hi"})
+    })
+
+    DshBeam.Session.append(session, %{
+      "role" => "tool_result",
+      "tool_call_id" => "c1",
+      "name" => "loop_echo",
+      "content" => "echo:hi"
+    })
+
+    DshBeam.Session.append(session, %{"role" => "assistant", "content" => "done"})
+
+    # the next chat completion must see the FULL prefix — including the tool
+    # turn — replayed verbatim (cache-friendly, like the agent loop), not a
+    # role/content-only mapping that drops tool_call/tool_result and shifts
+    # the prompt prefix between the last tool run and the next user turn.
+    assert {:ok, %{content: "stub reply: next"}} = DshBeam.Llm.Chat.ask(chat, "next")
+    assert_receive {:complete, _, messages}, 1000
+
+    assert messages == [
+             %{"role" => "user", "content" => "first"},
+             %{
+               "role" => "assistant",
+               "content" => "",
+               "tool_calls" => [
+                 %{
+                   "id" => "c1",
+                   "type" => "function",
+                   "function" => %{"name" => "loop_echo", "arguments" => ~s({"text":"hi"})}
+                 }
+               ]
+             },
+             %{"role" => "tool", "tool_call_id" => "c1", "content" => "echo:hi"},
+             %{"role" => "assistant", "content" => "done"},
+             %{"role" => "user", "content" => "next"}
+           ]
+
+    # the projection left the append-only log untouched: the chat consumer
+    # only appended its own user + assistant turns
+    assert DshBeam.Session.count(session) == 6
+  end
+
   test "removing the llm provider deactivates the chat consumer first" do
     llm = llm_entry(model: "stub-model", adapter_config: %{parent: self()})
 
