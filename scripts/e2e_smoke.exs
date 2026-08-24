@@ -39,4 +39,4 @@ result =
   DshBeam.Llm.chat(llm, [%{"role" => "user", "content" => "1+1은 얼마인가? 답만 짧게."}], stream: stream)
 
 IO.puts("\n\n== completion ==")
-IO.inspect(result, limit: :infinity, printable_limit: :infinity)
+IO.puts(inspect(result, limit: :infinity, printable_limit: :infinity))
