@@ -20,6 +20,8 @@ defmodule DshBeam.Llm.Plugin do
   - :model — default "deepseek-chat"
   - :credential — a DshBeam.Credential reference, default
     {:env, "DEEPSEEK_API_KEY"} (a literal key is not a configuration value)
+  - :receive_timeout — how long to wait for the model's reply (ms) before
+    failing with a transport timeout; default 300_000
   - :adapter_config — extra fields merged into the adapter's config
   """
 
@@ -47,6 +49,12 @@ defmodule DshBeam.Llm.Plugin do
     type: :credential,
     default: {:env, "DEEPSEEK_API_KEY"},
     doc: "The credential reference: env:VAR_NAME or literal:the-key"
+  )
+
+  setting(:receive_timeout,
+    type: :integer,
+    default: 300_000,
+    doc: "How long to wait for the model's reply (ms) before timing out"
   )
 
   @impl DshBeam.Plugin
@@ -80,7 +88,7 @@ defmodule DshBeam.Llm.Plugin do
         # like a :plug ride the top level), never the registry fields
         adapter_config =
           data.extra.config
-          |> Map.take([:base_url, :model, :credential])
+          |> Map.take([:base_url, :model, :credential, :receive_timeout])
           |> Map.merge(data.extra.config.adapter_config)
 
         :gen_statem.call(adapter, {:complete, adapter_config, messages, opts})
@@ -95,17 +103,30 @@ defmodule DshBeam.Llm.Plugin do
       base_url: Keyword.get(opts, :base_url, "https://api.deepseek.com"),
       model: Keyword.get(opts, :model, "deepseek-chat"),
       credential: Keyword.get(opts, :credential, {:env, "DEEPSEEK_API_KEY"}),
+      receive_timeout: Keyword.get(opts, :receive_timeout, 300_000),
       adapter_config: Keyword.get(opts, :adapter_config, %{})
     }
   end
 
   defp merge_config(config, opts) do
     Enum.reduce(opts, config, fn
-      {:base_url, value}, acc when is_binary(value) -> %{acc | base_url: value}
-      {:model, value}, acc when is_binary(value) -> %{acc | model: value}
-      {:credential, value}, acc -> %{acc | credential: value}
-      {:adapter_config, value}, acc when is_map(value) -> %{acc | adapter_config: value}
-      _ignored, acc -> acc
+      {:base_url, value}, acc when is_binary(value) ->
+        %{acc | base_url: value}
+
+      {:model, value}, acc when is_binary(value) ->
+        %{acc | model: value}
+
+      {:credential, value}, acc ->
+        %{acc | credential: value}
+
+      {:receive_timeout, value}, acc when is_integer(value) and value > 0 ->
+        %{acc | receive_timeout: value}
+
+      {:adapter_config, value}, acc when is_map(value) ->
+        %{acc | adapter_config: value}
+
+      _ignored, acc ->
+        acc
     end)
   end
 end

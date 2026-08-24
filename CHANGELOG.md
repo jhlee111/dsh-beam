@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Chat watchdog
+
+- The chat pane now runs a turn-scoped watchdog: if the agent loop fiber hangs
+  (a `gen_statem` call blocked outside the transport's receive budget), the
+  turn is killed and the pane settles with a visible timeout instead of
+  staying busy forever. The watchdog is turn-scoped, so a result that arrives
+  for an already-settled turn is ignored.
+
+### LLM receive timeout as a typed setting
+
+- `receive_timeout` (ms) is now a typed setting on `DshBeam.Llm.Plugin`,
+  exposed in the Models surface and persisted to the settings store, so a slow
+  reasoning model can be given a longer per-request budget without recompiling.
+  The default moves from 120s to 300s — the 120s budget was too tight for
+  `deepseek-reasoner` on a large prompt prefix.
+
 ### Chat history — cache-friendly tool turns
 
 - `DshBeam.Llm.Chat` now projects the session log through the same

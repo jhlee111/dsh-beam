@@ -284,6 +284,77 @@ defmodule DshBeam.LlmTest do
     assert_receive {:body, %{"tools" => ^tools}}, 1000
   end
 
+  test "receive_timeout is a typed llm setting that reaches the adapter config" do
+    settings = DshBeam.Plugin.settings(DshBeam.Llm.Plugin)
+
+    assert Enum.any?(
+             settings,
+             &(&1.name == :receive_timeout and &1.type == :integer and &1.default == 300_000)
+           )
+
+    config = [
+      model: "stub-model",
+      receive_timeout: 300_000,
+      adapter_config: %{parent: self()}
+    ]
+
+    {:ok, runtime} =
+      DshBeam.Runtime.start_link(
+        [llm_entry(config), adapter_entry(StubLlmAdapter, parent: self())],
+        []
+      )
+
+    ctx = DshBeam.Runtime.context(runtime)
+    {:ok, llm} = DshBeam.Context.get(ctx, :llm)
+
+    # the provider's own config carries the budget…
+    assert %{receive_timeout: 300_000} = DshBeam.Llm.config(llm)
+
+    # …and it rides the flattened adapter config into the transport call
+    assert {:ok, _} = DshBeam.Llm.chat(llm, [%{"role" => "user", "content" => "hi"}])
+    assert_receive {:complete_config, cfg}, 1000
+    assert cfg.receive_timeout == 300_000
+  end
+
+  test "configure/2 re-arms receive_timeout without re-mounting" do
+    {:ok, runtime} =
+      DshBeam.Runtime.start_link(
+        [
+          llm_entry(model: "stub-model", adapter_config: %{parent: self()}),
+          adapter_entry(StubLlmAdapter, parent: self())
+        ],
+        []
+      )
+
+    ctx = DshBeam.Runtime.context(runtime)
+    {:ok, llm} = DshBeam.Context.get(ctx, :llm)
+    %{llm: %{pid: pid_before}} = DshBeam.Runtime.entries(runtime)
+
+    assert :ok = DshBeam.Llm.configure(llm, receive_timeout: 250_000)
+
+    # dynamic reconfiguration: the fiber is untouched, the budget changed
+    assert %{llm: %{pid: ^pid_before}} = DshBeam.Runtime.entries(runtime)
+    assert %{receive_timeout: 250_000} = DshBeam.Llm.config(llm)
+  end
+
+  test "a saved receive_timeout override reaches the provider config on restart" do
+    {:ok, runtime} = DshBeam.Runtime.start_link([], [])
+    store = DshBeam.Runtime.settings(runtime)
+
+    :ok =
+      DshBeam.Runtime.reconcile(runtime, [
+        llm_entry(model: "stub-model", adapter_config: %{parent: self()}),
+        adapter_entry(StubLlmAdapter, parent: self())
+      ])
+
+    :ok = DshBeam.Settings.put(store, DshBeam.Llm.Plugin, :receive_timeout, 999_000)
+    :ok = DshBeam.Runtime.restart(runtime, :llm)
+
+    ctx = DshBeam.Runtime.context(runtime)
+    {:ok, llm} = DshBeam.Context.get(ctx, :llm)
+    assert %{receive_timeout: 999_000} = DshBeam.Llm.config(llm)
+  end
+
   test "configure/2 changes connection facts for the next request without re-mounting" do
     config = [model: "stub-model", adapter_config: %{parent: self()}]
 
@@ -360,6 +431,7 @@ defmodule StubLlmAdapter do
   def complete(config, messages, _opts) do
     parent = Map.get(config, :parent, self())
     send(parent, {:complete, config.model, messages})
+    send(parent, {:complete_config, config})
 
     {:ok,
      %{
