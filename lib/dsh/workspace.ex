@@ -28,6 +28,13 @@ defmodule DshBeam.Workspace do
 
   @impl DshBeam.Plugin
   def mount(_ctx, _opts) do
+    # Boot-time GC: sweep worktrees whose session branch already merged into
+    # the default branch (a dead session), pruning their checkout + local
+    # branch. The sweep is best-effort, never touches the caller's cwd (so a
+    # console living inside a merged worktree survives its own boot), and
+    # swallows failures — it must never block the composition from mounting.
+    _ = DshBeam.Git.prune_merged_worktrees(File.cwd!(), keep: [File.cwd!()])
+
     {:ok, [], %{workspace: self()}, %{by_cwd: %{}, sessions: %{}}}
   end
 
