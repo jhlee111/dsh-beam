@@ -145,6 +145,26 @@ defmodule DshBeam.Plugin do
     end
   end
 
+  @doc """
+  The module's declared system-prompt sections (name/order/text), introspected
+  from the Spark DSL — a plugin describes its own role/usage to the model, and
+  the agent loop assembles these into the system prompt.
+  """
+  def prompt_sections(mod) when is_atom(mod) do
+    if Code.ensure_loaded?(mod) do
+      try do
+        Spark.Dsl.Extension.get_entities(mod, [:prompt_section])
+        |> Enum.map(fn section ->
+          %{name: section.name, order: section.order, text: section.text}
+        end)
+      rescue
+        _ -> []
+      end
+    else
+      []
+    end
+  end
+
   # The case analyses on the generic hooks live here, behind a remote call,
   # so the type checker treats the dispatch result as dynamic: the default
   # hook bodies return a single shape, and narrowing a local call's case

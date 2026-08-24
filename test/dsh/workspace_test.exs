@@ -96,7 +96,8 @@ defmodule DshBeam.WorkspaceTest do
     %{cwd: cwd, title: title} = DshBeam.Session.header(session)
     assert is_binary(cwd)
     assert File.exists?(Path.join(cwd, "README.md"))
-    assert title =~ "session/"
+    # the default title is the workspace folder name, not the internal branch
+    assert title =~ "dsh_ws_repo"
 
     # and the workspace lists it
     assert %{^session => %{repo: _}} = DshBeam.Workspace.all_sessions(workspace)

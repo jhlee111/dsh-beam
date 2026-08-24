@@ -208,21 +208,20 @@ defmodule DshBeam.Workspace do
   # refusing.
   defp open(dir, opts) do
     dir = Path.expand(dir)
-    title = Keyword.get(opts, :title)
+    title = Keyword.get(opts, :title) || Path.basename(dir)
 
     case DshBeam.Git.repo_root(dir) do
       {:ok, root} ->
         branch = Keyword.get(opts, :branch, "session/#{System.unique_integer([:positive])}")
         dest = Keyword.get(opts, :dest, default_dest(root, branch))
-        resolved_title = title || branch
 
-        case try_worktree(root, branch, dest, resolved_title) do
+        case try_worktree(root, branch, dest, title) do
           {:ok, session, meta} -> {:ok, session, meta}
-          {:error, _reason} -> in_place_session(dir, resolved_title)
+          {:error, _reason} -> in_place_session(dir, title)
         end
 
       :error ->
-        in_place_session(dir, title || Path.basename(dir))
+        in_place_session(dir, title)
     end
   end
 

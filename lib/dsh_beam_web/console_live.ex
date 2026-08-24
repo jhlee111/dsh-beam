@@ -29,6 +29,7 @@ defmodule DshBeamWeb.ConsoleLive do
     %{id: :bash, plugin: DshBeam.Tool.Bash, config: [], disabled: false},
     %{id: :fs, plugin: DshBeam.Tool.Fs, config: [root: "."], disabled: false},
     %{id: :todo, plugin: DshBeam.Tool.Todo, config: [], disabled: false},
+    %{id: :tool_plugin, plugin: DshBeam.Tool.Plugin, config: [], disabled: false},
     %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false},
     %{id: :panel_composition, plugin: DshBeam.Ui.Panel.Composition, config: [], disabled: false},
     %{id: :panel_bindings, plugin: DshBeam.Ui.Panel.Bindings, config: [], disabled: false},
@@ -54,6 +55,7 @@ defmodule DshBeamWeb.ConsoleLive do
     :bash,
     :fs,
     :todo,
+    :tool_plugin,
     :loop,
     :panel_composition,
     :panel_bindings,
@@ -109,6 +111,7 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:custom_presets, [])
       |> assign(:presets_result, nil)
       |> assign(:sidebar_collapsed, false)
+      |> assign(:sidebar_width, 280)
       |> assign(:picker_open, false)
       |> assign(:picker_path, nil)
       |> assign(:picker_entries, [])
@@ -389,6 +392,11 @@ defmodule DshBeamWeb.ConsoleLive do
      assign(socket, sidebar_collapsed: not socket.assigns.sidebar_collapsed) |> refresh()}
   end
 
+  def handle_event("resize_sidebar", %{"width" => width}, socket) do
+    width = width |> to_string() |> String.to_integer() |> max(200) |> min(520)
+    {:noreply, assign(socket, sidebar_width: width) |> refresh()}
+  end
+
   def handle_event("browse_dir", _params, socket) do
     root = Path.expand(socket.assigns.workspace_repo || ".")
 
@@ -570,7 +578,7 @@ defmodule DshBeamWeb.ConsoleLive do
     ~H"""
     <div
       class="frame"
-      style={"grid-template-columns: " <> (if @sidebar_collapsed, do: "56px", else: "280px") <> " minmax(0, 1fr) 280px"}
+      style={"grid-template-columns: " <> (if @sidebar_collapsed, do: "56px", else: "#{@sidebar_width}px") <> " minmax(0, 1fr) 280px"}
     >
       <div class="frame-sidebar">
         <div class={"sidebar-root #{if @sidebar_collapsed, do: "collapsed"}"}>
@@ -592,6 +600,16 @@ defmodule DshBeamWeb.ConsoleLive do
           <% end %>
         </div>
       </div>
+
+      <%= unless @sidebar_collapsed do %>
+        <div
+          class="sidebar-handle"
+          id="sidebar-handle"
+          phx-hook="SidebarResize"
+          style={"left: #{@sidebar_width - 4}px"}
+        >
+        </div>
+      <% end %>
 
       <div class="frame-center">
         <div class="conv-root" data-phase="active">
@@ -1041,13 +1059,15 @@ defmodule DshBeamWeb.ConsoleLive do
         id: "agent",
         name: "Agent",
         desc: "Session + llm + adapter + shell + bash + loop",
-        entries: panel_entries() ++ core_entries([:session, :llm, :adapter, :shell, :bash, :loop])
+        entries:
+          panel_entries() ++
+            core_entries([:session, :llm, :adapter, :shell, :bash, :tool_plugin, :loop])
       },
       %{
         id: "chat",
         name: "Chat",
         desc: "Session + llm + adapter + loop (no tools)",
-        entries: panel_entries() ++ core_entries([:session, :llm, :adapter, :loop])
+        entries: panel_entries() ++ core_entries([:session, :llm, :adapter, :tool_plugin, :loop])
       }
     ]
   end

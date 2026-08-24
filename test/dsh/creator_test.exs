@@ -118,6 +118,31 @@ defmodule DshBeam.CreatorTest do
     assert {:ok, 42} = DshBeam.Context.get(ctx, :made_value)
   end
 
+  test "save_plugin persists source and load_saved_plugins mounts it" do
+    {:ok, runtime} = DshBeam.Runtime.start_link([], [])
+    ctx = DshBeam.Runtime.context(runtime)
+
+    source = """
+    defmodule SavedMadeProvider do
+      use DshBeam.Plugin
+      provide :saved_value, value: 7
+    end
+    """
+
+    dir = Path.join(System.tmp_dir!(), "dsh_plugins_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    # save -> a sanitized .exs file under dir
+    assert {:ok, path} = DshBeam.Creator.save_plugin("my made plugin", source, dir)
+    assert path == Path.join(dir, "my-made-plugin.exs")
+    assert File.read!(path) =~ "defmodule SavedMadeProvider"
+
+    # load -> compiles + mounts the saved plugin into the runtime
+    assert [{:ok, SavedMadeProvider}] = DshBeam.Creator.load_saved_plugins(runtime, dir)
+    assert DshBeam.Context.get(ctx, :saved_value) == {:ok, 7}
+  end
+
   defp wait_until(fun), do: wait_until(fun, 200)
 
   defp wait_until(fun, tries) when is_function(fun, 0) do

@@ -17,6 +17,7 @@ entries = [
   %{id: :bash, plugin: DshBeam.Tool.Bash, config: [], disabled: false},
   %{id: :fs, plugin: DshBeam.Tool.Fs, config: [root: File.cwd!()], disabled: false},
   %{id: :todo, plugin: DshBeam.Tool.Todo, config: [], disabled: false},
+  %{id: :tool_plugin, plugin: DshBeam.Tool.Plugin, config: [], disabled: false},
   %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false},
   %{id: :panel_composition, plugin: DshBeam.Ui.Panel.Composition, config: [], disabled: false},
   %{id: :panel_bindings, plugin: DshBeam.Ui.Panel.Bindings, config: [], disabled: false},
@@ -36,6 +37,11 @@ settings_path = Path.join([File.cwd!(), ".dsh", "settings.json"])
 
 {:ok, runtime} =
   DshBeam.Runtime.start_link(entries, settings_path: settings_path)
+
+# Load saved plugins (~/.dsh/plugins/*.exs) so a plugin saved in one workspace
+# is available in every other project the console opens.
+saved = DshBeam.Creator.load_saved_plugins(runtime)
+IO.puts("loaded saved plugins: #{inspect(saved)}")
 
 IO.puts("dsh-beam console: http://127.0.0.1:4001 (runtime #{inspect(runtime)})")
 IO.puts("settings: #{settings_path}")

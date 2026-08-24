@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### System prompt as a plugin registry
+
+- Added a `prompt_section` DSL so any plugin contributes its own guidance to
+  the assembled system prompt (the reference's `SystemPrompt` registry). The
+  agent loop now builds the system prompt from the harness identity + default
+  persona + every plugin's sections, instead of a hardcoded one-liner. The
+  self-modification tool documents its create → define → save workflow there.
+
+### Self-modification + reusable plugins
+
+- The agent loop can now author plugins from inside a workspace: a
+  `define_plugin` tool compiles and mounts a plugin live (in-process, via
+  `DshBeam.Creator.define`), and a `save_plugin` tool persists its source as a
+  reusable `.exs` under `~/.dsh/plugins`. The console loads those saved plugins
+  on boot, so a plugin made in one workspace is available in every project.
+
+### Sidebar
+
+- Session cards use a small current-indicator dot instead of a large pill, a
+  friendly title (the workspace folder name, not the internal branch), and a
+  wrapping cwd path. The sidebar boundary is now draggable to resize (clamped
+  200–520px), with the settled width persisted.
+
 ### Conversation composer
 
 - The composer is now a larger card with an auto-growing textarea (44px min,

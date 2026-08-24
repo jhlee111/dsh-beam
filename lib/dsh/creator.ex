@@ -103,6 +103,55 @@ defmodule DshBeam.Creator do
     end
   end
 
+  @doc """
+  The global plugin directory — a per-user store of saved plugin sources that
+  any workspace/project can load (the "save as an actual plugin" option).
+  """
+  def plugins_dir do
+    Path.join([System.user_home!(), ".dsh", "plugins"])
+  end
+
+  @doc """
+  Save a plugin's source as a reusable `.exs` file under `dir` (default
+  `plugins_dir/0`). `name` is sanitized to a filename; returns `{:ok, path}`.
+  """
+  def save_plugin(name, source, dir \\ plugins_dir())
+      when is_binary(name) and is_binary(source) and is_binary(dir) do
+    File.mkdir_p!(dir)
+
+    filename =
+      name |> String.trim() |> String.replace(~r/[^a-zA-Z0-9_-]+/, "-") |> String.trim("-")
+
+    path = Path.join(dir, "#{filename}.exs")
+
+    case File.write(path, source) do
+      :ok -> {:ok, path}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Load every saved plugin (each `.exs` under `dir`, default `plugins_dir/0`)
+  and mount it into the runtime. Returns the list of per-file results
+  (`{:ok, module}` or an error), so a broken saved plugin is reported, not
+  silent.
+  """
+  def load_saved_plugins(runtime, dir \\ plugins_dir()) do
+    dir
+    |> saved_plugin_paths()
+    |> Enum.map(fn path ->
+      source = File.read!(path)
+      define(runtime, source)
+    end)
+  end
+
+  defp saved_plugin_paths(dir) do
+    dir
+    |> Path.join("*.exs")
+    |> Path.wildcard()
+    |> Enum.sort()
+  end
+
   defp plugin_script(entries, sources) do
     source_blocks =
       sources
