@@ -377,11 +377,23 @@ defmodule DshBeamWeb.Layouts do
             color: var(--dsw-alias-label-secondary); max-width: 100%;
           }
           .reasoning-row summary {
-            display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
-            font-weight: 500; list-style: none; user-select: none;
+            display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+            cursor: pointer; font-weight: 500; list-style: none; user-select: none;
           }
           .reasoning-row summary::-webkit-details-marker { display: none; }
-          .reasoning-icon { color: var(--dsw-static-deepseek-400, #679efe); }
+          .reasoning-icon { flex: none; color: var(--dsw-static-deepseek-400, #679efe); }
+          .reasoning-title { flex: none; }
+          /* Shared one-line collapse chrome (reference DisclosureRow): a
+             separator dot + an ellipsized single-line summary. */
+          .row-sep {
+            flex: none; width: 3px; height: 3px; border-radius: 50%;
+            background: var(--dsw-alias-label-caption);
+          }
+          .row-summary {
+            flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap; color: var(--dsw-alias-label-secondary);
+            font-weight: 400;
+          }
           .reasoning-body {
             margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--dsw-alias-border-l2);
             white-space: pre-wrap; color: var(--dsw-alias-label-tertiary);
@@ -454,8 +466,15 @@ defmodule DshBeamWeb.Layouts do
             border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px;
             background: var(--dsw-static-neutral-bluish-900, #0c0f14); overflow: hidden;
           }
+          .tool-result-summary {
+            display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+            cursor: pointer; list-style: none; user-select: none;
+          }
+          .tool-result-summary::-webkit-details-marker { display: none; }
+          .tool-result-summary .tool-label { flex: none; margin: 0; }
           .tool-result pre {
             margin: 0; padding: 8px 12px; overflow: auto; max-height: 320px;
+            border-top: 1px solid var(--dsw-alias-border-l2);
             font-family: var(--ds-font-family-code); font-size: 12px;
             color: var(--dsw-alias-label-primary); white-space: pre-wrap; word-break: break-all;
           }
