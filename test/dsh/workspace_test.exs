@@ -99,6 +99,9 @@ defmodule DshBeam.WorkspaceTest do
     # the default title is the workspace folder name, not the internal branch
     assert title =~ "dsh_ws_repo"
 
+    # a worktree-backed session pins itself with a live marker (boot-GC fence)
+    assert File.exists?(Path.join([cwd, ".dsh", "live"]))
+
     # and the workspace lists it
     assert %{^session => %{repo: _}} = DshBeam.Workspace.all_sessions(workspace)
   end
@@ -130,12 +133,28 @@ defmodule DshBeam.WorkspaceTest do
     {:ok, session} = DshBeam.Workspace.open_session(workspace, repo)
     %{cwd: cwd} = DshBeam.Session.header(session)
     assert File.exists?(cwd)
+    assert File.exists?(Path.join([cwd, ".dsh", "live"]))
 
     assert :ok = DshBeam.Workspace.close_session(workspace, session)
 
     refute File.exists?(cwd)
     assert DshBeam.Workspace.all_sessions(workspace) == %{}
     refute Process.alive?(session)
+  end
+
+  test "workspace mount does not prune without boot_prune: true", %{repo: repo} do
+    # a merged, old, clean session worktree — the exact shape the old boot GC
+    # would have deleted
+    dest = worktree_session(repo, "session/oldmerged")
+    age!(dest)
+
+    # default config (no boot_prune): mounting the workspace must not touch it
+    {:ok, runtime} = DshBeam.Runtime.start_link([workspace_entry()], [])
+    ctx = DshBeam.Runtime.context(runtime)
+    {:ok, workspace} = DshBeam.Context.get(ctx, :workspace)
+    assert is_pid(workspace)
+
+    assert File.exists?(dest)
   end
 
   test "open_session outside a repository opens an in-place session", _context do
@@ -156,6 +175,19 @@ defmodule DshBeam.WorkspaceTest do
     # closing an in-place session does not try to remove a worktree
     assert :ok = DshBeam.Workspace.close_session(workspace, session)
     assert DshBeam.Workspace.all_sessions(workspace) == %{}
+  end
+
+  defp worktree_session(repo, branch) do
+    dest =
+      Path.join(System.tmp_dir!(), "dsh_ws_wt_#{branch}_#{System.unique_integer([:positive])}")
+
+    assert {:ok, _} = DshBeam.Git.worktree_add(repo, branch, dest)
+    on_exit(fn -> File.rm_rf!(dest) end)
+    dest
+  end
+
+  defp age!(path) do
+    File.touch!(path, {{2020, 1, 1}, {0, 0, 0}})
   end
 
   defp run_git(dir, args) do
