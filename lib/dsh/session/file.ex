@@ -40,7 +40,12 @@ defmodule DshBeam.Session.File do
   @impl true
   def handle_call({:append, event}, _from, state) do
     seq = state.seq + 1
-    File.open(state.path, [:append], fn io -> IO.puts(io, JSON.encode!(event)) end)
+
+    # File.write writes the raw UTF-8 bytes (Elixir strings are already UTF-8),
+    # unlike the previous File.open + IO.puts path, which opened a latin1
+    # device and failed to transcode non-ASCII (e.g. Korean) content.
+    File.write(state.path, JSON.encode!(event) <> "\n", [:append])
+
     notify(state.subscribers, event)
     {:reply, {:ok, seq}, %{state | seq: seq}}
   end
