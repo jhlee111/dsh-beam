@@ -15,6 +15,7 @@ defmodule DshBeam.SystemPromptTest do
     # DshBeam.Tool.Plugin registers a self_modification section (order 100)
     assert prompt =~ "define_plugin"
     assert prompt =~ "save_plugin"
+    assert prompt =~ "redefine_plugin"
     assert prompt =~ "~/.dsh/plugins"
   end
 end
