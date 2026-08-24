@@ -293,6 +293,31 @@ defmodule DshBeamWeb.Layouts do
           .model-option-name { font-weight: 500; }
           .model-option-desc { font-size: 11px; color: var(--dsw-alias-label-secondary); }
           .model-check { flex: none; margin-left: auto; }
+          /* Slash-command menu (reference ui-commands "＋" trigger). */
+          .command-seat { position: relative; display: inline-flex; }
+          .command-trigger {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 28px; height: 28px; border-radius: 8px;
+            border: 1px solid var(--dsw-alias-border-l2);
+            background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer;
+          }
+          .command-trigger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+          .command-trigger:disabled { color: var(--dsw-alias-label-dimmed); cursor: default; }
+          .command-menu {
+            position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 30;
+            min-width: 240px; max-height: 320px; overflow-y: auto; padding: 4px;
+            border-radius: 10px; border: 1px solid var(--dsw-alias-border-l1, #232a36);
+            background: var(--dsw-static-neutral-bluish-850, #161a21);
+            box-shadow: var(--dsw-shadow-lv2, 0 4px 12px rgba(0, 0, 0, .4));
+          }
+          .command-option {
+            display: flex; align-items: baseline; gap: 8px; width: 100%;
+            padding: 6px 8px; border: none; border-radius: 6px; background: transparent;
+            color: var(--dsw-alias-label-primary); font-size: 13px; text-align: left; cursor: pointer;
+          }
+          .command-option:hover { background: var(--dsw-alias-interactive-bg-hover); }
+          .command-option-name { flex: none; font-family: var(--ds-font-family-code); font-weight: 600; }
+          .command-option-desc { flex: 1; min-width: 0; color: var(--dsw-alias-label-secondary); font-size: 12px; }
           /* Back-to-bottom: a circular chevron floating just above the composer,
              revealed only while the reader is scrolled away from the newest
              message (reference ChatView .toBottom). */
@@ -395,6 +420,12 @@ defmodule DshBeamWeb.Layouts do
             letter-spacing: .03em; text-transform: uppercase;
           }
           .tool-command { font-family: var(--ds-font-family-code); font-size: 13px; word-break: break-all; }
+          .command-card {
+            border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px;
+            padding: 8px 12px; background: var(--dsw-alias-bg-layer-1, #1a1f27);
+            font-family: var(--ds-font-family-code); font-size: 13px;
+          }
+          .command-card.command-done { color: var(--dsw-alias-label-secondary); }
           .tool-result {
             border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px;
             background: var(--dsw-static-neutral-bluish-900, #0c0f14); overflow: hidden;

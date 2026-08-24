@@ -48,7 +48,8 @@ defmodule DshBeamWeb.ConsoleLive do
     %{id: :panel_workspace, plugin: DshBeam.Ui.Panel.Workspace, config: [], disabled: false},
     %{id: :panel_trajectory, plugin: DshBeam.Ui.Panel.Trajectory, config: [], disabled: false},
     %{id: :panel_access, plugin: DshBeam.Ui.Panel.Access, config: [], disabled: false},
-    %{id: :panel_model_select, plugin: DshBeam.Ui.Panel.ModelSelect, config: [], disabled: false}
+    %{id: :panel_model_select, plugin: DshBeam.Ui.Panel.ModelSelect, config: [], disabled: false},
+    %{id: :panel_command, plugin: DshBeam.Ui.Panel.Command, config: [], disabled: false}
   ]
 
   # The entries a seed/preset-apply swaps out of a composition: the agent core
@@ -76,7 +77,8 @@ defmodule DshBeamWeb.ConsoleLive do
     :panel_workspace,
     :panel_trajectory,
     :panel_access,
-    :panel_model_select
+    :panel_model_select,
+    :panel_command
   ]
 
   @impl true
@@ -134,6 +136,7 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:permission_acknowledged, false)
       |> assign(:model_open, false)
       |> assign(:model_pane, :root)
+      |> assign(:command_open, false)
       |> refresh()
 
     {:ok, socket}
@@ -225,7 +228,8 @@ defmodule DshBeamWeb.ConsoleLive do
             :panel_workspace,
             :panel_trajectory,
             :panel_access,
-            :panel_model_select
+            :panel_model_select,
+            :panel_command
           ])
       )
 
@@ -234,48 +238,12 @@ defmodule DshBeamWeb.ConsoleLive do
   end
 
   def handle_event("ask", %{"text" => text}, socket) do
-    case loop_pid(socket.assigns.runtime) do
-      {:ok, loop} ->
-        # Run the whole model↔tool loop off the LiveView process: the loop
-        # makes a real HTTP call (up to the receive_timeout budget, default
-        # 300s), which must not block the event handler and freeze the chat
-        # pane. The result is pushed back as a message and rendered in
-        # handle_info/2. A per-turn cancellation token rides alongside: the
-        # loop polls it at its step boundaries, and the adapter polls it
-        # while the transport runs, so "stop" truly halts the turn.
-        from = self()
+    case DshBeam.Command.parse(text) do
+      {:command, name, args} ->
+        run_command(socket, name, args)
 
-        turn = make_ref()
-        token = DshBeam.Agent.Cancel.new()
-
-        {:ok, task} =
-          Task.start(fn ->
-            result = DshBeam.Agent.Loop.run_trace(loop, text, token)
-            send(from, {:chat_result, turn, text, result})
-          end)
-
-        # Watchdog: a result (or the user's stop) cancels the turn-scoped
-        # guard implicitly — a stale guard finds chat_turn already reset and
-        # is ignored. Only a truly hung loop is cleared here.
-        Process.send_after(self(), {:chat_guard, turn}, @chat_result_timeout_ms)
-
-        {:noreply,
-         socket
-         |> assign(
-           chat_text: "",
-           chat_busy: true,
-           chat_task: task,
-           chat_turn: turn,
-           chat_token: token,
-           chat_started_at: System.system_time(:second)
-         )
-         |> refresh()}
-
-      :not_found ->
-        {:noreply,
-         socket
-         |> assign(chat_text: "", chat_error: ":no_loop_plugin")
-         |> refresh()}
+      {:not_command, _} ->
+        ask_agent(socket, text)
     end
   end
 
@@ -568,6 +536,21 @@ defmodule DshBeamWeb.ConsoleLive do
   def handle_event("model_effort_select", %{"effort" => effort}, socket) do
     socket = apply_model(socket, reasoning_effort: effort)
     {:noreply, socket |> assign(model_open: false, model_pane: :root) |> refresh()}
+  end
+
+  # -- slash-command menu --
+
+  def handle_event("command_toggle", _params, socket) do
+    {:noreply, assign(socket, command_open: not socket.assigns.command_open) |> refresh()}
+  end
+
+  def handle_event("command_pick", %{"command" => name}, socket) do
+    # Pick inserts the "/name " claim token into the draft; the user completes
+    # the args and submits, which the ask handler routes through run_command.
+    {:noreply,
+     socket
+     |> assign(chat_text: "/" <> name <> " ", command_open: false)
+     |> refresh()}
   end
 
   def handle_event("plugin_toggle", %{"plugin" => plugin_str}, socket) do
@@ -1126,6 +1109,12 @@ defmodule DshBeamWeb.ConsoleLive do
   defp chat_entry(%{"role" => "error", "content" => content}),
     do: %{kind: :error, content: content}
 
+  defp chat_entry(%{"role" => "command_run", "name" => name, "args" => args}),
+    do: %{kind: :command_run, name: name, args: args}
+
+  defp chat_entry(%{"role" => "command_done", "name" => name, "content" => content}),
+    do: %{kind: :command_done, name: name, content: content}
+
   defp chat_entry(other), do: %{kind: :event, content: inspect(other)}
 
   # The readable invocation of a tool call: the bash command verbatim, and any
@@ -1207,6 +1196,103 @@ defmodule DshBeamWeb.ConsoleLive do
     end
 
     socket
+  end
+
+  # Slash-command execution: append a durable command_run/command_done pair
+  # (the reference's command/run + command/done log events) around the
+  # dispatch, then re-render. The result string becomes the command card body.
+  # Run the whole model↔tool loop off the LiveView process: the loop makes a
+  # real HTTP call (up to the receive_timeout budget, default 300s), which must
+  # not block the event handler and freeze the chat pane. The result is pushed
+  # back as a message and rendered in handle_info/2. A per-turn cancellation
+  # token rides alongside: the loop polls it at its step boundaries, and the
+  # adapter polls it while the transport runs, so "stop" truly halts the turn.
+  defp ask_agent(socket, text) do
+    case loop_pid(socket.assigns.runtime) do
+      {:ok, loop} ->
+        from = self()
+
+        turn = make_ref()
+        token = DshBeam.Agent.Cancel.new()
+
+        {:ok, task} =
+          Task.start(fn ->
+            result = DshBeam.Agent.Loop.run_trace(loop, text, token)
+            send(from, {:chat_result, turn, text, result})
+          end)
+
+        # Watchdog: a result (or the user's stop) cancels the turn-scoped guard
+        # implicitly — a stale guard finds chat_turn already reset and is
+        # ignored. Only a truly hung loop is cleared here.
+        Process.send_after(self(), {:chat_guard, turn}, @chat_result_timeout_ms)
+
+        {:noreply,
+         socket
+         |> assign(
+           chat_text: "",
+           chat_busy: true,
+           chat_task: task,
+           chat_turn: turn,
+           chat_token: token,
+           chat_started_at: System.system_time(:second)
+         )
+         |> refresh()}
+
+      :not_found ->
+        {:noreply, socket |> assign(chat_text: "", chat_error: ":no_loop_plugin") |> refresh()}
+    end
+  end
+
+  defp run_command(socket, name, args) do
+    session = alive_session(socket.assigns.ctx)
+
+    append_command_event(session, %{"role" => "command_run", "name" => name, "args" => args})
+
+    {socket, result} = dispatch_command(socket, name, args)
+
+    append_command_event(session, %{"role" => "command_done", "name" => name, "content" => result})
+
+    {:noreply, socket |> assign(chat_text: "", chat_error: nil) |> refresh()}
+  end
+
+  defp append_command_event({:ok, session}, event), do: DshBeam.Session.append(session, event)
+  defp append_command_event(_none, _event), do: :ok
+
+  defp dispatch_command(socket, "permission", args) do
+    presets = ["read-only", "workspace-write", "danger-full-access"]
+
+    if args in presets do
+      apply_permission(socket, args)
+      {socket, "preset #{args}"}
+    else
+      {socket, "unknown preset \"#{args}\" (available: #{Enum.join(presets, ", ")})"}
+    end
+  end
+
+  defp dispatch_command(socket, "model", args) do
+    if DshBeam.Llm.Models.find_model(args) do
+      apply_model(socket, model: args)
+      {socket, "model #{args}"}
+    else
+      {socket, "unknown model \"#{args}\""}
+    end
+  end
+
+  defp dispatch_command(socket, "clear", _args) do
+    case alive_session(socket.assigns.ctx) do
+      {:ok, session} -> DshBeam.Session.clear(session)
+      _ -> :ok
+    end
+
+    {socket, "conversation cleared"}
+  end
+
+  defp dispatch_command(socket, "help", _args) do
+    {socket, "commands: " <> Enum.join(DshBeam.Command.names(), ", ")}
+  end
+
+  defp dispatch_command(socket, name, _args) do
+    {socket, "unknown command \"/#{name}\" (try /help)"}
   end
 
   defp group_turns(events) do

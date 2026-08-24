@@ -549,6 +549,35 @@ defmodule DshBeam.ConsoleTest do
     assert %{model: "deepseek-reasoner", reasoning_effort: "max"} = DshBeam.Llm.config(llm)
   end
 
+  test "a slash command is routed to the command runner, not the agent loop",
+       %{session: session, ctx: ctx} do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    render_submit(view, "seed", %{})
+    open_chat_session(view, ctx)
+
+    # /permission applies the preset and records a command card pair
+    render_submit(view, "ask", %{"text" => "/permission read-only"})
+    {:ok, session_pid} = DshBeam.Context.get(ctx, :session)
+    assert DshBeam.Permission.current(session_pid) == "read-only"
+
+    html = render(view)
+    assert html =~ "command-card"
+    assert html =~ "/permission"
+
+    # /model reconfigures the llm provider
+    render_submit(view, "ask", %{"text" => "/model deepseek-reasoner"})
+    {:ok, llm} = DshBeam.Context.get(ctx, :llm)
+    assert %{model: "deepseek-reasoner"} = DshBeam.Llm.config(llm)
+
+    # /help reports the catalog without touching the model/loop
+    render_submit(view, "ask", %{"text" => "/help"})
+    assert render(view) =~ "commands:"
+
+    # the command events were appended to the session log
+    assert Enum.any?(DshBeam.Session.all(session_pid), &(&1["role"] == "command_run"))
+    assert Enum.any?(DshBeam.Session.all(session_pid), &(&1["role"] == "command_done"))
+  end
+
   test "crashing a sandbox child re-injects a fresh OS process", %{
     session: session,
     ctx: ctx,

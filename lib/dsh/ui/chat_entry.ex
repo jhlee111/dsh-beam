@@ -41,6 +41,20 @@ defmodule DshBeam.Ui.ChatEntry do
           <span class="role-icon role-error" aria-hidden="true">⚠</span>
           <code><%= @entry.content %></code>
         </div>
+      <% :command_run -> %>
+        <div class="command-card">
+          <span class="tool-label">
+            <span class="role-icon role-tool" aria-hidden="true">❯</span>
+            /<%= @entry.name %><%= if @entry.args != "", do: " " <> @entry.args %>
+          </span>
+        </div>
+      <% :command_done -> %>
+        <div class="command-card command-done">
+          <span class="tool-label">
+            <span class="role-icon role-tool" aria-hidden="true">⏎</span>
+            /<%= @entry.name %> · <%= @entry.content %>
+          </span>
+        </div>
       <% _ -> %>
         <div class="msg-event"><code><%= @entry.content %></code></div>
     <% end %>
