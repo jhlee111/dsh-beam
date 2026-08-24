@@ -44,6 +44,12 @@ defmodule DshBeam.AgentTest do
     assert Enum.any?(second_messages, &(&1["role"] == "tool"))
     assert Enum.any?(second_messages, &(&1["role"] == "assistant" and &1["tool_calls"] != nil))
 
+    # the assistant tool-call turn uses "" content (never nil), so the wire
+    # message and the session projection stay identical (some gateways reject
+    # a null content, and a nil would poison later replays)
+    [assistant_turn] = Enum.filter(second_messages, &(&1["role"] == "assistant"))
+    assert assistant_turn["content"] == ""
+
     # the turn was logged to the session (the single source of truth), with
     # the tool call and result recorded chronologically: user, tool_call,
     # tool_result, assistant.
@@ -93,7 +99,9 @@ defmodule DshBeam.AgentTest do
 
     assert {:ok, "final answer"} = DshBeam.Agent.Loop.run(loop, "second task")
 
-    # the second turn's FIRST model call must carry the first turn's history
+    # the second turn's FIRST model call must carry the first turn's history —
+    # including the tool turn (assistant tool_calls + the tool result), so the
+    # prompt prefix is stable across runs (cache-friendly, deriveMessages-like)
     assert_receive {:loop_call, first_messages, _opts}, 1000
 
     assert Enum.any?(first_messages, &(&1["role"] == "user" and &1["content"] == "first task"))
@@ -103,13 +111,62 @@ defmodule DshBeam.AgentTest do
              &(&1["role"] == "assistant" and &1["content"] == "final answer")
            )
 
+    assert Enum.any?(
+             first_messages,
+             &(&1["role"] == "assistant" and &1["tool_calls"] != nil)
+           )
+
+    assert Enum.any?(first_messages, &(&1["role"] == "tool"))
+
     assert Enum.any?(first_messages, &(&1["role"] == "user" and &1["content"] == "second task"))
 
-    # the session log accumulated both turns, each with user + tool_call +
-    # tool_result + assistant (8 events total)
+    # the session log accumulated both turns: turn 1 = user, tool_call,
+    # tool_result, assistant (4 events); turn 2 = user, assistant (the scripted
+    # model sees the replayed tool turn and answers directly) — 6 events total
     ctx = DshBeam.Runtime.context(runtime)
     {:ok, session} = DshBeam.Context.get(ctx, :session)
-    assert DshBeam.Session.count(session) == 8
+    assert DshBeam.Session.count(session) == 6
+  end
+
+  test "the projection round-trips a tool turn into the model wire shape" do
+    {:ok, session} = DshBeam.Session.Memory.start([])
+
+    events = [
+      %{"role" => "user", "content" => "first"},
+      %{
+        "role" => "tool_call",
+        "id" => "c1",
+        "name" => "loop_echo",
+        "arguments" => %{"text" => "hi"},
+        "arguments_json" => ~s({"text":"hi"})
+      },
+      %{
+        "role" => "tool_result",
+        "tool_call_id" => "c1",
+        "name" => "loop_echo",
+        "content" => "echo:hi"
+      },
+      %{"role" => "assistant", "content" => "final answer"}
+    ]
+
+    Enum.each(events, &DshBeam.Session.append(session, &1))
+
+    assert DshBeam.Agent.Loop.Projection.from_session(session) == [
+             %{"role" => "user", "content" => "first"},
+             %{
+               "role" => "assistant",
+               "content" => "",
+               "tool_calls" => [
+                 %{
+                   "id" => "c1",
+                   "type" => "function",
+                   "function" => %{"name" => "loop_echo", "arguments" => ~s({"text":"hi"})}
+                 }
+               ]
+             },
+             %{"role" => "tool", "tool_call_id" => "c1", "content" => "echo:hi"},
+             %{"role" => "assistant", "content" => "final answer"}
+           ]
   end
 end
 
