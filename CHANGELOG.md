@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Self-modification + reusable plugins
+
+- The agent loop can now author plugins from inside a workspace: a
+  `define_plugin` tool compiles and mounts a plugin live (in-process, via
+  `DshBeam.Creator.define`), and a `save_plugin` tool persists its source as a
+  reusable `.exs` under `~/.dsh/plugins`. The console loads those saved plugins
+  on boot, so a plugin made in one workspace is available in every project.
+
 ### Sidebar
 
 - Session cards use a small current-indicator dot instead of a large pill, a

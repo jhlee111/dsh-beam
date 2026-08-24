@@ -29,6 +29,7 @@ defmodule DshBeamWeb.ConsoleLive do
     %{id: :bash, plugin: DshBeam.Tool.Bash, config: [], disabled: false},
     %{id: :fs, plugin: DshBeam.Tool.Fs, config: [root: "."], disabled: false},
     %{id: :todo, plugin: DshBeam.Tool.Todo, config: [], disabled: false},
+    %{id: :tool_plugin, plugin: DshBeam.Tool.Plugin, config: [], disabled: false},
     %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false},
     %{id: :panel_composition, plugin: DshBeam.Ui.Panel.Composition, config: [], disabled: false},
     %{id: :panel_bindings, plugin: DshBeam.Ui.Panel.Bindings, config: [], disabled: false},
@@ -54,6 +55,7 @@ defmodule DshBeamWeb.ConsoleLive do
     :bash,
     :fs,
     :todo,
+    :tool_plugin,
     :loop,
     :panel_composition,
     :panel_bindings,
@@ -1057,13 +1059,15 @@ defmodule DshBeamWeb.ConsoleLive do
         id: "agent",
         name: "Agent",
         desc: "Session + llm + adapter + shell + bash + loop",
-        entries: panel_entries() ++ core_entries([:session, :llm, :adapter, :shell, :bash, :loop])
+        entries:
+          panel_entries() ++
+            core_entries([:session, :llm, :adapter, :shell, :bash, :tool_plugin, :loop])
       },
       %{
         id: "chat",
         name: "Chat",
         desc: "Session + llm + adapter + loop (no tools)",
-        entries: panel_entries() ++ core_entries([:session, :llm, :adapter, :loop])
+        entries: panel_entries() ++ core_entries([:session, :llm, :adapter, :tool_plugin, :loop])
       }
     ]
   end
