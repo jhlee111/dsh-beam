@@ -30,6 +30,8 @@ Start here, then follow the links:
 - **[PLAN.md](PLAN.md)** — the research question, the OTP mapping, the milestone
   history, and the conclusion (where OTP isolation and the paper's model
   reinforce vs collide).
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — how to contribute, and where to help
+  (the roadmap items as starting points).
 - **[REVIEW.md](REVIEW.md)** — the review history and fix log.
 
 ## What's inside
