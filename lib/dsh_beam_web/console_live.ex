@@ -1107,7 +1107,11 @@ defmodule DshBeamWeb.ConsoleLive do
         # user-visible events.
         |> Enum.reject(&(&1["role"] in ["turn_start", "turn_end", "request"]))
         |> group_reasoning(busy)
-        |> Enum.map(&chat_entry/1)
+        |> Enum.with_index()
+        # A stable positional id lets the Disclosure hook keep its <details>
+        # open state across morphdom patches (phx-hook requires an id). The
+        # position is deterministic per session log, so it survives streaming.
+        |> Enum.map(fn {event, i} -> event |> chat_entry() |> Map.put(:id, "chat-entry-#{i}") end)
 
       _ ->
         []

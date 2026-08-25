@@ -26,7 +26,12 @@ defmodule DshBeam.Ui.ChatEntry do
           </button>
         </div>
       <% :reasoning -> %>
-        <details class="reasoning-row" data-running={@entry.running}>
+        <details
+          class="reasoning-row"
+          data-running={@entry.running}
+          id={@entry.id}
+          phx-hook="Disclosure"
+        >
           <summary>
             <DshBeamWeb.Icons.think size={14} class="reasoning-icon" />
             <span class="reasoning-title">Think</span>
@@ -44,7 +49,7 @@ defmodule DshBeam.Ui.ChatEntry do
           <code class="tool-command">$ <%= @entry.command %></code>
         </div>
       <% :tool_result -> %>
-        <details class="tool-result">
+        <details class="tool-result" id={@entry.id} phx-hook="Disclosure">
           <summary class="tool-result-summary">
             <span class="tool-label">
               <span class="role-icon role-tool" aria-hidden="true">⏎</span>
