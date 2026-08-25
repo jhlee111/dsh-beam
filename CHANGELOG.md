@@ -1,102 +1,117 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — reasoning streams live, self-modifying plugins (2026-08-24)
+
+The console turns from a static conversation into a live reasoning surface:
+deepseek-reasoner's thinking streams in real time (SSE through an agent
+accumulator, one row per fragment, latest line followed), and the agent can
+author, hot-swap, and persist its own plugins from inside a workspace.
+
+### Reasoning streaming (SSE)
+
+- Streaming now runs through an **SSE accumulator agent**: Req's `into: fun`
+  threads the `{request, response}` tuple untouched (both Finch and Plug
+  transports), while the parse state (buffer/reasoning/content/tool_calls/
+  finish_reason/usage) lives in the agent. Reasoning fragments coalesce into
+  rows that stream live into the chat pane, with the view following the
+  latest line while the model thinks (regression test replays raw SSE bytes
+  through a `send_chunked` plug).
+- The cancel token is wired into the streaming transport (`poll/4` with a
+  normalizer), so a stop aborts an in-flight stream, streaming or not.
+- `usage` is requested in the stream and the trailing buffered SSE event is
+  flushed at stream end.
+- The SSE accumulator agent is **unlinked**, so a console crash (or a
+  reconnect) never takes the stream down with it; expanded rows stay open
+  across live re-renders and streaming re-renders stay cheap (only the live
+  rows update).
 
 ### Chat watchdog
 
-- The chat pane now runs a turn-scoped watchdog: if the agent loop fiber hangs
-  (a `gen_statem` call blocked outside the transport's receive budget), the
-  turn is killed and the pane settles with a visible timeout instead of
-  staying busy forever. The watchdog is turn-scoped, so a result that arrives
-  for an already-settled turn is ignored.
+- The chat pane now runs a turn-scoped watchdog: if the agent loop fiber
+  hangs (a `gen_statem` call blocked outside the transport's receive budget),
+  the turn is killed and the pane settles with a visible timeout instead of
+  staying busy forever. A result arriving for an already-settled turn is
+  ignored.
 
 ### LLM receive timeout as a typed setting
 
 - `receive_timeout` (ms) is now a typed setting on `DshBeam.Llm.Plugin`,
-  exposed in the Models surface and persisted to the settings store, so a slow
-  reasoning model can be given a longer per-request budget without recompiling.
-  The default moves from 120s to 300s — the 120s budget was too tight for
-  `deepseek-reasoner` on a large prompt prefix.
+  exposed in the Models surface and persisted to the settings store, so a
+  slow reasoning model gets a longer per-request budget without recompiling.
+  Default moves 120s → 300s — 120s was too tight for `deepseek-reasoner` on a
+  large prompt prefix.
 
 ### Chat history — cache-friendly tool turns
 
 - `DshBeam.Llm.Chat` now projects the session log through the same
-  `Agent.Loop.Projection` the agent loop replays, so a chat consumer sitting
-  between tool runs no longer drops `tool_call`/`tool_result` events: the full
-  prefix (assistant `tool_calls` with `""` content, then the `tool` messages)
-  replays verbatim into the model. One projection for every model request —
-  stable prefix, provider prompt-cache hits preserved (ADR-0014).
+  `Agent.Loop.Projection` the agent loop replays, so a chat consumer between
+  tool runs no longer drops `tool_call`/`tool_result` events: the full prefix
+  (assistant `tool_calls` with `""` content, then the `tool` messages)
+  replays verbatim into the model. One projection per model request — stable
+  prefix, provider prompt-cache hits preserved (ADR-0014).
 
 ### Self-modification — hot swap
 
-- Added a `redefine_plugin` tool: the agent loop can hot-swap an already-mounted
-  plugin transactionally (compile new source for the same module name; a failed
-  start rolls back). The `self_modification` prompt section now documents the
-  create → define → redefine → save workflow.
+- Added a `redefine_plugin` tool: the agent loop can hot-swap an
+  already-mounted plugin transactionally (compile new source for the same
+  module name; a failed start rolls back). The `self_modification` prompt
+  section documents the create → define → redefine → save workflow.
 
 ### System prompt as a plugin registry
 
 - Added a `prompt_section` DSL so any plugin contributes its own guidance to
   the assembled system prompt (the reference's `SystemPrompt` registry). The
   agent loop now builds the system prompt from the harness identity + default
-  persona + every plugin's sections, instead of a hardcoded one-liner. The
-  self-modification tool documents its create → define → save workflow there.
+  persona + every plugin's sections, instead of a hardcoded one-liner.
 
 ### Self-modification + reusable plugins
 
-- The agent loop can now author plugins from inside a workspace: a
+- The agent loop can author plugins from inside a workspace: a
   `define_plugin` tool compiles and mounts a plugin live (in-process, via
   `DshBeam.Creator.define`), and a `save_plugin` tool persists its source as a
-  reusable `.exs` under `~/.dsh/plugins`. The console loads those saved plugins
-  on boot, so a plugin made in one workspace is available in every project.
+  reusable `.exs` under `~/.dsh/plugins`. The console loads saved plugins on
+  boot, so a plugin made in one workspace is available in every project.
 
-### Sidebar
+### Console shell — reference layout
 
-- Session cards use a small current-indicator dot instead of a large pill, a
-  friendly title (the workspace folder name, not the internal branch), and a
-  wrapping cwd path. The sidebar boundary is now draggable to resize (clamped
-  200–520px), with the settled width persisted.
-
-### Conversation composer
-
-- The composer is now a larger card with an auto-growing textarea (44px min,
-  220px max, then scrolls) instead of a single-line input, and the send/stop
-  control sits inside the card's bottom-right corner.
+- The console now mirrors the reference three-column `AppFrame` grid
+  (sidebar | conversation | details), with the reference `ui-sidebar` and
+  `ui-conversation` geometry: a sidebar column (brand, workspace browsing
+  region, settings seat), a conversation column (crumbs + Chat/Trajectory tabs
+  over a scroll body + composer seat), and a details column. Chat and
+  Trajectory are tabbed views (`:conversation` keyed slot); Todo lives in the
+  details column. The design theme is scoped via `body[data-ds-dark-theme]`,
+  so the console renders on the reference's dark token palette.
 
 ### Conversation rendering
 
-- Added the reference's back-to-bottom control: a circular chevron floats just
-  above the composer while the reader is scrolled away from the newest message,
-  and clicking it scrolls to the bottom. A client-side hook also follows the
-  stream — while pinned to the bottom, new nodes keep the view scrolled to the
-  latest message.
-
-### Fixes
-
-- Closing the current workspace session no longer crashes the console: the
-  chat/todo/trajectory projections now guard against a stale (dead) `:session`
-  binding instead of calling `subscribe`/`all` on the killed pid. Closing also
-  reports "session closed" instead of a raw `:ok`.
-
-### Conversation rendering
-
+- Chat and Trajectory render the reference's conversation shape (borrowed as
+  LiveView components, not web components): a right-aligned user bubble,
+  assistant markdown (Earmark), and terminal-style tool cards showing the
+  `bash` command verbatim instead of the raw arguments map, with the tool
+  output in a terminal block. Shared via `DshBeam.Ui.ChatEntry`.
+- Long tool output and markdown code blocks are capped to a scrollable
+  `max-height` (320px) instead of expanding the transcript to the full
+  content.
 - Ported the reference chat's role chrome: assistant/tool/error entries carry
   small colored role icons (✦ brand-blue assistant, ❯/⏎ green tool, ⚠ red
   error), and a running turn renders the "Deep diving…" shimmer with an
   elapsed-time clock (a client-side hook that reveals elapsed after 15s).
+- Added the reference's back-to-bottom control: a circular chevron floats just
+  above the composer while the reader is scrolled away from the newest
+  message. A client-side hook follows the stream — while pinned to the bottom,
+  new nodes keep the view scrolled to the latest message.
 
-### Conversation gated on a workspace session
+### Conversation composer
 
-- The chat/trajectory conversation and its composer only render while a
-  workspace session is current. With no workspace open, the conversation
-  column shows an empty state ("no workspace open") and an inert composer,
-  so the chat no longer silently runs over the boot's default directory.
-
-### Conversation rendering
-
-- Long tool output and markdown code blocks are capped to a scrollable
-  `max-height` (320px) instead of expanding the transcript to the full
-  content, matching the reference's collapsed-to-max presentation.
+- The composer is now a single send/stop toggle (the reference's shape) instead
+  of an "ask" + "new conversation" pair: idle shows `send`, a running turn
+  shows `stop` (best-effort — it unblocks the pane and marks the session,
+  while the synchronous loop may still finish in the background). "new
+  conversation" moved to the conversation header as a utility action.
+- The composer is a larger card with an auto-growing textarea (44px min, 220px
+  max, then scrolls) instead of a single-line input; the send/stop control
+  sits inside the card's bottom-right corner.
 
 ### Workspace sessions — relaxed to any folder
 
@@ -117,34 +132,39 @@
   opening a new session is the sidebar workspace's "+ new session", which is
   where multiple sessions within a workspace are opened.
 
-### Sidebar toggle
+### Sidebar
 
+- Session cards use a small current-indicator dot instead of a large pill, a
+  friendly title (the workspace folder name, not the internal branch), and a
+  wrapping cwd path. The sidebar boundary is now draggable to resize (clamped
+  200–520px), with the settled width persisted.
 - The sidebar "panel" control is now the collapse/expand toggle (280px ↔ 56px
   rail), not a second settings opener. The brand is a static label, and
   Settings opens from the sidebar foot only.
 
-### Conversation composer
+### Conversation gated on a workspace session
 
-- The composer is now a single send/stop toggle (the reference's shape) instead
-  of an "ask" + "new conversation" pair: idle shows `send`, a running turn shows
-  `stop` (best-effort — it unblocks the pane and marks the session, while the
-  synchronous loop may still finish in the background). "new conversation"
-  moved to the conversation header as a utility action.
+- The chat/trajectory conversation and its composer only render while a
+  workspace session is current. With no workspace open, the conversation
+  column shows an empty state ("no workspace open") and an inert composer,
+  so the chat no longer silently runs over the boot's default directory.
 
-### Conversation rendering
+### Models settings surface
 
-- Chat and Trajectory now render the reference's conversation shape (borrowed
-  as LiveView components, not web components): a right-aligned user bubble,
-  assistant markdown (Earmark), and terminal-style tool cards showing the
-  `bash` command verbatim instead of the raw arguments map, with the tool
-  output in a terminal block. Shared via `DshBeam.Ui.ChatEntry`.
+- The Models settings tab is now a provider card in the reference's shape:
+  a provider name + credential-configured dot, a write-only API-key input
+  (env-reference or literal), and a collapsed "customized settings" area for
+  `base_url` and `model`. Applying reconfigures the running provider and
+  persists the values, and the result line no longer double-inspects.
 
-### Fixes
+### Plugins settings surface — configurable cards
 
-- The Settings modal no longer closes when clicking inside the panel (e.g. the
-  Models API-key input): the dim backdrop is now a sibling of the panel with
-  its own `close_settings` click, so clicks inside the panel can never bubble
-  to it. Clicking the backdrop still closes.
+- The Plugins tab now renders each plugin as an accordion card (reference
+  `ui-settings-plugins`): a header with a friendly name, an enabled/disabled
+  pill, a description, and an unsaved badge; expanding a configurable card
+  discloses its typed fields with staged edit + Save/Discard. Edits stage in
+  the LiveView until Save writes them (and re-mounts the plugin); Discard
+  drops them without writing.
 
 ### General + Agent presets settings
 
@@ -156,33 +176,16 @@
   (reconciles the runtime composition to its entries), duplicated into a
   custom preset, and deleted (custom only).
 
-### Plugins settings surface — configurable cards
+### Fixes
 
-- The Plugins tab now renders each plugin as an accordion card (reference
-  `ui-settings-plugins`): a header with a friendly name, an enabled/disabled
-  pill, a description, and an unsaved badge; expanding a configurable card
-  discloses its typed fields with staged edit + Save/Discard. Edits stage in
-  the LiveView until Save writes them (and re-mounts the plugin); Discard
-  drops them without writing.
-
-### Console shell — reference layout
-
-- The console now mirrors the reference three-column `AppFrame` grid
-  (sidebar | conversation | details), with the reference `ui-sidebar` and
-  `ui-conversation` geometry: a sidebar column (brand, workspace browsing
-  region, settings seat), a conversation column (crumbs + Chat/Trajectory tabs
-  over a scroll body + composer seat), and a details column. Chat and
-  Trajectory are tabbed views (`:conversation` keyed slot); Todo lives in the
-  details column. The design theme is scoped via `body[data-ds-dark-theme]`,
-  so the console renders on the reference's dark token palette.
-
-### Models settings surface
-
-- The Models settings tab is now a provider card in the reference's shape:
-  a provider name + credential-configured dot, a write-only API-key input
-  (env-reference or literal), and a collapsed "customized settings" area for
-  `base_url` and `model`. Applying reconfigures the running provider and
-  persists the values, and the result line no longer double-inspects.
+- Closing the current workspace session no longer crashes the console: the
+  chat/todo/trajectory projections now guard against a stale (dead) `:session`
+  binding instead of calling `subscribe`/`all` on the killed pid. Closing also
+  reports "session closed" instead of a raw `:ok`.
+- The Settings modal no longer closes when clicking inside the panel (e.g. the
+  Models API-key input): the dim backdrop is now a sibling of the panel with
+  its own `close_settings` click, so clicks inside the panel can never bubble
+  to it. Clicking the backdrop still closes.
 
 ## 0.1.0 — a usable agent harness (2026-08-23)
 
