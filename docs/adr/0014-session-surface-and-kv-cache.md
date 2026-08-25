@@ -71,7 +71,7 @@ accident.
 
 | Concern | Reference | dsh-beam |
 |---|---|---|
-| log-derived request (surface fold) | core `agent-loop` | core `Agent.Loop` (has it) |
+| log-derived request (surface fold) | core `agent-loop` | core `Agent.Loop` + `Llm.Chat` (both project the log via `Agent.Loop.Projection`) |
 | append-only log + surface | core `session` | `Session` (log; surface split is implicit) |
 | cache usage parsing | adapter `llm-deepseek` | **to add**: `Llm.Adapter.Req` |
 | token pressure/usage projection | plugin `token-meter` (inject) | **to add**: `DshBeam.TokenMeter` plugin |

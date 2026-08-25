@@ -34,32 +34,47 @@ defmodule DshBeam.Session.File do
       cwd: Keyword.get(opts, :cwd)
     }
 
-    {:ok, %{path: path, seq: length(events), header: header, subscribers: %{}}}
+    # The decoded events are cached in memory (the file stays the durable
+    # source of truth). Re-reading + decoding the whole JSONL on every all/1
+    # turned each streamed reasoning append into three full disk re-reads per
+    # LiveView refresh — enough to drown the renderer mid-stream.
+    {:ok,
+     %{
+       path: path,
+       seq: length(events),
+       events: events,
+       header: header,
+       subscribers: %{}
+     }}
   end
 
   @impl true
   def handle_call({:append, event}, _from, state) do
     seq = state.seq + 1
-    File.open(state.path, [:append], fn io -> IO.puts(io, JSON.encode!(event)) end)
+
+    # File.write writes the raw UTF-8 bytes (Elixir strings are already UTF-8),
+    # unlike the previous File.open + IO.puts path, which opened a latin1
+    # device and failed to transcode non-ASCII (e.g. Korean) content.
+    File.write(state.path, JSON.encode!(event) <> "\n", [:append])
+
     notify(state.subscribers, event)
-    {:reply, {:ok, seq}, %{state | seq: seq}}
+    {:reply, {:ok, seq}, %{state | seq: seq, events: state.events ++ [event]}}
   end
 
   @impl true
   def handle_call(:all, _from, state) do
-    events = state.path |> File.stream!() |> Enum.map(&decode_line/1)
-    {:reply, events, state}
+    {:reply, state.events, state}
   end
 
   @impl true
   def handle_call(:count, _from, state) do
-    {:reply, state.path |> File.stream!() |> Enum.count(), state}
+    {:reply, length(state.events), state}
   end
 
   @impl true
   def handle_call(:clear, _from, state) do
     File.write!(state.path, "")
-    {:reply, :ok, %{state | seq: 0}}
+    {:reply, :ok, %{state | seq: 0, events: []}}
   end
 
   @impl true

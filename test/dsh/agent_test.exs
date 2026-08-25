@@ -21,6 +21,12 @@ defmodule DshBeam.AgentTest do
 
   defp loop_entry, do: %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false}
 
+  # The loop now records structural events (turn_start/request/turn_end); the
+  # content assertions below care only about the user-visible events.
+  defp content_events(events) do
+    Enum.reject(events, &(&1["role"] in ["turn_start", "turn_end", "request"]))
+  end
+
   test "the loop dispatches a tool call and answers" do
     {:ok, runtime} =
       DshBeam.Runtime.start_link(
@@ -44,11 +50,17 @@ defmodule DshBeam.AgentTest do
     assert Enum.any?(second_messages, &(&1["role"] == "tool"))
     assert Enum.any?(second_messages, &(&1["role"] == "assistant" and &1["tool_calls"] != nil))
 
+    # the assistant tool-call turn uses "" content (never nil), so the wire
+    # message and the session projection stay identical (some gateways reject
+    # a null content, and a nil would poison later replays)
+    [assistant_turn] = Enum.filter(second_messages, &(&1["role"] == "assistant"))
+    assert assistant_turn["content"] == ""
+
     # the turn was logged to the session (the single source of truth), with
     # the tool call and result recorded chronologically: user, tool_call,
     # tool_result, assistant.
     {:ok, session} = DshBeam.Context.get(ctx, :session)
-    assert DshBeam.Session.count(session) == 4
+    assert content_events(DshBeam.Session.all(session)) |> length() == 4
 
     assert [
              %{"role" => "user"},
@@ -56,7 +68,15 @@ defmodule DshBeam.AgentTest do
              %{"role" => "tool_result"},
              %{"role" => "assistant"}
            ] =
-             DshBeam.Session.all(session)
+             content_events(DshBeam.Session.all(session))
+
+    # the structural events wrap the content: one turn, one request per model
+    # call (the scripted adapter is called twice), and a completed turn_end
+    assert DshBeam.Session.all(session) |> Enum.count(&(&1["role"] == "turn_start")) == 1
+    assert DshBeam.Session.all(session) |> Enum.count(&(&1["role"] == "request")) == 2
+
+    assert [%{"role" => "turn_end", "reason" => "completed"}] =
+             DshBeam.Session.all(session) |> Enum.filter(&(&1["role"] == "turn_end"))
   end
 
   test "run_trace/2 returns the loop's step trace" do
@@ -93,7 +113,9 @@ defmodule DshBeam.AgentTest do
 
     assert {:ok, "final answer"} = DshBeam.Agent.Loop.run(loop, "second task")
 
-    # the second turn's FIRST model call must carry the first turn's history
+    # the second turn's FIRST model call must carry the first turn's history —
+    # including the tool turn (assistant tool_calls + the tool result), so the
+    # prompt prefix is stable across runs (cache-friendly, deriveMessages-like)
     assert_receive {:loop_call, first_messages, _opts}, 1000
 
     assert Enum.any?(first_messages, &(&1["role"] == "user" and &1["content"] == "first task"))
@@ -103,13 +125,128 @@ defmodule DshBeam.AgentTest do
              &(&1["role"] == "assistant" and &1["content"] == "final answer")
            )
 
+    assert Enum.any?(
+             first_messages,
+             &(&1["role"] == "assistant" and &1["tool_calls"] != nil)
+           )
+
+    assert Enum.any?(first_messages, &(&1["role"] == "tool"))
+
     assert Enum.any?(first_messages, &(&1["role"] == "user" and &1["content"] == "second task"))
 
-    # the session log accumulated both turns, each with user + tool_call +
-    # tool_result + assistant (8 events total)
+    # the session log accumulated both turns: turn 1 = user, tool_call,
+    # tool_result, assistant (4 content events); turn 2 = user, assistant — 6
+    # content events total, plus two turn_start/turn_end pairs.
     ctx = DshBeam.Runtime.context(runtime)
     {:ok, session} = DshBeam.Context.get(ctx, :session)
-    assert DshBeam.Session.count(session) == 8
+    assert content_events(DshBeam.Session.all(session)) |> length() == 6
+    assert DshBeam.Session.all(session) |> Enum.count(&(&1["role"] == "turn_start")) == 2
+  end
+
+  test "the projection round-trips a tool turn into the model wire shape" do
+    {:ok, session} = DshBeam.Session.Memory.start([])
+
+    events = [
+      %{"role" => "user", "content" => "first"},
+      %{
+        "role" => "tool_call",
+        "id" => "c1",
+        "name" => "loop_echo",
+        "arguments" => %{"text" => "hi"},
+        "arguments_json" => ~s({"text":"hi"})
+      },
+      %{
+        "role" => "tool_result",
+        "tool_call_id" => "c1",
+        "name" => "loop_echo",
+        "content" => "echo:hi"
+      },
+      %{"role" => "assistant", "content" => "final answer"}
+    ]
+
+    Enum.each(events, &DshBeam.Session.append(session, &1))
+
+    assert DshBeam.Agent.Loop.Projection.from_session(session) == [
+             %{"role" => "user", "content" => "first"},
+             %{
+               "role" => "assistant",
+               "content" => "",
+               "tool_calls" => [
+                 %{
+                   "id" => "c1",
+                   "type" => "function",
+                   "function" => %{"name" => "loop_echo", "arguments" => ~s({"text":"hi"})}
+                 }
+               ]
+             },
+             %{"role" => "tool", "tool_call_id" => "c1", "content" => "echo:hi"},
+             %{"role" => "assistant", "content" => "final answer"}
+           ]
+  end
+
+  test "the loop records a reasoning block and usage from the reply" do
+    adapter = %{id: :adapter, plugin: ReasoningLlmAdapter, config: [], disabled: false}
+
+    {:ok, runtime} =
+      DshBeam.Runtime.start_link(
+        [session_entry(), llm_entry(), adapter, loop_entry()],
+        []
+      )
+
+    %{loop: %{pid: loop}} = DshBeam.Runtime.entries(runtime)
+    ctx = DshBeam.Runtime.context(runtime)
+    {:ok, session} = DshBeam.Context.get(ctx, :session)
+
+    assert {:ok, "answer"} = DshBeam.Agent.Loop.run(loop, "think")
+
+    events = DshBeam.Session.all(session)
+
+    # reasoning is a display-only event, just before the assistant answer
+    assert [
+             %{"role" => "reasoning_chunk", "content" => "chain of thought"},
+             %{"role" => "assistant", "content" => "answer"} | _
+           ] =
+             Enum.drop_while(events, &(&1["role"] != "reasoning_chunk"))
+
+    [assistant] = Enum.filter(events, &(&1["role"] == "assistant"))
+    assert assistant["usage"].input_tokens == 100
+    assert assistant["usage"].output_tokens == 50
+  end
+
+  test "a streaming adapter emits reasoning chunks into the session" do
+    adapter = %{id: :adapter, plugin: StreamingLlmAdapter, config: [], disabled: false}
+
+    {:ok, runtime} =
+      DshBeam.Runtime.start_link(
+        [session_entry(), llm_entry(), adapter, loop_entry()],
+        []
+      )
+
+    %{loop: %{pid: loop}} = DshBeam.Runtime.entries(runtime)
+    ctx = DshBeam.Runtime.context(runtime)
+    {:ok, session} = DshBeam.Context.get(ctx, :session)
+
+    assert {:ok, "answer"} = DshBeam.Agent.Loop.run(loop, "think")
+
+    reasoning = DshBeam.Session.all(session) |> Enum.filter(&(&1["role"] == "reasoning_chunk"))
+    assert Enum.map(reasoning, & &1["content"]) == ["line one\n", "line two\n"]
+  end
+end
+
+defmodule StreamingLlmAdapter do
+  @moduledoc false
+  # A scripted adapter that streams reasoning through the loop's callback (as
+  # the real Req adapter does via SSE) instead of returning a full block.
+  use DshBeam.Llm.Adapter
+
+  @impl true
+  def complete(_config, _messages, opts) do
+    if stream = opts[:stream] do
+      stream.({:reasoning, "line one\n"})
+      stream.({:reasoning, "line two\n"})
+    end
+
+    {:ok, %{content: "answer", reasoning: nil, tool_calls: [], finish_reason: :stop, usage: nil}}
   end
 end
 
@@ -124,6 +261,31 @@ defmodule LoopEchoTool do
 
   @impl DshBeam.Plugin
   def handle_dsh_tool_call(:loop_echo, %{"text" => text}, _state), do: {:ok, "echo:" <> text}
+end
+
+defmodule ReasoningLlmAdapter do
+  @moduledoc false
+  # Scripted adapter returning a reasoning block and disjoint usage, to assert
+  # the loop records them as a reasoning event + usage on the assistant event.
+  use DshBeam.Llm.Adapter
+
+  @impl true
+  def complete(_config, _messages, _opts) do
+    {:ok,
+     %{
+       content: "answer",
+       reasoning: "chain of thought",
+       tool_calls: [],
+       finish_reason: :stop,
+       usage: %{
+         input_tokens: 100,
+         output_tokens: 50,
+         cache_read_tokens: 20,
+         cache_write_tokens: 0,
+         reasoning_tokens: 30
+       }
+     }}
+  end
 end
 
 defmodule LoopLlmAdapter do

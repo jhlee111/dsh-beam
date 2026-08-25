@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Chat watchdog
+
+- The chat pane now runs a turn-scoped watchdog: if the agent loop fiber hangs
+  (a `gen_statem` call blocked outside the transport's receive budget), the
+  turn is killed and the pane settles with a visible timeout instead of
+  staying busy forever. The watchdog is turn-scoped, so a result that arrives
+  for an already-settled turn is ignored.
+
+### LLM receive timeout as a typed setting
+
+- `receive_timeout` (ms) is now a typed setting on `DshBeam.Llm.Plugin`,
+  exposed in the Models surface and persisted to the settings store, so a slow
+  reasoning model can be given a longer per-request budget without recompiling.
+  The default moves from 120s to 300s — the 120s budget was too tight for
+  `deepseek-reasoner` on a large prompt prefix.
+
+### Chat history — cache-friendly tool turns
+
+- `DshBeam.Llm.Chat` now projects the session log through the same
+  `Agent.Loop.Projection` the agent loop replays, so a chat consumer sitting
+  between tool runs no longer drops `tool_call`/`tool_result` events: the full
+  prefix (assistant `tool_calls` with `""` content, then the `tool` messages)
+  replays verbatim into the model. One projection for every model request —
+  stable prefix, provider prompt-cache hits preserved (ADR-0014).
+
 ### Self-modification — hot swap
 
 - Added a `redefine_plugin` tool: the agent loop can hot-swap an already-mounted
@@ -207,3 +232,71 @@ console.
 ### Tests
 
 - 140 tests, one per paper guarantee + the milestone's verification criteria.
+
+### Crash audit log + supervised orchestrator
+
+- **`DshBeam.CrashAudit`** — a durable, append-only JSONL record of every
+  plugin failure the orchestrator observes (`:crashed`, `:crash_loop`,
+  `:start_failed`, `:exited`), written next to the settings store
+  (`.dsh/crash-audit.log`, gitignored) and fanned out to live subscribers
+  (`{:crash_audit, event}`). A crash is no longer only in the runtime's
+  in-memory entry record — it survives a console restart, so "what died and
+  why" can be diagnosed afterwards (the `erl_crash.dump` postmortem problem).
+  The runtime owns the audit (opt-in via `audit_path:`); the new
+  `DshBeam.CrashAudit.Plugin` exposes it to the composition as `:crash_audit`.
+- **Supervised orchestrator** — `scripts/console.exs` now starts the runtime
+  under a `one_for_one` Supervisor (`DshBeam.Console.Supervisor`), so a crash
+  of the runtime itself — the one process nothing else watched — re-spawns
+  the whole composition instead of taking the console down. The audit trail
+  is started before the runtime and outlives runtime re-injections.
+- **`DshBeam.Runtime.audit/1`** — accessor for the owned audit pid (`nil`
+  when no `audit_path` was configured; tests/library users stay
+  side-effect-free).
+
+### Crash audit events inside the session log
+
+- **`DshBeam.CrashAudit.SessionBridge`** — a fiber that depends on `:session`
+  and `:crash_audit` and interleaves every crash event as a
+  `%{"role" => "crash_audit", kind, id, reason, timestamp}` row in the
+  session log, so a crashed plugin is visible *inside the conversation* — the
+  chat/trajectory projections read the same append-only log, so the crash
+  shows up as a row in the UI, not only in `.dsh/crash-audit.log`.
+- The bridge drains the retained audit window on activation (missed events
+  during boot are caught up) and dedupes by `{timestamp, kind, id}`, so a
+  restarted/re-activated bridge never appends a crash twice.
+- The runtime now injects the audit pid into every entry's mount config
+  (`:audit`), so `CrashAudit.Plugin` exposes it without calling back into the
+  runtime (which would deadlock mid-reconcile).
+
+### Boot-time worktree GC — made conservative (regression fix)
+
+The original boot GC (this release, earlier) deleted live session worktrees:
+it swept any merged `session/*` worktree with `git worktree remove --force`,
+keyed `keep:` off `File.cwd!()` (which is the test runner / console, not the
+agent's worktree), treated a gitignored-only `.dsh/` as "clean", and ran
+unconditionally on mount — so a bare `mix test` in the main repo GC'd another
+live session's checkout. Two sessions (2051, 5314) died exactly this way.
+
+The sweep is now conservative — a worktree is removed only when ALL hold:
+
+- branch is `session/*` **and** merged into the default branch;
+- not in `opts[:keep]` (default: the caller's cwd);
+- checkout **older** than `opts[:grace_seconds]` (default 24h) — a worktree
+  created moments ago is a live session by definition (grace period);
+- **no live marker** (`<worktree>/.dsh/live` — written by
+  `DshBeam.Workspace.open_session/3` at checkout, removed by
+  `close_session/2`); a marked worktree is never swept (live marker);
+- `git worktree remove` **without `--force`** accepts it — git itself refuses
+  a tree with modified/untracked files, so a dirty session survives (no
+  force); and `clean_worktree?/1` now checks `status --porcelain --ignored`,
+  so a tree whose only local artifacts are the gitignored `.dsh/` is never
+  treated as clean (ignored-aware clean check).
+
+- **Boot GC is now opt-in (L4):** `DshBeam.Workspace.mount/2` never prunes on
+  its own. Only a mount configured with `boot_prune: true` **and** an explicit
+  `repo:` (never a `File.cwd!()` guess) runs the sweep — a bare `mix test` or
+  a console from an unrelated cwd cannot delete another session's worktree.
+  `scripts/console.exs` opts in explicitly with `repo: File.cwd!()`.
+- `DshBeam.Git.prune_merged_worktrees/2` removes a worktree only after every
+  fence above, deletes the local branch only after the removal succeeds, and
+  still prunes stale worktree metadata best-effort.

@@ -40,10 +40,14 @@ entries = [
   %{id: :adapter, plugin: DemoLlmAdapter, config: [], disabled: false},
   %{id: :shell, plugin: DshBeam.Shell.Plugin, config: [], disabled: false},
   %{id: :bash, plugin: DshBeam.Tool.Bash, config: [], disabled: false},
+  %{id: :crash_audit, plugin: DshBeam.CrashAudit.Plugin, config: [], disabled: false},
   %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false}
 ]
 
-{:ok, runtime} = DshBeam.Runtime.start_link(entries, [])
+# the crash audit trail is optional here: pass audit_path to keep a record of
+# any plugin failure during the demo (default: next to the settings store)
+{:ok, runtime} =
+  DshBeam.Runtime.start_link(entries, audit_path: DshBeam.CrashAudit.default_path())
 ctx = DshBeam.Runtime.context(runtime)
 
 IO.puts("== composition ==")

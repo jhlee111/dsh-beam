@@ -7,7 +7,8 @@ defmodule DshBeam.MixProject do
       version: "0.1.0",
       elixir: "~> 1.20",
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      aliases: aliases()
       # Code reloading is off (see config/config.exs): Phoenix 1.8's
       # CodeReloader hooks compilation through a Mix listener, but it cannot
       # survive a config change or a mid-edit compile error, so we omit it.
@@ -18,6 +19,16 @@ defmodule DshBeam.MixProject do
   def application do
     [
       extra_applications: [:logger]
+    ]
+  end
+
+  # "mix console" = `mix run scripts/console.exs` (the live console demo).
+  # DEEPSEEK_API_KEY / DSH_BEAM_PORT pass through as env vars, which is what
+  # the script reads, so no extra plumbing is needed. The single-string form
+  # (like "run priv/repo/seeds.exs") is how Mix aliases pass args to a task.
+  defp aliases do
+    [
+      console: ["run scripts/console.exs"]
     ]
   end
 

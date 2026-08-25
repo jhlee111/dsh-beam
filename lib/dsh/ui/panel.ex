@@ -218,6 +218,15 @@ defmodule DshBeam.Ui.Panel do
                 <input type="text" name="base_url" value={@llm_config.base_url} />
                 <label class="muted">model</label>
                 <input type="text" name="model" value={@llm_config.model} />
+                <label class="muted" title="how long to wait for the model's reply before timing out">
+                  receive_timeout (ms)
+                </label>
+                <input
+                  type="text"
+                  name="receive_timeout"
+                  value={@llm_config.receive_timeout}
+                  placeholder="300000"
+                />
               </details>
               <div class="provider-actions">
                 <button type="submit">apply</button>

@@ -161,8 +161,14 @@ defmodule DshBeam.ConsoleWorkspaceTest do
     assert html =~ "cws_echo"
     assert html =~ "final answer"
 
-    # the whole turn is recorded in the *workspace* session (the switched one)
-    roles = Enum.map(DshBeam.Session.all(ws_session), & &1["role"])
+    # the whole turn is recorded in the *workspace* session (the switched one);
+    # structural events (turn_start/request/turn_end) wrap the content
+    roles =
+      ws_session
+      |> DshBeam.Session.all()
+      |> Enum.reject(&(&1["role"] in ["turn_start", "turn_end", "request"]))
+      |> Enum.map(& &1["role"])
+
     assert roles == ["user", "tool_call", "tool_result", "assistant"]
 
     # 5. settings: a typed setting save persists to the store and re-mounts
