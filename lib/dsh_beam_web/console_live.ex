@@ -36,6 +36,7 @@ defmodule DshBeamWeb.ConsoleLive do
     %{id: :fs, plugin: DshBeam.Tool.Fs, config: [root: "."], disabled: false},
     %{id: :todo, plugin: DshBeam.Tool.Todo, config: [], disabled: false},
     %{id: :goal, plugin: DshBeam.Tool.Goal, config: [], disabled: false},
+    %{id: :goal_driver, plugin: DshBeam.Goal.Driver, config: [], disabled: false},
     %{id: :tool_plugin, plugin: DshBeam.Tool.Plugin, config: [], disabled: false},
     %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false},
     %{id: :panel_composition, plugin: DshBeam.Ui.Panel.Composition, config: [], disabled: false},
@@ -66,6 +67,7 @@ defmodule DshBeamWeb.ConsoleLive do
     :fs,
     :todo,
     :goal,
+    :goal_driver,
     :tool_plugin,
     :loop,
     :panel_composition,
@@ -1617,7 +1619,17 @@ defmodule DshBeamWeb.ConsoleLive do
         desc: "Session + llm + adapter + shell + bash + loop",
         entries:
           panel_entries() ++
-            core_entries([:session, :llm, :adapter, :shell, :bash, :goal, :tool_plugin, :loop])
+            core_entries([
+              :session,
+              :llm,
+              :adapter,
+              :shell,
+              :bash,
+              :goal,
+              :goal_driver,
+              :tool_plugin,
+              :loop
+            ])
       },
       %{
         id: "chat",

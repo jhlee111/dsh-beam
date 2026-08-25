@@ -107,12 +107,12 @@ defmodule DshBeam.GoalTest do
 
   test "resume is rejected once the round cap is exhausted", %{session: session} do
     {:ok, goal} = DshBeam.Goal.create(session, "work", max_goal_rounds: 1)
-    assert {:ok, _} = DshBeam.Goal.update(session, goal["id"], 1, "pause")
+    assert {:ok, _} = DshBeam.Goal.round(session, goal)
 
-    # rounds_started never advanced (no driver yet), so resume still works; the
-    # cap check reads rounds_started, which stays 0 in this unit scope
-    assert {:ok, resumed} = DshBeam.Goal.update(session, goal["id"], 2, "resume")
-    assert resumed["phase"] == "active"
+    # rounds_started (1) now equals the cap, so resume from paused is refused
+    assert {:ok, paused} = DshBeam.Goal.update(session, goal["id"], 1, "pause")
+    assert paused["phase"] == "paused"
+    assert {:error, :invalid_transition} = DshBeam.Goal.update(session, goal["id"], 2, "resume")
   end
 
   test "clear removes the current pointer and permits a fresh create", %{session: session} do
@@ -122,5 +122,16 @@ defmodule DshBeam.GoalTest do
 
     assert {:ok, again} = DshBeam.Goal.create(session, "again")
     assert again["phase"] == "active"
+  end
+
+  test "round/2 advances rounds_started from the goal_round markers", %{session: session} do
+    assert {:ok, goal} = DshBeam.Goal.create(session, "work")
+    assert goal["rounds_started"] == 0
+
+    assert {:ok, _seq} = DshBeam.Goal.round(session, goal)
+    assert DshBeam.Goal.current(session)["rounds_started"] == 1
+
+    assert {:ok, _seq} = DshBeam.Goal.round(session, DshBeam.Goal.current(session))
+    assert DshBeam.Goal.current(session)["rounds_started"] == 2
   end
 end

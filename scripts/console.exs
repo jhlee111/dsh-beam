@@ -40,6 +40,7 @@ entries = [
   %{id: :crash_audit, plugin: DshBeam.CrashAudit.Plugin, config: [], disabled: false},
   %{id: :todo, plugin: DshBeam.Tool.Todo, config: [], disabled: false},
   %{id: :goal, plugin: DshBeam.Tool.Goal, config: [], disabled: false},
+  %{id: :goal_driver, plugin: DshBeam.Goal.Driver, config: [], disabled: false},
   %{id: :tool_plugin, plugin: DshBeam.Tool.Plugin, config: [], disabled: false},
   %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false},
   %{id: :panel_composition, plugin: DshBeam.Ui.Panel.Composition, config: [], disabled: false},

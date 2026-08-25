@@ -16,8 +16,12 @@ defmodule DshBeam.Agent.Loop do
 
   need(:llm)
   need(:session)
+  provide(:loop, via: {__MODULE__, :self_pid, []})
 
   setting(:max_steps, type: :integer, default: 20, doc: "Max model↔tool round-trips")
+
+  @doc false
+  def self_pid, do: self()
 
   @typedoc "One loop step: a tool call or its result."
   @type step ::

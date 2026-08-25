@@ -45,18 +45,14 @@ defmodule DshBeam.Goal do
   @doc """
   The current goal view, folded from the session log (the last `goal_change`
   event wins), or `nil` when no goal is current. A clear tombstone yields nil.
+  Admitted goal rounds (the driver's `round/2` markers) advance `rounds_started`.
   """
   @spec current(pid()) :: view() | nil
   def current(session) when is_pid(session) do
-    session
-    |> DshBeam.Session.all()
-    |> Enum.filter(&(&1["role"] == "goal_change"))
-    |> List.last()
-    |> case do
-      nil ->
-        nil
+    events = DshBeam.Session.all(session)
 
-      %{"operation" => "clear"} ->
+    case last_goal_change(events) do
+      nil ->
         nil
 
       %{
@@ -65,11 +61,28 @@ defmodule DshBeam.Goal do
         "created_at" => created,
         "updated_at" => updated
       } ->
+        rounds = max(rounds, max_goal_round(events, snapshot["id"]))
         derive(snapshot, rounds, created, updated)
 
       _ ->
         nil
     end
+  end
+
+  @doc """
+  Admit one goal round: append a `goal_round` marker attributing the next
+  positive round to the current goal. Only these markers advance
+  `rounds_started`; the round prompt itself is an ordinary user message the
+  agent loop appends.
+  """
+  @spec round(pid(), view()) :: {:ok, integer()} | {:error, term()}
+  def round(session, goal) when is_pid(session) and is_map(goal) do
+    DshBeam.Session.append(session, %{
+      "role" => "goal_round",
+      "goal_id" => goal["id"],
+      "revision" => goal["revision"],
+      "round" => goal["rounds_started"] + 1
+    })
   end
 
   @doc """
@@ -232,6 +245,26 @@ defmodule DshBeam.Goal do
   end
 
   # -- helpers --
+
+  # The last non-clear goal_change event (nil when cleared or never created).
+  defp last_goal_change(events) do
+    events
+    |> Enum.filter(&(&1["role"] == "goal_change"))
+    |> List.last()
+    |> case do
+      nil -> nil
+      %{"operation" => "clear"} -> nil
+      event -> event
+    end
+  end
+
+  # The highest admitted round number for one goal id, from the goal_round markers.
+  defp max_goal_round(events, goal_id) do
+    events
+    |> Enum.filter(&(&1["role"] == "goal_round" and &1["goal_id"] == goal_id))
+    |> Enum.map(& &1["round"])
+    |> Enum.max(fn -> 0 end)
+  end
 
   # Create is allowed when nothing is current or the current goal is complete.
   defp replaceable?(session) do
