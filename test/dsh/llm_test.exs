@@ -250,6 +250,124 @@ defmodule DshBeam.LlmTest do
     assert usage.reasoning_tokens == 10
   end
 
+  test "the Req adapter streams SSE into content, usage, and the reasoning callback" do
+    # A chunked plug replays raw SSE bytes through the adapter's `into` fun, so
+    # the streaming parse path (buffer/split/emit) is exercised without a live
+    # network. This is the regression for the `into: fun` accumulator being a
+    # `{request, response}` tuple rather than the parse-state map.
+    test = self()
+
+    sse = [
+      ~s|data: {"choices":[{"delta":{"reasoning_content":"thinking…"}}]}\n\n|,
+      ~s|data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n|,
+      ~s|data: {"choices":[{"delta":{"content":" world"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}\n\n|,
+      "data: [DONE]\n\n"
+    ]
+
+    plug = fn conn ->
+      conn = Plug.Conn.send_chunked(conn, 200)
+
+      Enum.reduce(sse, conn, fn chunk, conn ->
+        {:ok, conn} = Plug.Conn.chunk(conn, chunk)
+        conn
+      end)
+    end
+
+    config = [
+      base_url: "https://api.deepseek.com",
+      credential: {:literal, "test-key"},
+      model: "deepseek-reasoner"
+    ]
+
+    {:ok, runtime} =
+      DshBeam.Runtime.start_link(
+        [llm_entry(config), adapter_entry(DshBeam.Llm.Adapter.Req, plug: plug)],
+        []
+      )
+
+    ctx = DshBeam.Runtime.context(runtime)
+    {:ok, llm} = DshBeam.Context.get(ctx, :llm)
+
+    stream = fn
+      {:reasoning, chunk} -> send(test, {:reasoning, chunk})
+      _other -> :ok
+    end
+
+    assert {:ok, reply} =
+             DshBeam.Llm.chat(llm, [%{"role" => "user", "content" => "hi"}], stream: stream)
+
+    assert reply.content == "Hello world"
+    assert reply.reasoning == nil
+    assert reply.finish_reason == :stop
+    assert reply.usage.input_tokens == 10
+    assert reply.usage.output_tokens == 5
+    assert_receive {:reasoning, "thinking…"}
+
+    # regression: a streamed reply must not kill the adapter. A linked
+    # accumulator Agent surfaces Agent.stop as {:EXIT, :normal}, which the
+    # fiber's default handle_dsh_exit/3 turns into {:stop, :normal} — so the
+    # NEXT chat would report :adapter_unavailable. A second streamed chat
+    # proves the fiber survived the first one.
+    assert {:ok, %{content: "Hello world"}} =
+             DshBeam.Llm.chat(llm, [%{"role" => "user", "content" => "hi"}], stream: stream)
+  end
+
+  test "the Req adapter coalesces reasoning fragments into fewer chunks" do
+    # DeepSeek streams reasoning_content in ~4-char token fragments; per-fragment
+    # emission would flood the session (and the LiveView refresh) with thousands
+    # of near-empty events. The adapter must coalesce to a bounded number of
+    # meaningful chunks. 5 × 30 chars crosses the 120-char threshold exactly
+    # once, so it must emit two chunks (120 + 30), not five.
+    test = self()
+
+    frags = for n <- 1..5, do: String.duplicate(<<96 + n>>, 30)
+
+    sse =
+      Enum.map(frags, fn frag ->
+        ~s|data: {"choices":[{"delta":{"reasoning_content":"#{frag}"}}]}\n\n|
+      end) ++
+        [
+          ~s|data: {"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}\n\n|,
+          "data: [DONE]\n\n"
+        ]
+
+    plug = fn conn ->
+      conn = Plug.Conn.send_chunked(conn, 200)
+
+      Enum.reduce(sse, conn, fn chunk, conn ->
+        {:ok, conn} = Plug.Conn.chunk(conn, chunk)
+        conn
+      end)
+    end
+
+    config = [
+      base_url: "https://api.deepseek.com",
+      credential: {:literal, "test-key"},
+      model: "deepseek-reasoner"
+    ]
+
+    {:ok, runtime} =
+      DshBeam.Runtime.start_link(
+        [llm_entry(config), adapter_entry(DshBeam.Llm.Adapter.Req, plug: plug)],
+        []
+      )
+
+    ctx = DshBeam.Runtime.context(runtime)
+    {:ok, llm} = DshBeam.Context.get(ctx, :llm)
+
+    stream = fn
+      {:reasoning, chunk} -> send(test, {:reasoning, chunk})
+      _other -> :ok
+    end
+
+    assert {:ok, _} =
+             DshBeam.Llm.chat(llm, [%{"role" => "user", "content" => "hi"}], stream: stream)
+
+    chunks = collect_reasoning()
+    assert Enum.map(chunks, &String.length/1) == [120, 30]
+    assert Enum.join(chunks) == Enum.join(frags)
+  end
+
   test "the Req adapter forwards tools without crashing on the keyword opts" do
     # regression: chat/3 passes opts as a keyword list [tools: ...]; the adapter
     # must read it with opts[:tools], not the map-only opts.tools (BadMapError).
@@ -404,6 +522,16 @@ defmodule DshBeam.LlmTest do
              DshBeam.Llm.chat(llm, [%{"role" => "user", "content" => "hi"}])
 
     refute_received :request_made
+  end
+
+  defp collect_reasoning, do: collect_reasoning([])
+
+  defp collect_reasoning(acc) do
+    receive do
+      {:reasoning, chunk} -> collect_reasoning([chunk | acc])
+    after
+      50 -> Enum.reverse(acc)
+    end
   end
 
   defp wait_until(fun), do: wait_until(fun, 200)
