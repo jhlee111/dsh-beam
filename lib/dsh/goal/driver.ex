@@ -4,14 +4,14 @@ defmodule DshBeam.Goal.Driver do
   `dsh-goal-round-driver`, on the BEAM.
 
   Turns an active, armed goal into sequential goal rounds: while the goal is
-  `active`, armed, and under its round cap, `run_rounds/2` marks the next round
+  `active`, armed, and under its round cap, `run_rounds/2` admits the next round
   and drives one agent-loop turn per round until the model reports `complete` /
   `blocked`, a human pauses/clears the goal, or the cap is reached.
 
   Activation (arming) is process-local and never persisted: it lives in this
   fiber's state. A fresh mount and `disarm/1` both start disarmed, so a resumed
-  session never auto-continues until a human resumes the goal (which the model
-  then `arm`s via `run_rounds` on an explicit continue).
+  session never auto-continues until a human resumes the goal. Cancellation
+  pauses the goal and disarms so it cannot auto-restart.
   """
 
   use DshBeam.Plugin
@@ -29,6 +29,30 @@ defmodule DshBeam.Goal.Driver do
 
   @doc "Whether continuation is currently armed."
   def armed?(driver), do: :gen_statem.call(driver, :armed?)
+
+  @doc "Arm continuation if `:goal_driver` is mounted; no-op otherwise."
+  def arm_ctx(ctx) do
+    case DshBeam.Context.get(ctx, :goal_driver) do
+      {:ok, driver} -> arm(driver)
+      _ -> :ok
+    end
+  end
+
+  @doc "Disarm continuation if `:goal_driver` is mounted; no-op otherwise."
+  def disarm_ctx(ctx) do
+    case DshBeam.Context.get(ctx, :goal_driver) do
+      {:ok, driver} -> disarm(driver)
+      _ -> :ok
+    end
+  end
+
+  @doc "Whether continuation is armed, or false when the driver is absent."
+  def armed_ctx(ctx) do
+    case DshBeam.Context.get(ctx, :goal_driver) do
+      {:ok, driver} -> armed?(driver)
+      _ -> false
+    end
+  end
 
   @doc """
   Run goal rounds to completion/stop. Blocks the driver fiber (like the loop's
@@ -51,7 +75,8 @@ defmodule DshBeam.Goal.Driver do
   end
 
   def handle_event({:call, from}, {:run_rounds, token}, _state, data) do
-    {:keep_state_and_data, [{:reply, from, do_run_rounds(data, token)}]}
+    {data, result} = do_run_rounds(data, token)
+    {:keep_state, data, [{:reply, from, result}]}
   end
 
   # -- continuation loop --
@@ -59,36 +84,42 @@ defmodule DshBeam.Goal.Driver do
   defp do_run_rounds(data, token) do
     with true <- Map.get(data.extra, :armed, false),
          {:active, %{session: session, loop: loop}} <- DshBeam.Context.resolve(data.ctx) do
-      run_rounds_loop(session, loop, token)
+      loop_rounds(session, loop, token, data)
     else
-      _ -> {:error, :not_armed}
+      _ -> {data, {:error, :not_armed}}
     end
   end
 
-  defp run_rounds_loop(session, loop, token) do
+  defp loop_rounds(session, loop, token, data) do
     case DshBeam.Goal.current(session) do
       nil ->
-        {:ok, :no_goal}
+        {data, {:ok, :no_goal}}
 
       %{"phase" => phase} when phase != "active" ->
-        {:ok, phase}
+        {data, {:ok, phase}}
 
       goal ->
         if goal["rounds_started"] >= goal["max_goal_rounds"] do
-          {:ok, :round_cap_reached}
+          {data, {:ok, :round_cap_reached}}
         else
-          {:ok, _seq} = DshBeam.Goal.round(session, goal)
-          goal = DshBeam.Goal.current(session)
-
-          case DshBeam.Agent.Loop.run_trace(loop, round_prompt(goal), token) do
-            {:ok, _answer, _trace} ->
-              settle(session, loop, token)
-
-            {:error, :stopped, _trace} ->
-              {:error, :cancelled}
-
+          case DshBeam.Goal.round(session, goal) do
             {:error, reason} ->
-              {:error, reason}
+              {data, {:error, reason}}
+
+            {:ok, _seq} ->
+              goal = DshBeam.Goal.current(session)
+
+              case DshBeam.Agent.Loop.run_trace(loop, round_prompt(goal), token) do
+                {:ok, _answer, _trace} ->
+                  settle(session, loop, token, data)
+
+                {:error, :stopped, _trace} ->
+                  pause_goal(session)
+                  {put_armed(data, false), {:error, :cancelled}}
+
+                {:error, reason} ->
+                  {put_armed(data, false), {:error, reason}}
+              end
           end
         end
     end
@@ -96,18 +127,30 @@ defmodule DshBeam.Goal.Driver do
 
   # After one successful round, look at the durable goal phase: an active goal
   # continues; anything else (complete/paused/blocked/cleared) stops.
-  defp settle(session, loop, token) do
+  defp settle(session, loop, token, data) do
     case DshBeam.Goal.current(session) do
-      %{"phase" => "active"} -> run_rounds_loop(session, loop, token)
-      %{"phase" => phase} -> {:ok, phase}
-      nil -> {:ok, :cleared}
+      %{"phase" => "active"} -> loop_rounds(session, loop, token, data)
+      %{"phase" => phase} -> {data, {:ok, phase}}
+      nil -> {data, {:ok, :cleared}}
+    end
+  end
+
+  # Cancellation must not auto-restart: pause the durable goal so a later
+  # run_rounds stops at the non-active phase (explicit resume is required).
+  defp pause_goal(session) do
+    case DshBeam.Goal.current(session) do
+      %{"phase" => "active", "id" => id, "revision" => revision} ->
+        DshBeam.Goal.update(session, id, revision, "pause")
+
+      _ ->
+        :ok
     end
   end
 
   defp round_prompt(goal) do
     """
     <goal_round>
-    You are continuing the active goal. Objective: #{inspect(goal["objective"])}.
+    You are continuing the active goal. Objective: #{goal["objective"]}.
     Round #{goal["rounds_started"]}/#{goal["max_goal_rounds"]}.
 
     Make concrete progress using the available tools. When the objective is

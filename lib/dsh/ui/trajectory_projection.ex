@@ -68,6 +68,15 @@ defmodule DshBeam.Ui.TrajectoryProjection do
   def cell(%{"role" => "turn_end", "reason" => reason}),
     do: %{kind: :turn_end, label: "END", text: reason}
 
+  def cell(%{"role" => "goal_change", "operation" => "clear"}),
+    do: %{kind: :system, label: "GOAL", text: "clear"}
+
+  def cell(%{"role" => "goal_change", "operation" => operation, "goal" => goal}),
+    do: %{kind: :system, label: "GOAL", text: "#{operation} · #{goal["objective"]}"}
+
+  def cell(%{"role" => "goal_round", "round" => round}),
+    do: %{kind: :system, label: "GOAL", text: "round #{round}"}
+
   def cell(other), do: %{kind: :other, label: "EVENT", text: inspect(other)}
 
   @doc """

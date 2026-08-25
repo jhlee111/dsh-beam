@@ -77,10 +77,26 @@ defmodule DshBeam.GoalTest do
   test "invalid transitions are rejected", %{session: session} do
     {:ok, goal} = DshBeam.Goal.create(session, "work")
 
-    # complete from active is legal, but pause from paused / complete from complete is not
+    # pause from paused is invalid; complete from complete is invalid
     assert {:ok, _} = DshBeam.Goal.update(session, goal["id"], 1, "pause")
     assert {:error, :invalid_transition} = DshBeam.Goal.update(session, goal["id"], 2, "pause")
-    assert {:error, :invalid_transition} = DshBeam.Goal.update(session, goal["id"], 2, "complete")
+
+    assert {:ok, _} = DshBeam.Goal.update(session, goal["id"], 2, "complete")
+    assert {:error, :invalid_transition} = DshBeam.Goal.update(session, goal["id"], 3, "complete")
+  end
+
+  test "complete is allowed from any non-complete phase", %{session: session} do
+    {:ok, goal} = DshBeam.Goal.create(session, "work")
+    assert {:ok, _} = DshBeam.Goal.update(session, goal["id"], 1, "pause")
+    assert {:ok, completed} = DshBeam.Goal.update(session, goal["id"], 2, "complete")
+    assert completed["phase"] == "complete"
+  end
+
+  test "resume re-arms an active goal", %{session: session} do
+    {:ok, goal} = DshBeam.Goal.create(session, "work")
+    assert {:ok, resumed} = DshBeam.Goal.update(session, goal["id"], 1, "resume")
+    assert resumed["phase"] == "active"
+    assert resumed["revision"] == 2
   end
 
   test "blocked requires a concrete reason", %{session: session} do
@@ -116,12 +132,42 @@ defmodule DshBeam.GoalTest do
   end
 
   test "clear removes the current pointer and permits a fresh create", %{session: session} do
-    assert {:ok, _} = DshBeam.Goal.create(session, "work")
-    assert {:ok, :cleared} = DshBeam.Goal.clear(session)
+    assert {:ok, goal} = DshBeam.Goal.create(session, "work")
+    assert {:ok, :cleared} = DshBeam.Goal.clear(session, goal["id"], goal["revision"])
     assert DshBeam.Goal.current(session) == nil
 
     assert {:ok, again} = DshBeam.Goal.create(session, "again")
     assert again["phase"] == "active"
+  end
+
+  test "clear under a stale reference is rejected", %{session: session} do
+    assert {:ok, goal} = DshBeam.Goal.create(session, "work")
+    assert {:ok, _} = DshBeam.Goal.update(session, goal["id"], 1, "pause")
+
+    assert {:error, :stale_reference} = DshBeam.Goal.clear(session, goal["id"], 1)
+  end
+
+  test "round/2 rejects a stale or non-active goal", %{session: session} do
+    assert {:ok, goal} = DshBeam.Goal.create(session, "work")
+    assert {:ok, _} = DshBeam.Goal.update(session, goal["id"], 1, "pause")
+
+    assert {:error, :not_active} = DshBeam.Goal.round(session, goal)
+  end
+
+  test "create and edit validate a positive round cap and edit requires a field", %{
+    session: session
+  } do
+    assert {:error, :invalid_max_rounds} =
+             DshBeam.Goal.create(session, "work", max_goal_rounds: 0)
+
+    assert {:error, :invalid_max_rounds} =
+             DshBeam.Goal.create(session, "work", max_goal_rounds: -1)
+
+    assert {:ok, goal} = DshBeam.Goal.create(session, "work")
+    assert {:error, :empty_edit} = DshBeam.Goal.update(session, goal["id"], 1, "edit")
+
+    assert {:error, :invalid_max_rounds} =
+             DshBeam.Goal.update(session, goal["id"], 1, "edit", max_goal_rounds: 0)
   end
 
   test "round/2 advances rounds_started from the goal_round markers", %{session: session} do

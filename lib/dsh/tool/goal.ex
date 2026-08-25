@@ -71,17 +71,30 @@ defmodule DshBeam.Tool.Goal do
   @impl DshBeam.Plugin
   def handle_dsh_tool_call(:get_goal, _args, state) do
     with {:ok, session} <- session(state) do
-      {:ok, JSON.encode!(%{"goal" => DshBeam.Goal.current(session)})}
+      goal = DshBeam.Goal.current(session)
+
+      {:ok,
+       JSON.encode!(%{
+         "goal" => goal,
+         "activation" => if(goal, do: DshBeam.Goal.Driver.armed_ctx(state.ctx), else: false)
+       })}
     end
   end
 
   def handle_dsh_tool_call(:create_goal, %{"objective" => objective} = args, state) do
     with {:ok, session} <- session(state) do
-      opts = if args["max_goal_rounds"], do: [max_goal_rounds: args["max_goal_rounds"]], else: []
+      opts =
+        if Map.has_key?(args, "max_goal_rounds"),
+          do: [max_goal_rounds: args["max_goal_rounds"]],
+          else: []
 
       case DshBeam.Goal.create(session, objective, opts) do
-        {:ok, goal} -> {:ok, JSON.encode!(%{"goal" => goal})}
-        {:error, reason} -> {:error, reason}
+        {:ok, goal} ->
+          DshBeam.Goal.Driver.arm_ctx(state.ctx)
+          {:ok, JSON.encode!(%{"goal" => goal})}
+
+        {:error, reason} ->
+          {:error, reason}
       end
     end
   end
@@ -93,11 +106,24 @@ defmodule DshBeam.Tool.Goal do
       ) do
     with {:ok, session} <- session(state) do
       case DshBeam.Goal.update(session, id, revision, action, update_opts(args)) do
-        {:ok, goal} -> {:ok, JSON.encode!(%{"goal" => goal})}
-        {:error, reason} -> {:error, reason}
+        {:ok, goal} ->
+          apply_activation(state, action)
+          {:ok, JSON.encode!(%{"goal" => goal})}
+
+        {:error, reason} ->
+          {:error, reason}
       end
     end
   end
+
+  # Mutations mirror the reference's activation rules: create/resume arm the
+  # continuation driver; pause/complete/blocked disarm it (edit retains it).
+  defp apply_activation(state, "resume"), do: DshBeam.Goal.Driver.arm_ctx(state.ctx)
+
+  defp apply_activation(state, action) when action in ["pause", "complete", "blocked"],
+    do: DshBeam.Goal.Driver.disarm_ctx(state.ctx)
+
+  defp apply_activation(_state, _action), do: :ok
 
   defp update_opts(args) do
     []

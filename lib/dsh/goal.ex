@@ -11,6 +11,14 @@ defmodule DshBeam.Goal do
   The pure domain layer mirrors `DshBeam.Permission`: it reads/writes the
   session log and enforces the lifecycle rules; the model-facing tools
   (`DshBeam.Tool.Goal`) and the human `/goal` command are separate consumers.
+
+  ## Known limitation
+
+  Mutations are check-then-append (one `Session.all` read, then a separate
+  `Session.append`), so the compare-and-set fence is not atomic against two
+  concurrent producers at the same revision. The tool/command call paths are
+  serialized through the loop/console, so this is a trusted-producer boundary
+  (the same class of concern as the reference's "trusted in-process producers").
   """
 
   @default_max_goal_rounds 256
@@ -19,6 +27,8 @@ defmodule DshBeam.Goal do
   @operations ~w(create edit pause resume complete blocked clear)
   # The durable snapshot fields (derived meta — rounds/timestamps — is separate).
   @snapshot_fields ~w(id objective phase blocked_reason max_goal_rounds)
+  # The blocked code: a stable lower-kebab-case routing token.
+  @code_regex ~r/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/
 
   @typedoc "One goal snapshot (the durable fields, excluding derived meta)."
   @type snapshot :: %{
@@ -71,39 +81,60 @@ defmodule DshBeam.Goal do
 
   @doc """
   Admit one goal round: append a `goal_round` marker attributing the next
-  positive round to the current goal. Only these markers advance
-  `rounds_started`; the round prompt itself is an ordinary user message the
-  agent loop appends.
+  positive, sequential round to the *current active* goal. Re-reads the current
+  goal and rejects a stale revision, a non-active phase, or a non-current id.
   """
   @spec round(pid(), view()) :: {:ok, integer()} | {:error, term()}
   def round(session, goal) when is_pid(session) and is_map(goal) do
-    DshBeam.Session.append(session, %{
-      "role" => "goal_round",
-      "goal_id" => goal["id"],
-      "revision" => goal["revision"],
-      "round" => goal["rounds_started"] + 1
-    })
+    case current(session) do
+      %{
+        "id" => id,
+        "revision" => revision,
+        "phase" => "active",
+        "rounds_started" => rounds
+      } ->
+        if id == goal["id"] and revision == goal["revision"] do
+          DshBeam.Session.append(session, %{
+            "role" => "goal_round",
+            "goal_id" => id,
+            "revision" => revision,
+            "round" => rounds + 1
+          })
+        else
+          {:error, :stale_reference}
+        end
+
+      nil ->
+        {:error, :no_goal}
+
+      _ ->
+        {:error, :not_active}
+    end
   end
 
   @doc """
   Create one goal from a trimmed, non-empty objective. Rejected when a
-  non-complete goal is already current (a completed goal may be replaced).
-  Returns `{:ok, view}` or `{:error, reason}`.
+  non-complete goal is already current (a completed goal may be replaced) or
+  the round cap is not a positive integer. Returns `{:ok, view}` or
+  `{:error, reason}`.
   """
   @spec create(pid(), String.t(), keyword()) :: {:ok, view()} | {:error, term()}
   def create(session, objective, opts \\ []) when is_pid(session) and is_binary(objective) do
     objective = String.trim(objective)
+    max_rounds = Keyword.get(opts, :max_goal_rounds, @default_max_goal_rounds)
 
     cond do
       objective == "" ->
         {:error, :empty_objective}
+
+      not valid_max_rounds?(max_rounds) ->
+        {:error, :invalid_max_rounds}
 
       not replaceable?(session) ->
         {:error, :goal_already_current}
 
       true ->
         now = now_ms()
-        max_rounds = Keyword.get(opts, :max_goal_rounds, @default_max_goal_rounds)
 
         snapshot = %{
           "id" => new_id(),
@@ -148,27 +179,33 @@ defmodule DshBeam.Goal do
   end
 
   @doc """
-  Clear the current goal: append a revisioned tombstone and retain the durable
-  history. Returns `{:ok, :cleared}` or `{:error, reason}`.
+  Clear the current goal under a compare-and-set fence: append a tombstone one
+  revision past the cleared goal and retain the durable history. Returns
+  `{:ok, :cleared}` or `{:error, reason}`.
   """
-  @spec clear(pid()) :: {:ok, :cleared} | {:error, term()}
-  def clear(session) when is_pid(session) do
+  @spec clear(pid(), String.t(), integer()) :: {:ok, :cleared} | {:error, term()}
+  def clear(session, goal_id, revision)
+      when is_pid(session) and is_binary(goal_id) and is_integer(revision) do
     case current(session) do
       nil ->
         {:error, :no_goal}
 
       goal ->
-        event = %{
-          "role" => "goal_change",
-          "operation" => "clear",
-          "cleared_id" => goal["id"],
-          "cleared_revision" => goal["revision"],
-          "cleared_at" => now_ms()
-        }
+        if goal["id"] == goal_id and goal["revision"] == revision do
+          event = %{
+            "role" => "goal_change",
+            "operation" => "clear",
+            "cleared_id" => goal_id,
+            "cleared_revision" => revision + 1,
+            "cleared_at" => now_ms()
+          }
 
-        case DshBeam.Session.append(session, event) do
-          {:ok, _seq} -> {:ok, :cleared}
-          other -> other
+          case DshBeam.Session.append(session, event) do
+            {:ok, _seq} -> {:ok, :cleared}
+            other -> other
+          end
+        else
+          {:error, :stale_reference}
         end
     end
   end
@@ -176,13 +213,27 @@ defmodule DshBeam.Goal do
   # -- mutation internals --
 
   defp do_update(session, goal, "edit", opts) do
-    objective = String.trim(opts[:objective] || goal["objective"])
-    max_rounds = opts[:max_goal_rounds] || goal["max_goal_rounds"]
+    has_objective = Keyword.has_key?(opts, :objective)
+    has_max = Keyword.has_key?(opts, :max_goal_rounds)
 
-    if objective == "" do
-      {:error, :empty_objective}
-    else
-      mutate(session, "edit", goal, %{"objective" => objective, "max_goal_rounds" => max_rounds})
+    cond do
+      not has_objective and not has_max ->
+        {:error, :empty_edit}
+
+      has_objective and String.trim(Keyword.get(opts, :objective, "")) == "" ->
+        {:error, :empty_objective}
+
+      has_max and not valid_max_rounds?(opts[:max_goal_rounds]) ->
+        {:error, :invalid_max_rounds}
+
+      true ->
+        objective = String.trim(Keyword.get(opts, :objective, goal["objective"]))
+        max_rounds = Keyword.get(opts, :max_goal_rounds, goal["max_goal_rounds"])
+
+        mutate(session, "edit", goal, %{
+          "objective" => objective,
+          "max_goal_rounds" => max_rounds
+        })
     end
   end
 
@@ -195,7 +246,10 @@ defmodule DshBeam.Goal do
   end
 
   defp do_update(session, goal, "resume", _opts) do
-    if goal["phase"] in ["paused", "blocked"] and goal["rounds_started"] < goal["max_goal_rounds"] do
+    # active|paused|blocked all resume to active (active is the rearm-after-
+    # session-resume case); only the round cap blocks it.
+    if goal["phase"] in ["active", "paused", "blocked"] and
+         goal["rounds_started"] < goal["max_goal_rounds"] do
       mutate(session, "resume", goal, %{"phase" => "active", "blocked_reason" => nil})
     else
       {:error, :invalid_transition}
@@ -203,7 +257,8 @@ defmodule DshBeam.Goal do
   end
 
   defp do_update(session, goal, "complete", _opts) do
-    if goal["phase"] == "active" do
+    # any non-complete phase may complete (the reference's non-complete check).
+    if goal["phase"] in ["active", "paused", "blocked"] do
       mutate(session, "complete", goal, %{"phase" => "complete", "blocked_reason" => nil})
     else
       {:error, :invalid_transition}
@@ -213,16 +268,20 @@ defmodule DshBeam.Goal do
   defp do_update(session, goal, "blocked", opts) do
     if goal["phase"] == "active" do
       message = String.trim(opts[:blocked_reason] || opts[:message] || "")
+      code = opts[:code] || "model-reported"
 
-      if message == "" do
-        {:error, :blocked_reason_required}
-      else
-        code = opts[:code] || "model-reported"
+      cond do
+        message == "" ->
+          {:error, :blocked_reason_required}
 
-        mutate(session, "blocked", goal, %{
-          "phase" => "blocked",
-          "blocked_reason" => %{"code" => code, "message" => message}
-        })
+        not valid_code?(code) ->
+          {:error, :invalid_code}
+
+        true ->
+          mutate(session, "blocked", goal, %{
+            "phase" => "blocked",
+            "blocked_reason" => %{"code" => code, "message" => message}
+          })
       end
     else
       {:error, :invalid_transition}
@@ -275,6 +334,12 @@ defmodule DshBeam.Goal do
     end
   end
 
+  defp valid_max_rounds?(n) when is_integer(n) and n > 0, do: true
+  defp valid_max_rounds?(_), do: false
+
+  defp valid_code?(code) when is_binary(code), do: String.match?(code, @code_regex)
+  defp valid_code?(_), do: false
+
   defp append_change(session, operation, snapshot, rounds, created) do
     now = now_ms()
 
@@ -300,7 +365,7 @@ defmodule DshBeam.Goal do
     |> Map.put("updated_at", updated)
   end
 
-  defp new_id, do: Integer.to_string(System.unique_integer([:positive, :monotonic]))
+  defp new_id, do: :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
 
   defp now_ms, do: System.system_time(:millisecond)
 end

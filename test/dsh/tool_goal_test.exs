@@ -14,7 +14,8 @@ defmodule DshBeam.Tool.GoalTest do
     {:ok, create_goal} = DshBeam.Context.get(ctx, :create_goal)
     {:ok, update_goal} = DshBeam.Context.get(ctx, :update_goal)
 
-    assert {:ok, ~s({"goal":null})} = DshBeam.Tool.call(get_goal, :get_goal, %{})
+    assert {:ok, got_none} = DshBeam.Tool.call(get_goal, :get_goal, %{})
+    assert %{"goal" => nil, "activation" => false} = JSON.decode!(got_none)
 
     assert {:ok, created} =
              DshBeam.Tool.call(create_goal, :create_goal, %{"objective" => "build a feature"})
