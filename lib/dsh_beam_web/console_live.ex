@@ -1017,10 +1017,20 @@ defmodule DshBeamWeb.ConsoleLive do
         }
       end)
 
+    # DshBeam.Llm.config/1 is a synchronous call into the LLM fiber, which is
+    # BLOCKED for the whole turn while it streams the model reply. Querying it
+    # here would therefore freeze every refresh (and the stop button) until the
+    # stream ends. Reuse the last-known config while a chat is in flight; it
+    # cannot change mid-turn anyway (the composer is busy), and it re-syncs the
+    # moment the turn settles.
     llm_config =
-      case DshBeam.Context.get(socket.assigns.ctx, :llm) do
-        {:ok, llm} when is_pid(llm) -> DshBeam.Llm.config(llm)
-        _ -> nil
+      if socket.assigns.chat_busy do
+        socket.assigns.llm_config
+      else
+        case DshBeam.Context.get(socket.assigns.ctx, :llm) do
+          {:ok, llm} when is_pid(llm) -> DshBeam.Llm.config(llm)
+          _ -> nil
+        end
       end
 
     {credential_mode, credential_env} =
