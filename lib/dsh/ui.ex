@@ -18,8 +18,16 @@ defmodule DshBeam.Ui do
   """
 
   @doc """
-  Render one slot's contributions. Returns a list of Phoenix.HTML.Safe-safe
-  values (rendered component output), usable in `~H` via `<%= ... %>`.
+  Render one slot's contributions. Returns a list of
+  `Phoenix.LiveView.Rendered` structs (one per composed occupant).
+
+  The host renders them with a `for` comprehension, so LiveComponents,
+  `phx-*` events, and hooks stay wired into the LiveView diff (serializing
+  them with `to_iodata` would drop that wiring):
+
+      <%= for rendered <- DshBeam.Ui.render_slot(:details, assigns) do %>
+        <%= rendered %>
+      <% end %>
   """
   def render_slot(name, assigns, opts \\ []) when is_atom(name) do
     entries = DshBeam.Ui.Registry.for_slot(name)
@@ -28,11 +36,8 @@ defmodule DshBeam.Ui do
     entries
     |> compose(key)
     |> Enum.map(fn entry ->
-      entry.component
-      |> render_component(forwarded(assigns, name))
-      |> Phoenix.HTML.Safe.to_iodata()
+      render_component(entry.component, forwarded(assigns, name))
     end)
-    |> Phoenix.HTML.raw()
   end
 
   # single: the lowest-order occupant wins

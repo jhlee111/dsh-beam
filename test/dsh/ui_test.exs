@@ -31,7 +31,7 @@ defmodule DshBeam.UiTest do
     # two plugins register :single_slot; render_slot keeps only the lowest order
     html =
       DshBeam.Ui.render_slot(:single_slot, %{})
-      |> Phoenix.HTML.Safe.to_iodata()
+      |> Enum.map(&Phoenix.HTML.Safe.to_iodata/1)
       |> IO.iodata_to_binary()
 
     assert html =~ "single-one"
@@ -41,7 +41,7 @@ defmodule DshBeam.UiTest do
   test "keyed slot: only the matching key renders" do
     html =
       DshBeam.Ui.render_slot(:keyed_slot, %{}, key: :b)
-      |> Phoenix.HTML.Safe.to_iodata()
+      |> Enum.map(&Phoenix.HTML.Safe.to_iodata/1)
       |> IO.iodata_to_binary()
 
     assert html =~ "keyed-b"
@@ -51,7 +51,7 @@ defmodule DshBeam.UiTest do
   test "chain slot: first matching select wins" do
     html =
       DshBeam.Ui.render_slot(:chain_slot, %{})
-      |> Phoenix.HTML.Safe.to_iodata()
+      |> Enum.map(&Phoenix.HTML.Safe.to_iodata/1)
       |> IO.iodata_to_binary()
 
     assert html =~ "chain-even"

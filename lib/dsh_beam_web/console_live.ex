@@ -792,7 +792,9 @@ defmodule DshBeamWeb.ConsoleLive do
           </div>
           <%= unless @sidebar_collapsed do %>
             <div class="region">
-              <%= DshBeam.Ui.render_slot(:sidebar, assigns) %>
+              <%= for rendered <- DshBeam.Ui.render_slot(:sidebar, assigns) do %>
+                <%= rendered %>
+              <% end %>
             </div>
             <div class="foot">
               <button class="settings-trigger" phx-click="open_settings">settings</button>
@@ -844,7 +846,9 @@ defmodule DshBeamWeb.ConsoleLive do
           </div>
           <div class="conv-scroll" id="conv-scroll" phx-hook="ScrollFollow">
             <%= if @workspace_active do %>
-              <%= DshBeam.Ui.render_slot(:conversation, assigns, key: @view_tab) %>
+              <%= for rendered <- DshBeam.Ui.render_slot(:conversation, assigns, key: @view_tab) do %>
+                <%= rendered %>
+              <% end %>
             <% else %>
               <div class="conversation-empty">
                 <p class="empty-title">no workspace open</p>
@@ -858,7 +862,9 @@ defmodule DshBeamWeb.ConsoleLive do
                 </div>
                 <form class="composer" phx-submit="ask">
                   <div class="composer-toolbar">
-                    <%= DshBeam.Ui.render_slot(:composer_toolbar, assigns) %>
+                    <%= for rendered <- DshBeam.Ui.render_slot(:composer_toolbar, assigns) do %>
+                      <%= rendered %>
+                    <% end %>
                   </div>
                   <textarea
                     name="text"
@@ -888,7 +894,9 @@ defmodule DshBeamWeb.ConsoleLive do
       </div>
 
       <div class="frame-details">
-        <%= DshBeam.Ui.render_slot(:details, assigns) %>
+        <%= for rendered <- DshBeam.Ui.render_slot(:details, assigns) do %>
+          <%= rendered %>
+        <% end %>
       </div>
     </div>
 
@@ -909,7 +917,9 @@ defmodule DshBeamWeb.ConsoleLive do
             <button phx-click="close_settings" class="settings-nav-item close">close</button>
           </nav>
           <div class="settings-content">
-            <%= DshBeam.Ui.render_slot(:settings_section, assigns, key: @settings_section) %>
+            <%= for rendered <- DshBeam.Ui.render_slot(:settings_section, assigns, key: @settings_section) do %>
+              <%= rendered %>
+            <% end %>
           </div>
         </div>
       </div>
