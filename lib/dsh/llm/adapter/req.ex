@@ -18,10 +18,10 @@ defmodule DshBeam.Llm.Adapter.Req do
   @default_receive_timeout 300_000
   # DeepSeek streams reasoning_content in ~4-char token fragments; emitting the
   # stream callback per fragment turns one reasoning block into thousands of
-  # session appends (and, downstream, thousands of full LiveView re-renders).
-  # Coalesce fragments and flush at most once per this many characters, so the
-  # chat pane still follows live without drowning the renderer.
-  @reasoning_flush_chars 120
+  # session appends. Coalesce fragments and flush at most once per this many
+  # characters, so the chat pane follows live (word-granular updates) without
+  # drowning the session log or the renderer.
+  @reasoning_flush_chars 40
 
   @impl true
   def complete(config, messages, opts) do

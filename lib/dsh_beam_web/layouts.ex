@@ -838,15 +838,6 @@ defmodule DshBeamWeb.Layouts do
             destroyed() { this.el.removeEventListener('input', this.grow); }
           };
 
-          // Preserves a <details> element's reader-set `open` state across
-          // morphdom patches. The server HTML never carries `open` (it's
-          // user-controlled DOM state), so a live re-render would otherwise
-          // collapse an expanded reasoning/tool-result row as new chunks land.
-          let Disclosure = {
-            beforeUpdate() { this.wasOpen = this.el.open; },
-            updated() { if (this.wasOpen !== undefined) this.el.open = this.wasOpen; }
-          };
-
           // "Deep diving" elapsed-time clock: ticks client-side without a
           // server round-trip, revealing the elapsed time after 15s (the
           // reference's turn status).
@@ -929,7 +920,7 @@ defmodule DshBeamWeb.Layouts do
           let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
           let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
             params: { _csrf_token: csrfToken },
-            hooks: { ElapsedClock, ScrollFollow, AutoGrow, Disclosure, SidebarResize, DetailsResize }
+            hooks: { ElapsedClock, ScrollFollow, AutoGrow, SidebarResize, DetailsResize }
           });
           liveSocket.connect();
           window.addEventListener("phx:page-loading-stop", () => liveSocket.enableDebug());

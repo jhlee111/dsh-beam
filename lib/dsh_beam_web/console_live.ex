@@ -97,6 +97,7 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:result, nil)
       |> assign(:chat_text, "")
       |> assign(:chat_log, [])
+      |> assign(:open_rows, MapSet.new())
       |> assign(:chat_busy, false)
       |> assign(:chat_task, nil)
       |> assign(:chat_turn, nil)
@@ -279,6 +280,23 @@ defmodule DshBeamWeb.ConsoleLive do
     end
 
     {:noreply, socket |> assign(chat_error: nil) |> refresh()}
+  end
+
+  def handle_event("toggle_row", %{"id" => id}, socket) do
+    # The reader's expanded/collapsed state is server-owned (open_rows), so the
+    # <details open> attribute survives every re-render — the anti-pattern was a
+    # JS hook mutating the DOM open attribute without phx-update="ignore".
+    open_rows =
+      if MapSet.member?(socket.assigns.open_rows, id) do
+        MapSet.delete(socket.assigns.open_rows, id)
+      else
+        MapSet.put(socket.assigns.open_rows, id)
+      end
+
+    {:noreply,
+     socket
+     |> assign(open_rows: open_rows)
+     |> assign(:chat_log, chat_entries(socket.assigns.ctx, socket.assigns.chat_busy, open_rows))}
   end
 
   def handle_event("workspace_create", %{"repo" => repo} = params, socket) do
@@ -744,8 +762,11 @@ defmodule DshBeamWeb.ConsoleLive do
      socket |> assign(:events, Enum.take([event | socket.assigns.events], 100)) |> refresh()}
   end
 
-  def handle_info({:dsh_session_event, _event}, socket) do
-    {:noreply, refresh(socket)}
+  def handle_info({:dsh_session_event, event}, socket) do
+    # Streaming appends are the chat pane's hot path: update only the affected
+    # stream item (append/new row or the growing reasoning tail) instead of the
+    # full-console refresh, so word-sized deltas render without a full re-render.
+    {:noreply, refresh_chat(socket, event)}
   end
 
   def handle_info({:dsh_runtime_event, _event}, socket) do
@@ -1045,13 +1066,15 @@ defmodule DshBeamWeb.ConsoleLive do
     workspace_sessions = workspace_sessions(socket.assigns.ctx)
     workspace_active = Enum.any?(workspace_sessions, & &1.current)
 
+    chat = chat_entries(socket.assigns.ctx, socket.assigns.chat_busy, socket.assigns.open_rows)
+
     assign(socket,
       rows: rows,
       bindings: bindings,
       llm_config: llm_config,
       credential_mode: credential_mode,
       credential_env: credential_env,
-      chat_log: chat_log(socket.assigns.ctx, socket.assigns.chat_busy),
+      chat_log: chat,
       todos: todos(socket.assigns.ctx),
       trajectory: trajectory(socket.assigns.ctx, socket.assigns.trajectory_query),
       permission: permission(socket.assigns.ctx),
@@ -1093,7 +1116,7 @@ defmodule DshBeamWeb.ConsoleLive do
 
   # The chat pane renders the session log (the single source of truth), so the
   # conversation survives a page refresh and tool calls appear chronologically.
-  defp chat_log(ctx, busy) do
+  defp chat_entries(ctx, busy, open_rows) do
     case alive_session(ctx) do
       {:ok, session} ->
         # idempotent: once subscribed, appends fan out {:dsh_session_event, ...}
@@ -1102,20 +1125,45 @@ defmodule DshBeamWeb.ConsoleLive do
 
         session
         |> DshBeam.Session.all()
-        # structural events (turn_start/request/turn_end) are trajectory
-        # ledger material, not chat content — the chat pane renders only the
-        # user-visible events.
-        |> Enum.reject(&(&1["role"] in ["turn_start", "turn_end", "request"]))
+        # only the user-visible conversation roles belong in the chat pane;
+        # structural/ledger roles (turn/request/todo/permission/…) live in their
+        # own projections (trajectory, todo panel, access seat).
+        |> Enum.filter(&chat_role?(&1["role"]))
         |> group_reasoning(busy)
         |> Enum.with_index()
-        # A stable positional id lets the Disclosure hook keep its <details>
-        # open state across morphdom patches (phx-hook requires an id). The
-        # position is deterministic per session log, so it survives streaming.
-        |> Enum.map(fn {event, i} -> event |> chat_entry() |> Map.put(:id, "chat-entry-#{i}") end)
+        |> Enum.map(fn {event, i} ->
+          id = "chat-entry-#{i}"
+
+          event
+          |> chat_entry()
+          |> Map.put(:id, id)
+          |> Map.put(:open, MapSet.member?(open_rows, id))
+        end)
 
       _ ->
         []
     end
+  end
+
+  # Chat-only update on one session append: re-derive the chat projection from
+  # the (in-memory) session log without recomputing the whole console. The
+  # expensive work (plugin inventory, LLM config, workspace roster) is skipped
+  # here, so a streamed delta re-renders only the conversation pane.
+  defp refresh_chat(socket, %{"role" => "todo_write"}),
+    do: assign(socket, todos: todos(socket.assigns.ctx))
+
+  defp refresh_chat(socket, %{"role" => "permission_preset"}),
+    do: assign(socket, permission: permission(socket.assigns.ctx))
+
+  defp refresh_chat(socket, %{"role" => role}) when role in ["turn_start", "turn_end", "request"],
+    do: socket
+
+  defp refresh_chat(socket, _event) do
+    assign(
+      socket,
+      :chat_log,
+      chat_entries(socket.assigns.ctx, socket.assigns.chat_busy, socket.assigns.open_rows)
+    )
   end
 
   # Streamed reasoning is many reasoning_chunk events; fold consecutive chunks
@@ -1128,10 +1176,13 @@ defmodule DshBeamWeb.ConsoleLive do
           {acc, (current || "") <> content}
 
         event, {acc, current} ->
-          acc = if current, do: [reasoning_entry(current, busy) | acc], else: acc
+          # a reasoning block closed by another event is settled, never the
+          # streaming tail
+          acc = if current, do: [reasoning_entry(current, false) | acc], else: acc
           {[event | acc], nil}
       end)
 
+    # only the final (still-open) block is the live tail
     grouped = if current, do: [reasoning_entry(current, busy) | grouped], else: grouped
     Enum.reverse(grouped)
   end
@@ -1164,6 +1215,21 @@ defmodule DshBeamWeb.ConsoleLive do
     do: %{kind: :command_done, name: name, content: content}
 
   defp chat_entry(other), do: %{kind: :event, content: inspect(other)}
+
+  # The roles the chat pane renders; everything else (structural/ledger roles)
+  # is a different projection.
+  defp chat_role?(role) do
+    role in [
+      "user",
+      "assistant",
+      "reasoning_chunk",
+      "tool_call",
+      "tool_result",
+      "error",
+      "command_run",
+      "command_done"
+    ]
+  end
 
   # The readable invocation of a tool call: the bash command verbatim, and any
   # other tool's arguments as a compact term (instead of the raw map inspect).
