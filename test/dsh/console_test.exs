@@ -580,6 +580,36 @@ defmodule DshBeam.ConsoleTest do
     assert Enum.any?(DshBeam.Session.all(session_pid), &(&1["role"] == "command_done"))
   end
 
+  test "the /goal command manages the session goal", %{session: session, ctx: ctx} do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    render_submit(view, "seed", %{})
+    open_chat_session(view, ctx)
+    {:ok, session_pid} = DshBeam.Context.get(ctx, :session)
+
+    # /goal <objective> creates an active goal
+    render_submit(view, "ask", %{"text" => "/goal build a feature"})
+    assert DshBeam.Goal.current(session_pid)["objective"] == "build a feature"
+    assert DshBeam.Goal.current(session_pid)["phase"] == "active"
+
+    # bare /goal reports the status
+    render_submit(view, "ask", %{"text" => "/goal"})
+    assert render(view) =~ "goal [active]"
+
+    # /goal pause transitions to paused
+    render_submit(view, "ask", %{"text" => "/goal pause"})
+    assert DshBeam.Goal.current(session_pid)["phase"] == "paused"
+
+    # /goal edit replaces the objective in place
+    render_submit(view, "ask", %{"text" => "/goal edit ship the feature"})
+    goal = DshBeam.Goal.current(session_pid)
+    assert goal["objective"] == "ship the feature"
+    assert goal["phase"] == "paused"
+
+    # /goal clear removes the pointer
+    render_submit(view, "ask", %{"text" => "/goal clear"})
+    assert DshBeam.Goal.current(session_pid) == nil
+  end
+
   test "crashing a sandbox child re-injects a fresh OS process", %{
     session: session,
     ctx: ctx,

@@ -35,6 +35,8 @@ defmodule DshBeamWeb.ConsoleLive do
     %{id: :bash, plugin: DshBeam.Tool.Bash, config: [], disabled: false},
     %{id: :fs, plugin: DshBeam.Tool.Fs, config: [root: "."], disabled: false},
     %{id: :todo, plugin: DshBeam.Tool.Todo, config: [], disabled: false},
+    %{id: :goal, plugin: DshBeam.Tool.Goal, config: [], disabled: false},
+    %{id: :goal_driver, plugin: DshBeam.Goal.Driver, config: [], disabled: false},
     %{id: :tool_plugin, plugin: DshBeam.Tool.Plugin, config: [], disabled: false},
     %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false},
     %{id: :panel_composition, plugin: DshBeam.Ui.Panel.Composition, config: [], disabled: false},
@@ -64,6 +66,8 @@ defmodule DshBeamWeb.ConsoleLive do
     :bash,
     :fs,
     :todo,
+    :goal,
+    :goal_driver,
     :tool_plugin,
     :loop,
     :panel_composition,
@@ -1402,6 +1406,16 @@ defmodule DshBeamWeb.ConsoleLive do
     end
   end
 
+  defp dispatch_command(socket, "goal", args) do
+    result =
+      case alive_session(socket.assigns.ctx) do
+        {:ok, session} -> goal_command(socket.assigns.ctx, session, String.trim(args))
+        _ -> "no session"
+      end
+
+    {socket, result}
+  end
+
   defp dispatch_command(socket, "clear", _args) do
     case alive_session(socket.assigns.ctx) do
       {:ok, session} -> DshBeam.Session.clear(session)
@@ -1418,6 +1432,129 @@ defmodule DshBeamWeb.ConsoleLive do
   defp dispatch_command(socket, name, _args) do
     {socket, "unknown command \"/#{name}\" (try /help)"}
   end
+
+  # -- /goal command (the reference's command-goal) --
+
+  defp goal_command(_ctx, session, ""), do: goal_status(session)
+
+  defp goal_command(ctx, session, args) do
+    {word, rest} = split_word(args)
+    word = String.downcase(word)
+
+    cond do
+      word == "edit" ->
+        if String.trim(rest) == "",
+          do: "edit needs a replacement objective",
+          else: goal_edit(ctx, session, String.trim(rest))
+
+      word in ["pause", "resume", "clear"] and rest == "" ->
+        goal_verb(ctx, session, word)
+
+      word in ["pause", "resume", "clear"] ->
+        "unknown /goal form \"#{args}\" (try /goal <objective|edit <objective>|pause|resume|clear>)"
+
+      true ->
+        goal_create(ctx, session, args)
+    end
+  end
+
+  defp split_word(args) do
+    case String.split(args, " ", parts: 2) do
+      [word, rest] -> {word, rest}
+      [word] -> {word, ""}
+      [] -> {"", ""}
+    end
+  end
+
+  defp goal_status(session) do
+    case DshBeam.Goal.current(session) do
+      nil ->
+        "no current goal — /goal <objective> to create one"
+
+      goal ->
+        round = "#{goal["rounds_started"]}/#{goal["max_goal_rounds"]}"
+        base = "goal [#{goal["phase"]}]: #{goal["objective"]} (round #{round})"
+
+        case goal["blocked_reason"] do
+          %{"code" => code, "message" => message} ->
+            base <> " — blocked: #{code} (#{message})"
+
+          _ ->
+            base
+        end
+    end
+  end
+
+  defp goal_create(ctx, session, objective) do
+    case DshBeam.Goal.create(session, objective) do
+      {:ok, goal} ->
+        DshBeam.Goal.Driver.arm_ctx(ctx)
+        "goal created: #{goal["objective"]}"
+
+      {:error, :goal_already_current} ->
+        "a goal is already current — /goal edit <objective> or /goal clear"
+
+      {:error, :empty_objective} ->
+        "objective must not be empty"
+
+      {:error, reason} ->
+        "create failed: #{inspect(reason)}"
+    end
+  end
+
+  defp goal_edit(ctx, session, objective) do
+    goal_update(ctx, session, "edit", objective: objective)
+  end
+
+  defp goal_verb(ctx, session, "clear"), do: goal_clear(ctx, session)
+  defp goal_verb(ctx, session, verb), do: goal_update(ctx, session, verb, [])
+
+  defp goal_clear(ctx, session) do
+    case DshBeam.Goal.current(session) do
+      nil ->
+        "no current goal"
+
+      goal ->
+        case DshBeam.Goal.clear(session, goal["id"], goal["revision"]) do
+          {:ok, :cleared} ->
+            DshBeam.Goal.Driver.disarm_ctx(ctx)
+            "goal cleared"
+
+          {:error, reason} ->
+            "clear failed: #{inspect(reason)}"
+        end
+    end
+  end
+
+  defp goal_update(ctx, session, action, opts) do
+    case DshBeam.Goal.current(session) do
+      nil ->
+        "no current goal"
+
+      goal ->
+        case DshBeam.Goal.update(session, goal["id"], goal["revision"], action, opts) do
+          {:ok, updated} ->
+            apply_command_activation(ctx, action)
+            "goal [#{updated["phase"]}]: #{updated["objective"]}"
+
+          {:error, :invalid_transition} ->
+            "cannot #{action} from phase #{goal["phase"]}"
+
+          {:error, :blocked_reason_required} ->
+            "blocked needs a concrete reason"
+
+          {:error, reason} ->
+            "#{action} failed: #{inspect(reason)}"
+        end
+    end
+  end
+
+  defp apply_command_activation(ctx, "resume"), do: DshBeam.Goal.Driver.arm_ctx(ctx)
+
+  defp apply_command_activation(ctx, action) when action in ["pause", "complete", "blocked"],
+    do: DshBeam.Goal.Driver.disarm_ctx(ctx)
+
+  defp apply_command_activation(_ctx, _action), do: :ok
 
   # The workspace sidebar: every workspace session, with its current/current?
   # flag and an encoded key for the switch/close events.
@@ -1502,7 +1639,17 @@ defmodule DshBeamWeb.ConsoleLive do
         desc: "Session + llm + adapter + shell + bash + loop",
         entries:
           panel_entries() ++
-            core_entries([:session, :llm, :adapter, :shell, :bash, :tool_plugin, :loop])
+            core_entries([
+              :session,
+              :llm,
+              :adapter,
+              :shell,
+              :bash,
+              :goal,
+              :goal_driver,
+              :tool_plugin,
+              :loop
+            ])
       },
       %{
         id: "chat",

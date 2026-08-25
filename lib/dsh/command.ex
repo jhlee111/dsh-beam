@@ -7,9 +7,9 @@ defmodule DshBeam.Command do
   session/llm/runtime context), while this module stays the pure, testable
   catalog the menu and the dispatcher both read.
 
-  The seeded catalog maps to dsh-beam reality; `/plan`, `/goal`, `/compact`,
-  `/retry`, `/fork` are reference commands that have no dsh-beam substrate yet
-  and are intentionally absent.
+  The seeded catalog maps to dsh-beam reality; `/plan`, `/compact`, `/retry`,
+  `/fork` are reference commands that have no dsh-beam substrate yet and are
+  intentionally absent.
   """
 
   @catalog %{
@@ -20,6 +20,10 @@ defmodule DshBeam.Command do
     "model" => %{
       description: "Select the model for this conversation",
       hint: "<deepseek-chat|deepseek-reasoner>"
+    },
+    "goal" => %{
+      description: "Manage the session goal",
+      hint: "<objective|edit <objective>|pause|resume|clear>"
     },
     "clear" => %{description: "Clear the conversation", hint: ""},
     "help" => %{description: "List available commands", hint: ""}
@@ -36,7 +40,7 @@ defmodule DshBeam.Command do
   def catalog, do: @catalog
 
   # Declaration order is the menu order (like the permission preset order).
-  @names ["permission", "model", "clear", "help"]
+  @names ["permission", "model", "goal", "clear", "help"]
 
   @doc "The command names, in declaration (menu) order."
   @spec names() :: [String.t()]

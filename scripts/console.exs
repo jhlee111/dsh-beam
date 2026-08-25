@@ -21,14 +21,17 @@ settings_path = Path.join([File.cwd!(), ".dsh", "settings.json"])
 entries = [
   %{id: :console, plugin: DshBeam.Console, config: [server: true], disabled: false},
   %{id: :session, plugin: DshBeam.Session.Plugin, config: [], disabled: false},
-  %{id: :workspace, plugin: DshBeam.Workspace,
-       config: [
-         boot_prune: true,
-         repo: File.cwd!(),
-         keep: [File.cwd!()],
-         roster_path: Path.join([System.user_home!(), ".dsh", "workspace-roster.json"])
-       ],
-       disabled: false},
+  %{
+    id: :workspace,
+    plugin: DshBeam.Workspace,
+    config: [
+      boot_prune: true,
+      repo: File.cwd!(),
+      keep: [File.cwd!()],
+      roster_path: Path.join([System.user_home!(), ".dsh", "workspace-roster.json"])
+    ],
+    disabled: false
+  },
   %{id: :llm, plugin: DshBeam.Llm.Plugin, config: [], disabled: false},
   %{id: :adapter, plugin: DshBeam.Llm.Adapter.Req, config: [], disabled: false},
   %{id: :shell, plugin: DshBeam.Shell.Plugin, config: [], disabled: false},
@@ -36,6 +39,8 @@ entries = [
   %{id: :fs, plugin: DshBeam.Tool.Fs, config: [root: File.cwd!()], disabled: false},
   %{id: :crash_audit, plugin: DshBeam.CrashAudit.Plugin, config: [], disabled: false},
   %{id: :todo, plugin: DshBeam.Tool.Todo, config: [], disabled: false},
+  %{id: :goal, plugin: DshBeam.Tool.Goal, config: [], disabled: false},
+  %{id: :goal_driver, plugin: DshBeam.Goal.Driver, config: [], disabled: false},
   %{id: :tool_plugin, plugin: DshBeam.Tool.Plugin, config: [], disabled: false},
   %{id: :loop, plugin: DshBeam.Agent.Loop, config: [], disabled: false},
   %{id: :panel_composition, plugin: DshBeam.Ui.Panel.Composition, config: [], disabled: false},
