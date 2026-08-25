@@ -16,6 +16,12 @@ defmodule DshBeam.Llm.Adapter.Req do
   use DshBeam.Llm.Adapter
 
   @default_receive_timeout 300_000
+  # DeepSeek streams reasoning_content in ~4-char token fragments; emitting the
+  # stream callback per fragment turns one reasoning block into thousands of
+  # session appends (and, downstream, thousands of full LiveView re-renders).
+  # Coalesce fragments and flush at most once per this many characters, so the
+  # chat pane still follows live without drowning the renderer.
+  @reasoning_flush_chars 120
 
   @impl true
   def complete(config, messages, opts) do
@@ -198,7 +204,7 @@ defmodule DshBeam.Llm.Adapter.Req do
           token -> cancellable_stream(url, options, token, timeout)
         end
 
-      acc = state |> Agent.get(& &1) |> flush_buffer(stream)
+      acc = state |> Agent.get(& &1) |> flush_buffer(stream) |> flush_reasoning(stream)
 
       case result do
         {:ok, :streamed} -> stream_result(acc)
@@ -220,6 +226,7 @@ defmodule DshBeam.Llm.Adapter.Req do
     %{
       buffer: "",
       reasoning: "",
+      pending_reasoning: "",
       content: "",
       tool_calls: %{},
       finish_reason: nil,
@@ -231,6 +238,26 @@ defmodule DshBeam.Llm.Adapter.Req do
   # trailing buffered event (if any) before the result is assembled.
   defp flush_buffer(%{buffer: ""} = acc, _stream), do: acc
   defp flush_buffer(acc, stream), do: process_sse_event(acc.buffer, %{acc | buffer: ""}, stream)
+
+  # Emit the leftover coalesced reasoning tail (under the flush threshold) so
+  # no fragment is dropped when the stream settles.
+  defp flush_reasoning(%{pending_reasoning: ""} = acc, _stream), do: acc
+
+  defp flush_reasoning(acc, stream) do
+    stream.({:reasoning, acc.pending_reasoning})
+    %{acc | pending_reasoning: ""}
+  end
+
+  # Hold reasoning fragments back until a meaningful run accumulates, then emit
+  # one coalesced chunk; the tail (under the threshold) is flushed at the end.
+  defp coalesce_reasoning(acc, pending, stream) do
+    if String.length(pending) >= @reasoning_flush_chars do
+      stream.({:reasoning, pending})
+      %{acc | pending_reasoning: ""}
+    else
+      %{acc | pending_reasoning: pending}
+    end
+  end
 
   defp request_stream(url, options) do
     case Req.post(url, options) do
@@ -294,8 +321,8 @@ defmodule DshBeam.Llm.Adapter.Req do
           acc
 
         reasoning ->
-          stream.({:reasoning, reasoning})
-          %{acc | reasoning: acc.reasoning <> reasoning}
+          acc = %{acc | reasoning: acc.reasoning <> reasoning}
+          coalesce_reasoning(acc, acc.pending_reasoning <> reasoning, stream)
       end
 
     acc =
