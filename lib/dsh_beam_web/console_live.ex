@@ -1404,6 +1404,16 @@ defmodule DshBeamWeb.ConsoleLive do
     end
   end
 
+  defp dispatch_command(socket, "goal", args) do
+    result =
+      case alive_session(socket.assigns.ctx) do
+        {:ok, session} -> goal_command(session, String.trim(args))
+        _ -> "no session"
+      end
+
+    {socket, result}
+  end
+
   defp dispatch_command(socket, "clear", _args) do
     case alive_session(socket.assigns.ctx) do
       {:ok, session} -> DshBeam.Session.clear(session)
@@ -1419,6 +1429,109 @@ defmodule DshBeamWeb.ConsoleLive do
 
   defp dispatch_command(socket, name, _args) do
     {socket, "unknown command \"/#{name}\" (try /help)"}
+  end
+
+  # -- /goal command (the reference's command-goal) --
+
+  defp goal_command(session, ""), do: goal_status(session)
+
+  defp goal_command(session, args) do
+    {word, rest} = split_word(args)
+    word = String.downcase(word)
+
+    cond do
+      word == "edit" ->
+        if String.trim(rest) == "",
+          do: "edit needs a replacement objective",
+          else: goal_edit(session, String.trim(rest))
+
+      word == "pause" and rest == "" ->
+        goal_verb(session, "pause")
+
+      word == "resume" and rest == "" ->
+        goal_verb(session, "resume")
+
+      word == "clear" and rest == "" ->
+        goal_clear(session)
+
+      true ->
+        goal_create(session, args)
+    end
+  end
+
+  defp split_word(args) do
+    case String.split(args, " ", parts: 2) do
+      [word, rest] -> {word, rest}
+      [word] -> {word, ""}
+      [] -> {"", ""}
+    end
+  end
+
+  defp goal_status(session) do
+    case DshBeam.Goal.current(session) do
+      nil ->
+        "no current goal — /goal <objective> to create one"
+
+      goal ->
+        round = "#{goal["rounds_started"]}/#{goal["max_goal_rounds"]}"
+        base = "goal [#{goal["phase"]}]: #{goal["objective"]} (round #{round})"
+
+        case goal["phase"] do
+          "blocked" ->
+            reason = goal["blocked_reason"]
+            base <> " — blocked: #{reason["code"]} (#{reason["message"]})"
+
+          _ ->
+            base
+        end
+    end
+  end
+
+  defp goal_create(session, objective) do
+    case DshBeam.Goal.create(session, objective) do
+      {:ok, goal} ->
+        "goal created: #{goal["objective"]}"
+
+      {:error, :goal_already_current} ->
+        "a goal is already current — /goal edit <objective> or /goal clear"
+
+      {:error, :empty_objective} ->
+        "objective must not be empty"
+
+      {:error, reason} ->
+        "create failed: #{inspect(reason)}"
+    end
+  end
+
+  defp goal_edit(session, objective) do
+    goal_update(session, "edit", objective: objective)
+  end
+
+  defp goal_verb(session, verb) do
+    goal_update(session, verb, [])
+  end
+
+  defp goal_clear(session) do
+    case DshBeam.Goal.clear(session) do
+      {:ok, :cleared} -> "goal cleared"
+      {:error, :no_goal} -> "no current goal"
+      {:error, reason} -> "clear failed: #{inspect(reason)}"
+    end
+  end
+
+  defp goal_update(session, action, opts) do
+    case DshBeam.Goal.current(session) do
+      nil ->
+        "no current goal"
+
+      goal ->
+        case DshBeam.Goal.update(session, goal["id"], goal["revision"], action, opts) do
+          {:ok, updated} -> "goal [#{updated["phase"]}]: #{updated["objective"]}"
+          {:error, :invalid_transition} -> "cannot #{action} from phase #{goal["phase"]}"
+          {:error, :blocked_reason_required} -> "blocked needs a concrete reason"
+          {:error, reason} -> "#{action} failed: #{inspect(reason)}"
+        end
+    end
   end
 
   # The workspace sidebar: every workspace session, with its current/current?
