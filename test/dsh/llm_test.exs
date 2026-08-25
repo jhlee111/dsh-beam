@@ -314,10 +314,9 @@ defmodule DshBeam.LlmTest do
 
   test "the Req adapter coalesces reasoning fragments into fewer chunks" do
     # DeepSeek streams reasoning_content in ~4-char token fragments; per-fragment
-    # emission would flood the session (and the LiveView refresh) with thousands
-    # of near-empty events. The adapter must coalesce to a bounded number of
-    # meaningful chunks. 5 × 30 chars crosses the 120-char threshold exactly
-    # once, so it must emit two chunks (120 + 30), not five.
+    # emission would flood the session with thousands of near-empty events. The
+    # adapter must coalesce to a bounded number of meaningful chunks: 5 × 30
+    # chars crossing the 40-char threshold emits (60 + 60 + 30), not five.
     test = self()
 
     frags = for n <- 1..5, do: String.duplicate(<<96 + n>>, 30)
@@ -364,7 +363,7 @@ defmodule DshBeam.LlmTest do
              DshBeam.Llm.chat(llm, [%{"role" => "user", "content" => "hi"}], stream: stream)
 
     chunks = collect_reasoning()
-    assert Enum.map(chunks, &String.length/1) == [120, 30]
+    assert Enum.map(chunks, &String.length/1) == [60, 60, 30]
     assert Enum.join(chunks) == Enum.join(frags)
   end
 
