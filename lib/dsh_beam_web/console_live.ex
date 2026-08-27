@@ -604,6 +604,45 @@ defmodule DshBeamWeb.ConsoleLive do
     {:noreply, assign(socket, plugin_drafts: drafts) |> refresh()}
   end
 
+  # Enable/disable a plugin entry: flip its disabled flag and reconcile, so a
+  # disabled plugin stays in the desired composition (visible, re-enableable)
+  # while its fiber is stopped. The console host itself cannot be disabled.
+  def handle_event("plugin_enable", %{"plugin" => plugin_str, "enabled" => enabled_str}, socket) do
+    plugin = decode_plugin!(plugin_str)
+
+    if plugin == DshBeam.Console do
+      {:noreply, refresh(socket)}
+    else
+      enable = enabled_str in ["true", "1"]
+      runtime = socket.assigns.runtime
+      current = current_specs(runtime)
+
+      specs =
+        case Enum.find(current, &(&1.plugin == plugin)) do
+          nil ->
+            # an inventoried plugin outside this composition: mount it as a
+            # fresh entry (id = plugin module, the Creator's convention)
+            current ++ [%{id: plugin, plugin: plugin, config: [], disabled: not enable}]
+
+          %{id: id} ->
+            Enum.map(current, fn
+              %{id: ^id} = spec -> %{spec | disabled: not enable}
+              spec -> spec
+            end)
+        end
+
+      :ok = DshBeam.Runtime.reconcile(runtime, specs)
+
+      {:noreply,
+       socket
+       |> assign(
+         plugins_result:
+           "#{if enable, do: "enabled", else: "disabled"} #{friendly_plugin_name(plugin)}"
+       )
+       |> refresh()}
+    end
+  end
+
   def handle_event("preset_default", %{"preset" => id}, socket) do
     store = DshBeam.Runtime.settings(socket.assigns.runtime)
     :ok = DshBeam.Settings.put(store, DshBeam.Ui.Panel.General, :default_preset, id)
@@ -1701,7 +1740,15 @@ defmodule DshBeamWeb.ConsoleLive do
 
   defp build_inventory(runtime, entries, plugin_open, plugin_drafts) do
     store = DshBeam.Runtime.settings(runtime)
-    mounted = MapSet.new(entries, fn {_id, rec} -> rec.spec.plugin end)
+
+    # present = the plugin is an entry of this composition (running or
+    # disabled); enabled = present and its disabled flag is false.
+    present = MapSet.new(entries, fn {_id, rec} -> rec.spec.plugin end)
+
+    enabled =
+      for {_id, %{spec: %{plugin: plugin, disabled: false}}} <- entries,
+          into: MapSet.new(),
+          do: plugin
 
     DshBeam.Plugin.Inventory.installed()
     |> Enum.map(fn entry ->
@@ -1711,7 +1758,10 @@ defmodule DshBeamWeb.ConsoleLive do
       %{
         plugin: plugin,
         name: friendly_plugin_name(plugin),
-        enabled: MapSet.member?(mounted, plugin),
+        present: MapSet.member?(present, plugin),
+        enabled: MapSet.member?(enabled, plugin),
+        # the console host is the composition's root: never disableable
+        core: plugin == DshBeam.Console,
         open: MapSet.member?(plugin_open, plugin),
         dirty: map_size(drafts) > 0,
         desc: plugin_desc(plugin),

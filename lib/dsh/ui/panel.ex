@@ -339,24 +339,42 @@ defmodule DshBeam.Ui.Panel do
         <div class="plugins-scroll">
           <%= for p <- @inventory do %>
             <div class="plugin-card">
-              <button
-                type="button"
-                class="plugin-head"
-                phx-click="plugin_toggle"
-                phx-value-plugin={inspect(p.plugin)}
-              >
-                <span class="plugin-name"><%= p.name %></span>
-                <span class={"pill state-#{if p.enabled, do: "active", else: "gone"}"}>
-                  <%= if p.enabled, do: "enabled", else: "disabled" %>
-                </span>
-                <%= if p.settings != [] do %>
+              <div class="plugin-head-row">
+                <button
+                  type="button"
+                  class="plugin-head"
+                  phx-click="plugin_toggle"
+                  phx-value-plugin={inspect(p.plugin)}
+                >
+                  <span class="plugin-name"><%= p.name %></span>
                   <span class="plugin-desc"><%= p.desc %></span>
                   <%= if p.dirty do %>
                     <span class="pill unsaved">unsaved</span>
                   <% end %>
-                  <span class={"chevron #{if p.open, do: "open"}"}>▾</span>
+                  <%= if p.settings != [] do %>
+                    <span class={"chevron #{if p.open, do: "open"}"}>▾</span>
+                  <% end %>
+                </button>
+                <span class={"pill state-#{status_class(p)}"}>
+                  <%= status_label(p) %>
+                </span>
+                <%= if p.core do %>
+                  <button type="button" class="plugin-toggle" disabled title="core plugin">
+                    core
+                  </button>
+                <% else %>
+                  <button
+                    type="button"
+                    class={"plugin-toggle #{if p.enabled, do: "on", else: "off"}"}
+                    phx-click="plugin_enable"
+                    phx-value-plugin={inspect(p.plugin)}
+                    phx-value-enabled={if p.enabled, do: "false", else: "true"}
+                    title={if p.enabled, do: "disable plugin", else: "enable plugin"}
+                  >
+                    <%= if p.enabled, do: "disable", else: "enable" %>
+                  </button>
                 <% end %>
-              </button>
+              </div>
               <%= if p.open and p.settings != [] do %>
                 <form class="plugin-body" phx-change="plugin_edit" phx-submit="settings_save">
                   <input type="hidden" name="plugin" value={to_string(p.plugin)} />
@@ -382,6 +400,16 @@ defmodule DshBeam.Ui.Panel do
       </section>
       """
     end
+
+    # enabled (running), disabled (in the composition, fiber stopped), or
+    # not mounted at all (inventoried but not part of this composition).
+    defp status_class(%{enabled: true}), do: "active"
+    defp status_class(%{present: true}), do: "gone"
+    defp status_class(_), do: "gone"
+
+    defp status_label(%{enabled: true}), do: "enabled"
+    defp status_label(%{present: true}), do: "disabled"
+    defp status_label(_), do: "not mounted"
   end
 
   defmodule General do

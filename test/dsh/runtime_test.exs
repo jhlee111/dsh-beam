@@ -276,6 +276,25 @@ defmodule DshBeam.RuntimeTest do
     assert {:ok, 1} = DshBeam.Context.get(ctx, :k)
   end
 
+  test "a disabled entry stays in the desired composition without a fiber" do
+    {:ok, runtime} = DshBeam.Runtime.start_link([], [])
+
+    entry = %{id: :k, plugin: DshBeam.Provider, config: [provides: %{k: 1}], disabled: true}
+    :ok = DshBeam.Runtime.reconcile(runtime, [entry])
+
+    # the entry is recorded (disabled), but no fiber runs and nothing binds
+    assert %{k: %{spec: %{disabled: true}, pid: nil}} = DshBeam.Runtime.entries(runtime)
+    assert DshBeam.Context.get(DshBeam.Runtime.context(runtime), :k) == :not_found
+
+    # re-enabling starts the fiber; disabling again stops it and keeps the entry
+    :ok = DshBeam.Runtime.reconcile(runtime, [%{entry | disabled: false}])
+    assert %{k: %{spec: %{disabled: false}, pid: pid}} = DshBeam.Runtime.entries(runtime)
+    assert is_pid(pid)
+
+    :ok = DshBeam.Runtime.reconcile(runtime, [%{entry | disabled: true}])
+    assert %{k: %{spec: %{disabled: true}, pid: nil}} = DshBeam.Runtime.entries(runtime)
+  end
+
   test "the quiescent state is a function of the final configuration (confluence)" do
     entry_a = %{
       id: :a,
