@@ -31,6 +31,7 @@ platform* and *how the UI is built* — and everything else hangs off them.
 | [0014](0014-session-surface-and-kv-cache.md) | Session history as an append-only log with a derived model surface (KV-cache reuse) | accepted |
 | [0015](0015-llm-adapter-is-a-plugin.md) | LLM adapters are plugins, not behaviour values | accepted |
 | [0016](0016-workspace-session-worktree.md) | Session = git worktree: per-session isolation over one repository | accepted |
+| [0017](0017-element-select-creator-feedback.md) | ElementSelect: a creator-plugin feedback channel from UI to agent | accepted |
 
 ## How to add an ADR
 

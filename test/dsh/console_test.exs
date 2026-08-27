@@ -690,7 +690,6 @@ defmodule DshBeam.ConsoleTest do
     assert DshBeam.Workspace.all_sessions(workspace) == %{}
   end
 
->>>>>>> 1f34b7a (feat(workspace): row-click switch + ⋮ menu for close (two-step))
   test "the /goal command manages the session goal", %{session: session, ctx: ctx} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
     render_submit(view, "seed", %{})
