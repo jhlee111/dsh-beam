@@ -48,7 +48,7 @@ defmodule DshBeam.Ui.Panel.Workspace do
             no sessions yet — pick a workspace folder and press “+ new session”
           </p>
         <% end %>
-        <%= for s <- @workspace_sessions do %>
+        <%= for {s, idx} <- Enum.with_index(@workspace_sessions) do %>
           <div class={"workspace-row #{if s.current, do: "current"}"}>
             <div
               class="ws-select"
