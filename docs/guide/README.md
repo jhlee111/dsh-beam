@@ -19,6 +19,8 @@ how to work in it. Read in order on first landing.
   lifecycle, and how data flows.
 - [Contributing](contributing.md) — how to add a plugin, a tool, a UI panel;
   the CI gates and commit style.
+- [Plugin UX feedback](plugin-ux-feedback.md) — how a Pick marker resolves
+  to code, and the rules for editing plugin UI (runtime hooks, scoped CSS).
 - [Glossary](glossary.md) — the vocabulary (fiber, coeffect, revertible effect,
   L-Unload guard, intercept, slot, projection).
 
