@@ -317,6 +317,86 @@ defmodule DshBeam.ConsoleTest do
     assert html =~ "9"
   end
 
+  test "plugins can be enabled and disabled from the plugins tab", %{
+    session: session,
+    runtime: runtime
+  } do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    _ = open_settings(view)
+    _ = open_section(view, :plugins)
+
+    # every installed plugin renders a card; the console host is core and
+    # cannot be disabled, and an inventoried-but-unmounted plugin reads
+    # "not mounted"
+    html = render(view)
+    assert html =~ "plugin-card"
+    assert html =~ "ConsoleSettingsPlugin"
+    assert html =~ "core"
+    assert html =~ "not mounted"
+
+    # enabling mounts the plugin as a running entry
+    html =
+      render_click(view, "plugin_enable", %{
+        "plugin" => to_string(ConsoleSettingsPlugin),
+        "enabled" => "true"
+      })
+
+    assert html =~ "enabled ConsoleSettingsPlugin"
+
+    entries = DshBeam.Runtime.entries(runtime)
+    assert %{spec: %{disabled: false}} = entries[ConsoleSettingsPlugin]
+    assert is_pid(entries[ConsoleSettingsPlugin].pid)
+
+    # disabling keeps the entry in the composition but stops its fiber
+    html =
+      render_click(view, "plugin_enable", %{
+        "plugin" => to_string(ConsoleSettingsPlugin),
+        "enabled" => "false"
+      })
+
+    assert html =~ "disabled ConsoleSettingsPlugin"
+
+    entries = DshBeam.Runtime.entries(runtime)
+    assert %{spec: %{disabled: true}} = entries[ConsoleSettingsPlugin]
+    assert entries[ConsoleSettingsPlugin].pid == nil
+
+    # re-enabling restarts the fiber
+    html =
+      render_click(view, "plugin_enable", %{
+        "plugin" => to_string(ConsoleSettingsPlugin),
+        "enabled" => "true"
+      })
+
+    assert html =~ "enabled ConsoleSettingsPlugin"
+
+    entries = DshBeam.Runtime.entries(runtime)
+    assert %{spec: %{disabled: false}} = entries[ConsoleSettingsPlugin]
+    assert is_pid(entries[ConsoleSettingsPlugin].pid)
+  end
+
+  test "the console host cannot be disabled from the plugins tab", %{
+    session: session,
+    runtime: runtime
+  } do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    _ = open_settings(view)
+    _ = open_section(view, :plugins)
+
+    html = render(view)
+    assert html =~ "core"
+
+    # a hostile click on the console's enable control is a no-op
+    html =
+      render_click(view, "plugin_enable", %{
+        "plugin" => to_string(DshBeam.Console),
+        "enabled" => "false"
+      })
+
+    entries = DshBeam.Runtime.entries(runtime)
+    assert %{spec: %{disabled: false}} = entries[:console]
+    assert is_pid(entries[:console].pid)
+  end
+
   test "the plugins tab shows configurable cards with staged edits", %{
     session: session,
     runtime: runtime

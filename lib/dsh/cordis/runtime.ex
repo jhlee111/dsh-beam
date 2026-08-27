@@ -315,7 +315,14 @@ defmodule DshBeam.Runtime do
   defp collect_error(:ok, errors), do: errors
   defp collect_error({:error, reason}, errors), do: [reason | errors]
 
-  defp start_entry(state, %{disabled: true}, _restarts), do: {state, :ok}
+  defp start_entry(state, %{disabled: true} = entry, _restarts) do
+    # A disabled entry stays in the desired composition: record it without a
+    # fiber, so a later reconcile can re-enable it and the console can show it
+    # as "disabled" instead of gone. The reassert pass skips disabled entries,
+    # so this record is never started behind the operator's back.
+    {put_record(state, entry.id, %{spec: entry, pid: nil, restarts: 0, error: nil, timer: nil}),
+     :ok}
+  end
 
   defp start_entry(state, entry, restarts) do
     # Lay the typed-settings overrides (resolved defaults + any saved

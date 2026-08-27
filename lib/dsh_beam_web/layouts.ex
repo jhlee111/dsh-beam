@@ -654,10 +654,23 @@ defmodule DshBeamWeb.Layouts do
           }
           .plugin-head:hover { background: var(--dsw-alias-interactive-bg-hover); }
           .plugin-name { font-weight: 600; }
+          .plugin-head-row {
+            display: flex; align-items: center; gap: 8px;
+            padding: 4px 10px 0 10px; width: 100%; box-sizing: border-box;
+          }
+          .plugin-head { padding-top: 8px; }
+          .plugin-head-row .plugin-head { padding-top: 4px; padding-bottom: 4px; }
           .plugin-desc {
             flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
             white-space: nowrap; color: var(--dsw-alias-label-secondary); font-size: 12px;
           }
+          .plugin-toggle {
+            flex: none; font-size: 11px; padding: 2px 8px; border-radius: 10px;
+            border: 1px solid var(--dsw-alias-border-l3, #2b3442); cursor: pointer;
+          }
+          .plugin-toggle.on { color: var(--dsw-static-green-500, #34d399); border-color: var(--dsw-static-green-500); }
+          .plugin-toggle.off { color: var(--dsw-static-neutral-bluish-500, #6b7a90); }
+          .plugin-toggle:disabled { opacity: .5; cursor: default; }
           .chevron { margin-left: auto; transition: transform .15s var(--ds-ease-in-out); }
           .chevron.open { transform: rotate(180deg); }
           .plugin-body { padding: 8px 10px; border-top: 1px solid var(--dsw-alias-border-l2); }
