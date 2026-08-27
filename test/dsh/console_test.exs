@@ -660,6 +660,37 @@ defmodule DshBeam.ConsoleTest do
     assert Enum.any?(DshBeam.Session.all(session_pid), &(&1["role"] == "command_done"))
   end
 
+  test "session rows switch on click and close via the ⋮ menu (two-step)",
+       %{session: session, ctx: ctx} do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    render_submit(view, "seed", %{})
+    dir = Path.join(System.tmp_dir!(), "dsh_close_" <> Integer.to_string(System.unique_integer([:positive])))
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    render_submit(view, "workspace_create", %{"repo" => dir, "title" => "closable"})
+    {:ok, workspace} = DshBeam.Context.get(ctx, :workspace)
+    [ws] = Map.keys(DshBeam.Workspace.all_sessions(workspace))
+
+    html = render(view)
+    # no bare switch button — the whole card is the switch target
+    refute html =~ ">switch</button>"
+    assert html =~ ~s(phx-click="workspace_switch")
+    # close moved behind the vertical meatball menu (⋮ → close session)
+    assert html =~ "ws-meatball"
+    assert html =~ "close session"
+    assert html =~ "WorkspaceMenu"
+
+    # clicking the card switches the session
+    render_click(view, "workspace_switch", %{"session" => encode(ws)})
+    assert DshBeam.Context.get(ctx, :session) == {:ok, ws}
+
+    # the menu's close (fired after ⋮ → close session) still closes the worktree
+    render_click(view, "workspace_close", %{"session" => encode(ws)})
+    assert DshBeam.Workspace.all_sessions(workspace) == %{}
+  end
+
+>>>>>>> 1f34b7a (feat(workspace): row-click switch + ⋮ menu for close (two-step))
   test "the /goal command manages the session goal", %{session: session, ctx: ctx} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
     render_submit(view, "seed", %{})
