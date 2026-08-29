@@ -852,7 +852,15 @@ defmodule DshBeamWeb.Layouts do
               this.onKeydown = (e) => {
                 if (e.key === 'Enter' && !e.shiftKey && !this.el.disabled) {
                   e.preventDefault();
-                  if (this.el.form) this.el.form.requestSubmit();
+                  const form = this.el.form;
+                  if (form && typeof form.requestSubmit === 'function') {
+                    form.requestSubmit();
+                  } else if (form) {
+                    // Older browsers: LiveView submits on the form's submit
+                    // event, which requestSubmit emits but submit() does not,
+                    // so fall back to the phx-submit target directly.
+                    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+                  }
                 }
               };
               this.el.addEventListener('keydown', this.onKeydown);
