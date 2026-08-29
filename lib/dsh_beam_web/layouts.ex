@@ -850,6 +850,10 @@ defmodule DshBeamWeb.Layouts do
               // unlike a server-side draft assign). Shift+Enter falls through
               // to the browser default so it inserts a newline natively.
               this.onKeydown = (e) => {
+                // Skip Enter that confirms an IME composition (Korean/Japanese
+                // input): let the browser commit the composed text instead of
+                // submitting a half-composed draft.
+                if (e.isComposing || e.keyCode === 229) return;
                 if (e.key === 'Enter' && !e.shiftKey && !this.el.disabled) {
                   e.preventDefault();
                   const form = this.el.form;
