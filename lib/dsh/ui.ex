@@ -1,4 +1,6 @@
 defmodule DshBeam.Ui do
+  import Phoenix.Component
+
   @moduledoc """
   The UI slot composer — the harness's ui-slots renderer, for LiveView
   function components.
@@ -28,6 +30,12 @@ defmodule DshBeam.Ui do
       <%= for rendered <- DshBeam.Ui.render_slot(:details, assigns) do %>
         <%= rendered %>
       <% end %>
+
+  Each contribution is wrapped in a layout-transparent region marker
+  (`display: contents`, `data-dsh-region`) carrying the slot name, the plugin
+  module that rendered it, and its source file — the ElementSelect picker reads
+  these via `closest('[data-dsh-region]')` so a pick marker names the owning
+  plugin / slot / source, not just the HTML.
   """
   def render_slot(name, assigns, opts \\ []) when is_atom(name) do
     entries = DshBeam.Ui.Registry.for_slot(name)
@@ -36,8 +44,41 @@ defmodule DshBeam.Ui do
     entries
     |> compose(key)
     |> Enum.map(fn entry ->
-      render_component(entry.component, forwarded(assigns, name))
+      entry.component
+      |> render_component(forwarded(assigns, name))
+      |> wrap_region(entry)
     end)
+  end
+
+  defp wrap_region(rendered, entry) do
+    assigns = %{
+      inner: rendered,
+      slot: entry.name,
+      plugin: entry.plugin |> inspect() |> String.replace("Elixir.", ""),
+      source: source_file(entry.plugin),
+      key: if(is_nil(entry.key), do: "", else: to_string(entry.key))
+    }
+
+    ~H"""
+    <span
+      style="display: contents"
+      data-dsh-region
+      data-dsh-slot={@slot}
+      data-dsh-plugin={@plugin}
+      data-dsh-source={@source}
+      data-dsh-key={@key}
+    ><%= @inner %></span>
+    """
+  end
+
+  defp source_file(mod) do
+    case mod.module_info(:compile)[:source] do
+      nil -> ""
+      src when is_list(src) -> src |> List.to_string() |> Path.relative_to_cwd()
+      src when is_binary(src) -> Path.relative_to_cwd(src)
+    end
+  rescue
+    _ -> ""
   end
 
   # single: the lowest-order occupant wins

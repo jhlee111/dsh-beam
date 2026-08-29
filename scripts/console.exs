@@ -52,7 +52,8 @@ entries = [
   %{id: :panel_events, plugin: DshBeam.Ui.Panel.EventFeed, config: [], disabled: false},
   %{id: :panel_plugins, plugin: DshBeam.Ui.Panel.Plugins, config: [], disabled: false},
   %{id: :panel_workspace, plugin: DshBeam.Ui.Panel.Workspace, config: [], disabled: false},
-  %{id: :panel_trajectory, plugin: DshBeam.Ui.Panel.Trajectory, config: [], disabled: false}
+  %{id: :panel_trajectory, plugin: DshBeam.Ui.Panel.Trajectory, config: [], disabled: false},
+  %{id: :panel_element_select, plugin: DshBeam.Ui.Panel.ElementSelect, config: [], disabled: false}
 ]
 
 # Supervise the orchestrator itself: the runtime (and its plugin

@@ -660,6 +660,34 @@ defmodule DshBeam.ConsoleTest do
     assert Enum.any?(DshBeam.Session.all(session_pid), &(&1["role"] == "command_done"))
   end
 
+  test "the element select seat injects a pick marker into the composer draft",
+       %{session: session, ctx: ctx} do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    render_submit(view, "seed", %{})
+    open_chat_session(view, ctx)
+
+    # the seat renders into the composer toolbar
+    html = render(view)
+    assert html =~ "element-select-trigger"
+    assert html =~ "Pick"
+
+    # a pick payload lands in the composer draft as a structured marker
+    html =
+      render_click(view, "element_pick", %{
+        "tag" => "button",
+        "id" => "composer-send",
+        "classes" => "composer-send",
+        "selector" => "form.composer > .composer-actions > button.composer-send",
+        "text" => "send",
+        "html" => "<button class=\"composer-send\">send</button>"
+      })
+
+    assert html =~ "요소 지적"
+    assert html =~ "button#composer-send"
+    assert html =~ "셀렉터: form.composer"
+    assert html =~ "composer-send"
+  end
+
   test "session rows switch on click and close via the ⋮ menu (two-step)",
        %{session: session, ctx: ctx} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)

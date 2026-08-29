@@ -51,7 +51,8 @@ defmodule DshBeamWeb.ConsoleLive do
     %{id: :panel_trajectory, plugin: DshBeam.Ui.Panel.Trajectory, config: [], disabled: false},
     %{id: :panel_access, plugin: DshBeam.Ui.Panel.Access, config: [], disabled: false},
     %{id: :panel_model_select, plugin: DshBeam.Ui.Panel.ModelSelect, config: [], disabled: false},
-    %{id: :panel_command, plugin: DshBeam.Ui.Panel.Command, config: [], disabled: false}
+    %{id: :panel_command, plugin: DshBeam.Ui.Panel.Command, config: [], disabled: false},
+    %{id: :panel_element_select, plugin: DshBeam.Ui.Panel.ElementSelect, config: [], disabled: false}
   ]
 
   # The entries a seed/preset-apply swaps out of a composition: the agent core
@@ -82,7 +83,8 @@ defmodule DshBeamWeb.ConsoleLive do
     :panel_trajectory,
     :panel_access,
     :panel_model_select,
-    :panel_command
+    :panel_command,
+    :panel_element_select
   ]
 
   @impl true
@@ -235,12 +237,27 @@ defmodule DshBeamWeb.ConsoleLive do
             :panel_trajectory,
             :panel_access,
             :panel_model_select,
-            :panel_command
+            :panel_command,
+            :panel_element_select
           ])
       )
 
     :ok = DshBeam.Runtime.reconcile(socket.assigns.runtime, specs ++ @demo_entries)
     {:noreply, refresh(socket)}
+  end
+
+  def handle_event("element_pick", params, socket) do
+    marker = DshBeam.Ui.Panel.ElementSelect.marker(params)
+
+    current = socket.assigns.chat_text
+    draft =
+      if current == "" do
+        marker
+      else
+        current <> "\n\n" <> marker
+      end
+
+    {:noreply, assign(socket, chat_text: draft) |> refresh()}
   end
 
   def handle_event("ask", %{"text" => text}, socket) do
@@ -821,6 +838,10 @@ defmodule DshBeamWeb.ConsoleLive do
     ~H"""
     <div
       class="frame"
+      data-dsh-region
+      data-dsh-slot="layout"
+      data-dsh-plugin="DshBeamWeb.ConsoleLive"
+      data-dsh-source="lib/dsh_beam_web/console_live.ex"
       style={"grid-template-columns: " <> (if @sidebar_collapsed, do: "56px", else: "#{@sidebar_width}px") <> " minmax(0, 1fr) #{@details_width}px"}
     >
       <div class="frame-sidebar">
@@ -944,7 +965,13 @@ defmodule DshBeamWeb.ConsoleLive do
     </div>
 
     <%= if @settings_open do %>
-      <div class="settings-overlay">
+      <div
+        class="settings-overlay"
+        data-dsh-region
+        data-dsh-slot="layout"
+        data-dsh-plugin="DshBeamWeb.ConsoleLive"
+        data-dsh-source="lib/dsh_beam_web/console_live.ex"
+      >
         <div class="settings-backdrop" phx-click="close_settings"></div>
         <div class="settings-panel">
           <nav class="settings-nav">
@@ -969,7 +996,13 @@ defmodule DshBeamWeb.ConsoleLive do
     <% end %>
 
     <%= if @picker_open do %>
-      <div class="settings-overlay">
+      <div
+        class="settings-overlay"
+        data-dsh-region
+        data-dsh-slot="layout"
+        data-dsh-plugin="DshBeamWeb.ConsoleLive"
+        data-dsh-source="lib/dsh_beam_web/console_live.ex"
+      >
         <div class="settings-backdrop" phx-click="picker_cancel"></div>
         <div class="settings-panel picker-panel">
           <div class="picker-head">
