@@ -276,30 +276,6 @@ defmodule DshBeamWeb.ConsoleLive do
     end
   end
 
-  # Enter in the composer submits the form, Shift+Enter inserts a newline —
-  # same as the reference chat's textarea (a shift modifier on a phx-keydown
-  # Enter submit). Sending the live event on Enter while Shift is held would
-  # send an empty draft; we forward Shift+Enter to the DOM so the browser
-  # inserts the newline natively, and only send on plain Enter.
-  def handle_event("composer_keydown", %{"key" => "Enter"} = params, socket) do
-    if params["shift"] do
-      {:noreply, socket}
-    else
-      send(self(), :composer_submit)
-      {:noreply, socket}
-    end
-  end
-
-  def handle_info(:composer_submit, socket) do
-    text = socket.assigns.chat_text
-
-    if String.trim(text) == "" do
-      {:noreply, socket}
-    else
-      handle_event("ask", %{"text" => text}, socket)
-    end
-  end
-
   def handle_event("stop_chat", _params, socket) do
     # Cooperative stop: cancel the token so the loop halts at its next step
     # boundary (and the adapter aborts the in-flight model call), then kill
@@ -967,8 +943,6 @@ defmodule DshBeamWeb.ConsoleLive do
                     rows="1"
                     placeholder="run a task (drives the agent loop)"
                     disabled={@chat_busy}
-                    phx-keydown="composer_keydown"
-                    phx-key="Enter"
                   ><%= @chat_text %></textarea>
                   <div class="composer-actions">
                     <%= if @chat_busy do %>

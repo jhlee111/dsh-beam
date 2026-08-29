@@ -845,10 +845,24 @@ defmodule DshBeamWeb.Layouts do
                 this.el.style.height = this.el.scrollHeight + 'px';
               };
               this.el.addEventListener('input', this.grow);
+              // Enter submits the composer form (same as the send button —
+              // the form's phx-submit serializes the textarea's live value,
+              // unlike a server-side draft assign). Shift+Enter falls through
+              // to the browser default so it inserts a newline natively.
+              this.onKeydown = (e) => {
+                if (e.key === 'Enter' && !e.shiftKey && !this.el.disabled) {
+                  e.preventDefault();
+                  if (this.el.form) this.el.form.requestSubmit();
+                }
+              };
+              this.el.addEventListener('keydown', this.onKeydown);
               this.grow();
             },
             updated() { this.grow(); },
-            destroyed() { this.el.removeEventListener('input', this.grow); }
+            destroyed() {
+              this.el.removeEventListener('input', this.grow);
+              this.el.removeEventListener('keydown', this.onKeydown);
+            }
           };
 
           // "Deep diving" elapsed-time clock: ticks client-side without a
