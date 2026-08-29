@@ -664,7 +664,13 @@ defmodule DshBeam.ConsoleTest do
        %{session: session, ctx: ctx} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
     render_submit(view, "seed", %{})
-    dir = Path.join(System.tmp_dir!(), "dsh_close_" <> Integer.to_string(System.unique_integer([:positive])))
+
+    dir =
+      Path.join(
+        System.tmp_dir!(),
+        "dsh_close_" <> Integer.to_string(System.unique_integer([:positive]))
+      )
+
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf!(dir) end)
 
