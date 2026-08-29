@@ -199,7 +199,6 @@ defmodule DshBeam.Ui.ChainOdd do
   end
 end
 
-
 defmodule DshBeam.Ui.ElementSelectMarkerTest do
   use ExUnit.Case, async: true
 

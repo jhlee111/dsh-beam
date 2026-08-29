@@ -52,7 +52,12 @@ defmodule DshBeamWeb.ConsoleLive do
     %{id: :panel_access, plugin: DshBeam.Ui.Panel.Access, config: [], disabled: false},
     %{id: :panel_model_select, plugin: DshBeam.Ui.Panel.ModelSelect, config: [], disabled: false},
     %{id: :panel_command, plugin: DshBeam.Ui.Panel.Command, config: [], disabled: false},
-    %{id: :panel_element_select, plugin: DshBeam.Ui.Panel.ElementSelect, config: [], disabled: false}
+    %{
+      id: :panel_element_select,
+      plugin: DshBeam.Ui.Panel.ElementSelect,
+      config: [],
+      disabled: false
+    }
   ]
 
   # The entries a seed/preset-apply swaps out of a composition: the agent core
@@ -250,6 +255,7 @@ defmodule DshBeamWeb.ConsoleLive do
     marker = DshBeam.Ui.Panel.ElementSelect.marker(params)
 
     current = socket.assigns.chat_text
+
     draft =
       if current == "" do
         marker

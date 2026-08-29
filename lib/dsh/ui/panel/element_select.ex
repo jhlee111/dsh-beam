@@ -53,7 +53,8 @@ defmodule DshBeam.Ui.Panel.ElementSelect do
     ([
        "[요소 지적] #{tag}#{id}#{if classes == "", do: "", else: " .#{classes}"}",
        "셀렉터: #{selector}"
-     ] ++ region_lines(p) ++
+     ] ++
+       region_lines(p) ++
        [
          if(text == "", do: nil, else: "내용: #{inspect(String.slice(text, 0, 200))}"),
          if(html == "", do: nil, else: "HTML: #{String.slice(html, 0, 600)}")
