@@ -134,6 +134,7 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:credential_env, "DEEPSEEK_API_KEY")
       |> assign(:inventory, [])
       |> assign(:workspace_sessions, [])
+      |> assign(:workspace_groups, [])
       |> assign(:workspace_repo, ".")
       |> assign(:workspace_result, nil)
       |> assign(:ws_folders_open, nil)
@@ -393,6 +394,21 @@ defmodule DshBeamWeb.ConsoleLive do
       end
 
     {:noreply, socket |> assign(workspace_result: result) |> refresh()}
+  end
+
+  def handle_event("workspace_rename", %{"session" => key, "title" => title}, socket) do
+    session = session_from_key(key)
+
+    if session && String.trim(title) != "" do
+      DshBeam.Session.set_header(session, %{title: String.trim(title)})
+
+      case workspace_pid(socket.assigns.ctx) do
+        {:ok, ws} -> DshBeam.Workspace.persist(ws)
+        _ -> :ok
+      end
+    end
+
+    {:noreply, refresh(socket)}
   end
 
   def handle_event("workspace_folders_add", params, socket) do
@@ -1334,6 +1350,7 @@ defmodule DshBeamWeb.ConsoleLive do
     store = DshBeam.Runtime.settings(runtime)
     default_preset = resolve_default_preset(store)
     workspace_sessions = workspace_sessions(socket.assigns.ctx)
+    workspace_groups = workspace_groups(socket.assigns.ctx)
     workspace_active = Enum.any?(workspace_sessions, & &1.current)
     workspace_folders = folders_from_context(socket.assigns.ctx, socket.assigns.runtime)
 
@@ -1350,6 +1367,7 @@ defmodule DshBeamWeb.ConsoleLive do
       trajectory: trajectory(socket.assigns.ctx, socket.assigns.trajectory_query),
       permission: permission(socket.assigns.ctx),
       workspace_sessions: workspace_sessions,
+      workspace_groups: workspace_groups,
       workspace_active: workspace_active,
       workspace_folders: workspace_folders,
       inventory:
@@ -1830,8 +1848,9 @@ defmodule DshBeamWeb.ConsoleLive do
         %{
           session: session,
           session_key: encode_id(session),
-          title: meta.title || inspect(session),
+          title: display_title(session, meta),
           cwd: meta.cwd,
+          repo: meta.repo,
           current: session == current,
           folders: Map.get(meta, :folders, [])
         }
@@ -1839,6 +1858,60 @@ defmodule DshBeamWeb.ConsoleLive do
       |> Enum.sort_by(& &1.title)
     else
       _ -> []
+    end
+  end
+
+  # Sessions grouped by their workspace folder (the repo root; an in-place
+  # session groups by its own cwd). Each group = one workspace row in the
+  # sidebar, with its own "+ new session".
+  defp workspace_groups(ctx) do
+    with {:ok, workspace} when is_pid(workspace) <- DshBeam.Context.get(ctx, :workspace),
+         sessions when is_map(sessions) <- safe_sessions(workspace) do
+      current =
+        case DshBeam.Context.get(ctx, :session) do
+          {:ok, session} when is_pid(session) -> session
+          _ -> nil
+        end
+
+      sessions
+      |> Enum.map(fn {session, meta} ->
+        %{
+          session: session,
+          session_key: encode_id(session),
+          title: display_title(session, meta),
+          cwd: meta.cwd,
+          repo: meta.repo || meta.cwd,
+          current: session == current,
+          folders: Map.get(meta, :folders, [])
+        }
+      end)
+      |> Enum.group_by(& &1.repo)
+      |> Enum.map(fn {repo, rows} ->
+        %{repo: repo, name: Path.basename(repo), sessions: Enum.sort_by(rows, & &1.title)}
+      end)
+      |> Enum.sort_by(& &1.name)
+    else
+      _ -> []
+    end
+  end
+
+  # An unnamed session reads as "Session <pid number>" (e.g. "Session 8578");
+  # a title the user set (or anything other than the repo basename / the
+  # "untitled session" placeholder) is shown as-is.
+  defp display_title(session, meta) do
+    case meta[:title] do
+      t when is_binary(t) and t not in ["", "untitled session"] ->
+        if t != Path.basename(meta[:repo] || meta[:cwd] || t), do: t, else: "Session " <> pid_number(session)
+
+      _ ->
+        "Session " <> pid_number(session)
+    end
+  end
+
+  defp pid_number(session) do
+    case Regex.run(~r/#PID<0\.(\d+)\.0>/, inspect(session)) do
+      [_, num] -> num
+      _ -> "?"
     end
   end
 

@@ -24,7 +24,7 @@ defmodule DshBeam.Ui.Panel.Workspace do
   def panel(assigns) do
     ~H"""
     <section>
-      <h2>workspace</h2>
+      <h2>workspaces</h2>
 
       <form class="workspace-form" phx-submit="workspace_create">
         <input type="hidden" name="repo" value={@workspace_repo} />
@@ -46,105 +46,154 @@ defmodule DshBeam.Ui.Panel.Workspace do
         <p class="workspace-feedback muted"><%= result_label(@workspace_result) %></p>
       <% end %>
 
-      <div class="workspace-list">
-        <%= if @workspace_sessions == [] do %>
-          <p class="muted empty-hint">
-            no sessions yet — pick a workspace folder and press “+ new session”
-          </p>
-        <% end %>
-        <%= for {s, idx} <- Enum.with_index(@workspace_sessions) do %>
-          <div class={"workspace-row #{if s.current, do: "current"}"}>
-            <div
-              class="ws-select"
-              phx-click={if s.current, do: nil, else: "workspace_switch"}
-              phx-value-session={s.session_key}
-              role="button"
-              tabindex={if s.current, do: -1, else: 0}
-              aria-label={if s.current, do: "current session", else: "switch to " <> s.title}
-              title={if s.current, do: "current session", else: "switch to this session"}
-            >
-              <span class={"ws-dot #{if s.current, do: "current", else: "idle"}"}></span>
-              <div class="workspace-meta">
-                <span class="ws-title"><%= s.title %></span>
-                <span class="ws-cwd" title={s.cwd}><%= s.cwd %></span>
-              </div>
-            </div>
-            <div class="workspace-actions">
-              <button
-                type="button"
-                class="ws-folders-toggle"
-                aria-label="folders for this session"
-                title="extra folders for this session"
-                phx-click="workspace_folders_toggle"
-                phx-value-session={s.session_key}
-              >folders<%= if s.folders != [], do: " · " <> Integer.to_string(length(s.folders)) %></button>
-              <div
-                id={"ws-menu-" <> Integer.to_string(idx)}
-                class="ws-menu-wrap"
-                phx-hook="WorkspaceMenu"
-                data-session={s.session_key}
-              >
-                <button
-                  type="button"
-                  class="ws-meatball"
-                  aria-label="session actions"
-                  aria-haspopup="menu"
-                  aria-expanded="false"
-                  title="session actions"
-                >⋮</button>
-                <div class="ws-menu" role="menu" hidden>
+      <%= if @workspace_groups == [] do %>
+        <p class="muted empty-hint">
+          no workspaces yet — add a folder above and press “+ new session”
+        </p>
+      <% end %>
+
+      <%= for g <- @workspace_groups do %>
+        <div class="ws-group">
+          <div class="ws-group-head">
+            <span class="ws-group-icon" aria-hidden="true">📁</span>
+            <span class="ws-group-name" title={g.repo}><%= g.name %></span>
+            <form class="ws-group-new" phx-submit="workspace_create">
+              <input type="hidden" name="repo" value={g.repo} />
+              <button type="submit" class="ws-group-new-btn" title={"new session in " <> g.repo}>+ new session</button>
+            </form>
+          </div>
+
+          <div class="workspace-list">
+            <%= for {s, idx} <- Enum.with_index(g.sessions) do %>
+              <div class={"workspace-row #{if s.current, do: "current"}"}>
+                <div
+                  class="ws-select"
+                  phx-click={if s.current, do: nil, else: "workspace_switch"}
+                  phx-value-session={s.session_key}
+                  role="button"
+                  tabindex={if s.current, do: -1, else: 0}
+                  aria-label={if s.current, do: "current session", else: "switch to " <> s.title}
+                  title={if s.current, do: "current session", else: "switch to this session"}
+                >
+                  <span class={"ws-dot #{if s.current, do: "current", else: "idle"}"}></span>
+                  <div class="workspace-meta">
+                    <span class="ws-title"><%= s.title %></span>
+                    <span class="ws-cwd" title={s.cwd}><%= s.cwd %></span>
+                  </div>
+                </div>
+                <div class="workspace-actions">
                   <button
                     type="button"
-                    class="ws-menu-item ws-menu-close"
-                    role="menuitem"
-                    data-action="close"
-                  >close session</button>
-                </div>
-              </div>
-            </div>
-            <%= if @ws_folders_open == s.session_key do %>
-              <div class="ws-session-folders">
-                <p class="muted wf-hint">folders this session may read/write</p>
-                <div class="workspace-list wf-list">
-                  <%= if s.folders == [] do %>
-                    <p class="muted empty-hint">none yet</p>
-                  <% end %>
-                  <%= for f <- s.folders do %>
-                    <div class="workspace-row wf-row">
-                      <span class="ws-dot idle" title={if f.writable, do: "writable", else: "read-only"}></span>
-                      <div class="workspace-meta">
-                        <span class="ws-cwd" title={f.path}><%= f.path %></span>
-                        <span class={"pill #{if f.writable, do: "state-active", else: "state-gone"}"}>
-                          <%= if f.writable, do: "writable", else: "read-only" %>
-                        </span>
-                      </div>
-                      <div class="workspace-actions">
-                        <button phx-click="workspace_session_folders_remove" phx-value-session={s.session_key} phx-value-path={f.path}>remove</button>
-                      </div>
+                    class="ws-folders-toggle"
+                    aria-label="folders for this session"
+                    title="extra folders for this session"
+                    phx-click="workspace_folders_toggle"
+                    phx-value-session={s.session_key}
+                  >folders<%= if s.folders != [], do: " · " <> Integer.to_string(length(s.folders)) %></button>
+                  <div
+                    id={"ws-menu-" <> Integer.to_string(idx)}
+                    class="ws-menu-wrap"
+                    phx-hook="WorkspaceMenu"
+                    data-session={s.session_key}
+                    data-title={s.title}
+                  >
+                    <button
+                      type="button"
+                      class="ws-meatball"
+                      aria-label="session actions"
+                      aria-haspopup="menu"
+                      aria-expanded="false"
+                      title="session actions"
+                    >⋮</button>
+                    <div class="ws-menu" role="menu" hidden>
+                      <button
+                        type="button"
+                        class="ws-menu-item ws-menu-rename"
+                        role="menuitem"
+                        data-action="rename"
+                      >rename session</button>
+                      <button
+                        type="button"
+                        class="ws-menu-item ws-menu-close"
+                        role="menuitem"
+                        data-action="close"
+                      >close session</button>
                     </div>
-                  <% end %>
+                  </div>
                 </div>
-                <form class="workspace-form" phx-submit="workspace_session_folders_add">
-                  <input type="hidden" name="session" value={s.session_key} />
-                  <label class="muted">folder path</label>
-                  <input type="text" name="path" placeholder="/abs/path/to/related/repo" />
-                  <label class="wf-check">
-                    <input type="checkbox" name="writable" value="true" checked />
-                    writable (else read-only)
-                  </label>
-                  <button type="submit" class="new-session-btn">+ add folder</button>
-                </form>
+                <%= if @ws_folders_open == s.session_key do %>
+                  <div class="ws-session-folders">
+                    <p class="muted wf-hint">folders this session may read/write</p>
+                    <div class="workspace-list wf-list">
+                      <%= if s.folders == [] do %>
+                        <p class="muted empty-hint">none yet</p>
+                      <% end %>
+                      <%= for f <- s.folders do %>
+                        <div class="workspace-row wf-row">
+                          <span class="ws-dot idle" title={if f.writable, do: "writable", else: "read-only"}></span>
+                          <div class="workspace-meta">
+                            <span class="ws-cwd" title={f.path}><%= f.path %></span>
+                            <span class={"pill #{if f.writable, do: "state-active", else: "state-gone"}"}>
+                              <%= if f.writable, do: "writable", else: "read-only" %>
+                            </span>
+                          </div>
+                          <div class="workspace-actions">
+                            <button phx-click="workspace_session_folders_remove" phx-value-session={s.session_key} phx-value-path={f.path}>remove</button>
+                          </div>
+                        </div>
+                      <% end %>
+                    </div>
+                    <form class="workspace-form" phx-submit="workspace_session_folders_add">
+                      <input type="hidden" name="session" value={s.session_key} />
+                      <label class="muted">folder path</label>
+                      <input type="text" name="path" placeholder="/abs/path/to/related/repo" />
+                      <label class="wf-check">
+                        <input type="checkbox" name="writable" value="true" checked />
+                        writable (else read-only)
+                      </label>
+                      <button type="submit" class="new-session-btn">+ add folder</button>
+                    </form>
+                  </div>
+                <% end %>
               </div>
             <% end %>
           </div>
-        <% end %>
-      </div>
+        </div>
+      <% end %>
     </section>
 
     <style>
       /* The whole card is the switch target (non-current rows); the only
          visible control is a vertical meatball revealed on hover. Closing is
          a two-step path — ⋮ → close session — so it can't be hit by accident. */
+      .ws-group { margin-bottom: 12px; }
+      .ws-group-head {
+        display: flex; align-items: center; gap: 6px;
+        padding: 4px 2px; border-bottom: 1px solid var(--dsw-alias-border-l2, #2a3342);
+        margin-bottom: 4px;
+      }
+      .ws-group-icon { font-size: 13px; line-height: 1; flex: none; }
+      .ws-group-name {
+        font-size: 13px; font-weight: 700; color: var(--dsw-alias-label-primary);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+      }
+      .ws-group-repo {
+        flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        font-size: 11px; color: var(--dsw-alias-label-caption);
+      }
+      .ws-group-new { margin-left: auto; flex: none; }
+      .ws-group-new-btn {
+        height: 22px; padding: 0 8px; border-radius: 6px;
+        border: 1px solid var(--dsw-alias-border-l2, #2a3342);
+        background: transparent; color: var(--dsw-alias-label-secondary);
+        font-size: 11px; cursor: pointer;
+      }
+      .ws-group-new-btn:hover {
+        background: var(--dsw-alias-interactive-bg-hover);
+        border-color: var(--dsw-static-deepseek-400, #679efe);
+        color: var(--dsw-alias-label-primary);
+      }
+      .ws-menu-rename { color: var(--dsw-alias-label-secondary); }
       .workspace-row { transition: background 120ms ease; }
       .workspace-row:not(.current):hover { background: var(--dsw-alias-interactive-bg-hover); }
       .workspace-row:not(.current) .ws-select { cursor: pointer; }
@@ -221,9 +270,14 @@ defmodule DshBeam.Ui.Panel.Workspace do
             e.preventDefault();
             e.stopPropagation();
             const item = e.target.closest('[data-action]');
+            const session = this.el.dataset.session || '';
             if (item && item.dataset.action === 'close') {
-              const session = this.el.dataset.session || '';
               this.pushEvent('workspace_close', { session: session });
+            } else if (item && item.dataset.action === 'rename') {
+              const title = window.prompt('Session name', this.el.dataset.title || '');
+              if (title !== null && title.trim() !== '') {
+                this.pushEvent('workspace_rename', { session: session, title: title.trim() });
+              }
             }
             this.close();
           };

@@ -111,6 +111,11 @@ defmodule DshBeam.Workspace do
     :gen_statem.call(workspace, :all_sessions)
   end
 
+  @doc "Persist the roster manifest now (e.g. after a session rename)."
+  def persist(workspace) when is_pid(workspace) do
+    :gen_statem.call(workspace, :persist_roster)
+  end
+
   @doc "The session's own extra folders: a list of %{path, writable}."
   def get_session_folders(workspace, session) when is_pid(workspace) and is_pid(session) do
     :gen_statem.call(workspace, {:get_session_folders, session})
@@ -210,6 +215,11 @@ defmodule DshBeam.Workspace do
     {:keep_state_and_data, [{:reply, from, sessions}]}
   end
 
+  def handle_event({:call, from}, :persist_roster, _state, data) do
+    persist_roster(data.extra)
+    {:keep_state_and_data, [{:reply, from, :ok}]}
+  end
+
   def handle_event({:call, from}, {:get_session_folders, session}, _state, data) do
     folders = Map.get(data.extra.sessions, session, %{}) |> Map.get(:folders, [])
     {:keep_state_and_data, [{:reply, from, {:ok, folders}}]}
@@ -286,9 +296,16 @@ defmodule DshBeam.Workspace do
   # git repo — is part of the harness, so a non-repo (or a repo whose worktree
   # cannot be created, e.g. permissions) degrades to in-place rather than
   # refusing.
+  defp default_title(dir, opts) do
+    if Keyword.get(opts, :worktree, true) == false, do: nil, else: Path.basename(dir)
+  end
+
   defp open(dir, opts) do
     dir = Path.expand(dir)
-    title = Keyword.get(opts, :title) || Path.basename(dir)
+    # A worktree session defaults its title to the repo basename (the
+    # reference's "session over <repo>"); an in-place session (worktree:
+    # false) keeps nil so the sidebar shows "Session <pid>" until renamed.
+    title = Keyword.get(opts, :title) || default_title(dir, opts)
 
     # The UI's "no worktree" option: force an in-place session even over a git
     # repository (the session stays rooted at the folder itself).
