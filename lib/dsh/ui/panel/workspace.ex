@@ -35,6 +35,10 @@ defmodule DshBeam.Ui.Panel.Workspace do
         </div>
         <label class="muted" for="ws-title">session title (optional)</label>
         <input type="text" name="title" id="ws-title" placeholder="e.g. my task" />
+        <label class="wf-check ws-worktree-check" title="off: open the session in-place, not as a git worktree">
+          <input type="checkbox" name="worktree" value="true" checked />
+          git worktree
+        </label>
         <button type="submit" class="new-session-btn">+ new session</button>
       </form>
 
@@ -66,6 +70,14 @@ defmodule DshBeam.Ui.Panel.Workspace do
               </div>
             </div>
             <div class="workspace-actions">
+              <button
+                type="button"
+                class="ws-folders-toggle"
+                aria-label="folders for this session"
+                title="extra folders for this session"
+                phx-click="workspace_folders_toggle"
+                phx-value-session={s.session_key}
+              >folders<%= if s.folders != [], do: " · " <> Integer.to_string(length(s.folders)) %></button>
               <div
                 id={"ws-menu-" <> Integer.to_string(idx)}
                 class="ws-menu-wrap"
@@ -90,6 +102,40 @@ defmodule DshBeam.Ui.Panel.Workspace do
                 </div>
               </div>
             </div>
+            <%= if @ws_folders_open == s.session_key do %>
+              <div class="ws-session-folders">
+                <p class="muted wf-hint">folders this session may read/write</p>
+                <div class="workspace-list wf-list">
+                  <%= if s.folders == [] do %>
+                    <p class="muted empty-hint">none yet</p>
+                  <% end %>
+                  <%= for f <- s.folders do %>
+                    <div class="workspace-row wf-row">
+                      <span class="ws-dot idle" title={if f.writable, do: "writable", else: "read-only"}></span>
+                      <div class="workspace-meta">
+                        <span class="ws-cwd" title={f.path}><%= f.path %></span>
+                        <span class={"pill #{if f.writable, do: "state-active", else: "state-gone"}"}>
+                          <%= if f.writable, do: "writable", else: "read-only" %>
+                        </span>
+                      </div>
+                      <div class="workspace-actions">
+                        <button phx-click="workspace_session_folders_remove" phx-value-session={s.session_key} phx-value-path={f.path}>remove</button>
+                      </div>
+                    </div>
+                  <% end %>
+                </div>
+                <form class="workspace-form" phx-submit="workspace_session_folders_add">
+                  <input type="hidden" name="session" value={s.session_key} />
+                  <label class="muted">folder path</label>
+                  <input type="text" name="path" placeholder="/abs/path/to/related/repo" />
+                  <label class="wf-check">
+                    <input type="checkbox" name="writable" value="true" checked />
+                    writable (else read-only)
+                  </label>
+                  <button type="submit" class="new-session-btn">+ add folder</button>
+                </form>
+              </div>
+            <% end %>
           </div>
         <% end %>
       </div>
@@ -139,6 +185,25 @@ defmodule DshBeam.Ui.Panel.Workspace do
       .ws-menu-item:hover { background: var(--dsw-alias-interactive-bg-hover); }
       .ws-menu-close { color: var(--dsw-static-red-400, #fb7185); }
       .ws-menu-close:hover { color: var(--dsw-static-red-400, #fb7185); }
+      .ws-folders-toggle {
+        flex: none; display: inline-flex; align-items: center; gap: 2px;
+        height: 20px; padding: 0 6px; border-radius: 6px;
+        border: 1px solid var(--dsw-alias-border-l2, #2a3342);
+        background: transparent; color: var(--dsw-alias-label-caption);
+        font-size: 11px; line-height: 1; cursor: pointer; opacity: 0;
+        transition: opacity 120ms ease;
+      }
+      .workspace-row:hover .ws-folders-toggle,
+      .ws-folders-toggle:focus-visible { opacity: 1; }
+      .ws-folders-toggle:hover { color: var(--dsw-alias-label-primary); border-color: var(--dsw-alias-border-l1, #232a36); }
+      .ws-session-folders {
+        grid-column: 1 / -1; margin: 2px 0 4px; padding: 8px;
+        border-radius: 8px; border: 1px solid var(--dsw-alias-border-l2, #2a3342);
+        background: var(--dsw-static-neutral-bluish-875, #13161c);
+      }
+      .ws-session-folders .wf-check { margin: 4px 0; }
+      .ws-worktree-check { display: flex; align-items: center; gap: 4px; margin: 2px 0; }
+      .ws-worktree-check input { width: auto; }
     </style>
 
     <script data-phx-runtime-hook="WorkspaceMenu">

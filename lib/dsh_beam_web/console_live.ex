@@ -136,6 +136,7 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:workspace_sessions, [])
       |> assign(:workspace_repo, ".")
       |> assign(:workspace_result, nil)
+      |> assign(:ws_folders_open, nil)
       |> assign(:workspace_folders, [])
       |> assign(:wf_draft, "")
       |> assign(:wf_writable, true)
@@ -357,7 +358,14 @@ defmodule DshBeamWeb.ConsoleLive do
             t -> t
           end
 
-        opts = if title, do: [title: title], else: []
+        # "no worktree" option: open in-place even over a git repository.
+        use_worktree = params["worktree"] != "false"
+
+        opts =
+          []
+          |> maybe_put(:title, title)
+          |> maybe_put(:worktree, use_worktree)
+
         DshBeam.Workspace.open_session(workspace, repo, opts)
       else
         :not_found -> {:error, :no_workspace_plugin}
@@ -366,6 +374,9 @@ defmodule DshBeamWeb.ConsoleLive do
 
     {:noreply, socket |> assign(workspace_result: result) |> refresh()}
   end
+
+  defp maybe_put(opts, _key, nil), do: opts
+  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
 
   def handle_event("workspace_switch", %{"session" => session_key}, socket) do
     session = session_key |> Base.decode64!() |> :erlang.binary_to_term([:safe])
@@ -408,6 +419,55 @@ defmodule DshBeamWeb.ConsoleLive do
   def handle_event("workspace_folders_remove", %{"path" => path}, socket) do
     save_extra_folder(socket, fn folders -> Enum.reject(folders, &(&1.path == path)) end)
     {:noreply, socket |> assign(wf_result: "removed #{path}") |> refresh()}
+  end
+
+  # A session's OWN extra folders: add/remove on the workspace capability so
+  # they persist with the roster and feed the fs tool's per-session allowlist.
+  def handle_event("workspace_session_folders_add", %{"session" => key} = params, socket) do
+    session = session_from_key(key)
+
+    path =
+      case params["path"] do
+        "" -> nil
+        nil -> nil
+        path -> String.trim(path)
+      end
+
+    if session && path do
+      writable = params["writable"] == "true"
+      folders = session_folders(socket.assigns.ctx, session)
+      next = [%{path: Path.expand(path), writable: writable} | folders]
+      DshBeam.Workspace.set_session_folders(workspace_pid!(socket.assigns.ctx), session, next)
+      {:noreply, refresh(socket)}
+    else
+      {:noreply, socket |> assign(workspace_result: "path must not be empty") |> refresh()}
+    end
+  end
+
+  def handle_event(
+        "workspace_session_folders_remove",
+        %{"session" => key, "path" => path},
+        socket
+      ) do
+    session = session_from_key(key)
+
+    if session do
+      folders = session_folders(socket.assigns.ctx, session)
+      next = Enum.reject(folders, &(&1.path == path))
+      DshBeam.Workspace.set_session_folders(workspace_pid!(socket.assigns.ctx), session, next)
+      {:noreply, refresh(socket)}
+    else
+      {:noreply, refresh(socket)}
+    end
+  end
+
+  def handle_event("workspace_folders_toggle", %{"session" => key}, socket) do
+    current = socket.assigns.ws_folders_open
+
+    {:noreply,
+     socket
+     |> assign(ws_folders_open: if(current == key, do: nil, else: key))
+     |> refresh()}
   end
 
   def handle_event("llm_apply", params, socket) do
@@ -1107,6 +1167,37 @@ defmodule DshBeamWeb.ConsoleLive do
     end
   end
 
+  defp workspace_pid!(ctx) do
+    case workspace_pid(ctx) do
+      {:ok, workspace} -> workspace
+      _ -> nil
+    end
+  end
+
+  defp session_from_key(key) when is_binary(key) do
+    try do
+      key |> Base.decode64!() |> :erlang.binary_to_term([:safe])
+    rescue
+      _ -> nil
+    end
+  end
+
+  defp session_from_key(_), do: nil
+
+  # A session's own extra folders (from the workspace capability).
+  defp session_folders(ctx, session) do
+    case workspace_pid(ctx) do
+      {:ok, workspace} ->
+        case DshBeam.Workspace.get_session_folders(workspace, session) do
+          {:ok, folders} when is_list(folders) -> folders
+          _ -> []
+        end
+
+      _ ->
+        []
+    end
+  end
+
   # Subdirectories of a path, sorted by name — the server-side folder picker
   # browses the local filesystem and returns real absolute paths (the browser
   # File System Access API cannot expose a picked folder's path).
@@ -1741,7 +1832,8 @@ defmodule DshBeamWeb.ConsoleLive do
           session_key: encode_id(session),
           title: meta.title || inspect(session),
           cwd: meta.cwd,
-          current: session == current
+          current: session == current,
+          folders: Map.get(meta, :folders, [])
         }
       end)
       |> Enum.sort_by(& &1.title)

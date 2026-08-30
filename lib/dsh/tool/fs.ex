@@ -109,12 +109,56 @@ defmodule DshBeam.Tool.Fs do
     end
   end
 
-  # The added folders, read from the :workspace_folders binding when the
-  # WorkspaceFolders plugin is mounted and active; [] without it.
+  # The added folders: the global :workspace_folders binding when the
+  # WorkspaceFolders plugin is active, PLUS the current session's own extra
+  # folders (per-session allowlist owned by DshBeam.Workspace). Union by
+  # path; the session's own folders win on the writable flag. [] without any.
   defp extra_folders(state) do
-    case DshBeam.Context.get(state.ctx, :workspace_folders) do
-      {:ok, folders} when is_list(folders) -> folders
-      _ -> []
+    global =
+      case DshBeam.Context.get(state.ctx, :workspace_folders) do
+        {:ok, folders} when is_list(folders) -> folders
+        _ -> []
+      end
+
+    session = session_folders(state)
+
+    Enum.reduce(session ++ global, [], fn %{path: path, writable: writable} = f, acc ->
+      case Enum.find(acc, &(&1.path == path)) do
+        nil -> [f | acc]
+        %{writable: w} when w == writable -> acc
+        _ -> [f | Enum.reject(acc, &(&1.path == path))]
+      end
+    end)
+  end
+
+  # The current session's own extra folders (from the workspace capability).
+  defp session_folders(state) do
+    case session_cwd(state) do
+      cwd when is_binary(cwd) ->
+        case DshBeam.Context.get(state.ctx, :workspace) do
+          {:ok, workspace} when is_pid(workspace) ->
+            case workspace_session(workspace, cwd) do
+              {:ok, session} -> DshBeam.Workspace.get_session_folders(workspace, session)
+              _ -> []
+            end
+
+          _ ->
+            []
+        end
+
+      _ ->
+        []
+    end
+  end
+
+  # Find the live session whose cwd matches (the fs tool's root is the
+  # session cwd, so the owning session is the one rooted there).
+  defp workspace_session(workspace, cwd) do
+    sessions = DshBeam.Workspace.all_sessions(workspace)
+
+    case Enum.find(sessions, fn {_s, meta} -> meta.cwd == cwd end) do
+      {session, _meta} -> {:ok, session}
+      nil -> :error
     end
   end
 
