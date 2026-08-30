@@ -102,7 +102,7 @@ defmodule DshBeamWeb.ConsoleLive do
   ]
 
   @impl true
-  def mount(_params, session, socket) do
+  def mount(params, session, socket) do
     %{runtime: runtime, ctx: ctx} = refs(session)
 
     :ok = DshBeam.Context.subscribe(ctx)
@@ -167,12 +167,71 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:trajectory_query, "")
       |> refresh()
 
+    # Restore the last active session after a restart: mount-time preference
+    # is (1) an explicit ?session=<key> URL param, else (2) the remembered
+    # active session cwd. Only workspace sessions (which the roster re-opened
+    # on boot) are candidates; the mount-default session is left alone when
+    # there is nothing to restore.
+    restore_active_session(socket, params)
+
     # the extra-folders capability is core: mount it with the console so the
     # sidebar seat and the fs tool see it even before any "seed"
     :ok =
       DshBeam.Runtime.reconcile(runtime, current_specs(runtime) ++ [workspace_folders_entry()])
 
     {:ok, socket}
+  end
+
+  # Resolve the session to restore at mount: an explicit ?session=<key> wins,
+  # else the remembered active session cwd (settings). No-op when neither
+  # matches a live workspace session.
+  defp restore_active_session(socket, params) do
+    runtime = socket.assigns.runtime
+    store = DshBeam.Runtime.settings(runtime)
+
+    target =
+      case params do
+        %{"session" => key} when is_binary(key) and key != "" ->
+          {:key, session_from_key(key)}
+
+        _ ->
+          {:cwd, remembered_active_cwd(store)}
+      end
+
+    session =
+      case target do
+        {:key, nil} -> nil
+        {:key, session} -> session
+        {:cwd, nil} -> nil
+        {:cwd, cwd} -> workspace_session_by_cwd(socket.assigns.ctx, cwd)
+      end
+
+    if is_pid(session) and Process.alive?(session) do
+      :ok = switch_session(runtime, session)
+    end
+
+    :ok
+  end
+
+  defp remembered_active_cwd(store) do
+    case DshBeam.Settings.get(store, DshBeam.Workspace, :active_session) do
+      {:ok, cwd} when is_binary(cwd) and cwd != "" -> cwd
+      _ -> nil
+    end
+  end
+
+  # Find the live workspace session whose cwd matches.
+  defp workspace_session_by_cwd(ctx, cwd) do
+    with {:ok, workspace} when is_pid(workspace) <- DshBeam.Context.get(ctx, :workspace) do
+      sessions = DshBeam.Workspace.all_sessions(workspace)
+
+      case Enum.find(sessions, fn {_s, meta} -> meta.cwd == cwd end) do
+        {session, _meta} -> session
+        nil -> nil
+      end
+    else
+      _ -> nil
+    end
   end
 
   @impl true
@@ -381,7 +440,21 @@ defmodule DshBeamWeb.ConsoleLive do
   def handle_event("workspace_switch", %{"session" => session_key}, socket) do
     session = session_key |> Base.decode64!() |> :erlang.binary_to_term([:safe])
     :ok = switch_session(socket.assigns.runtime, session)
+    remember_active_session(socket, session)
     {:noreply, refresh(socket)}
+  end
+
+  # Remember which session was active so a console restart can restore it.
+  # Persisted as the session's cwd (stable across restarts; the pid is not).
+  defp remember_active_session(socket, session) do
+    case DshBeam.Session.cwd(session) do
+      cwd when is_binary(cwd) ->
+        store = DshBeam.Runtime.settings(socket.assigns.runtime)
+        DshBeam.Settings.put(store, DshBeam.Workspace, :active_session, cwd)
+
+      _ ->
+        :ok
+    end
   end
 
   def handle_event("workspace_close", %{"session" => session_key}, socket) do
@@ -1927,9 +2000,11 @@ defmodule DshBeamWeb.ConsoleLive do
       known
       |> Enum.reject(&Map.has_key?(session_rows, &1))
       |> Enum.map(&%{repo: &1, name: Path.basename(&1), sessions: [], known: true})
-      |> Kernel.++(Enum.map(session_rows, fn {repo, rows} ->
-        %{repo: repo, name: Path.basename(repo), sessions: Enum.sort_by(rows, & &1.title)}
-      end))
+      |> Kernel.++(
+        Enum.map(session_rows, fn {repo, rows} ->
+          %{repo: repo, name: Path.basename(repo), sessions: Enum.sort_by(rows, & &1.title)}
+        end)
+      )
       |> Enum.sort_by(& &1.name)
     else
       _ -> []

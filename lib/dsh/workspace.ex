@@ -47,6 +47,12 @@ defmodule DshBeam.Workspace do
     doc: "Known workspace folders (one absolute path per line) — added via the sidebar + button"
   )
 
+  setting(:active_session,
+    type: :string,
+    default: "",
+    doc: "The cwd of the last active session — restored on console restart"
+  )
+
   @impl DshBeam.Plugin
   def mount(_ctx, opts) do
     # Boot GC is OPT-IN (L4): only a mount that explicitly asks for it — with
@@ -461,9 +467,13 @@ defmodule DshBeam.Workspace do
       case entry do
         %{"cwd" => cwd, "repo" => repo, "title" => title, "file" => file} = entry ->
           folders = Map.get(entry, "folders", [])
+
           case DshBeam.Session.File.start(path: file, title: title, cwd: cwd) do
-            {:ok, session} -> acc |> register(session, cwd, repo, file) |> put_folders(session, folders)
-            {:error, _} -> acc
+            {:ok, session} ->
+              acc |> register(session, cwd, repo, file) |> put_folders(session, folders)
+
+            {:error, _} ->
+              acc
           end
 
         _ ->
@@ -478,7 +488,14 @@ defmodule DshBeam.Workspace do
     entries =
       Enum.map(sessions, fn {session, %{cwd: cwd, repo: repo, file: file}} ->
         folders = sessions |> Map.get(session, %{}) |> Map.get(:folders, [])
-        %{"cwd" => cwd, "repo" => repo, "title" => session_title(session), "file" => file, "folders" => folders}
+
+        %{
+          "cwd" => cwd,
+          "repo" => repo,
+          "title" => session_title(session),
+          "file" => file,
+          "folders" => folders
+        }
       end)
 
     File.mkdir_p(Path.dirname(path))
