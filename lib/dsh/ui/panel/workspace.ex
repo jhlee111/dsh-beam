@@ -24,23 +24,18 @@ defmodule DshBeam.Ui.Panel.Workspace do
   def panel(assigns) do
     ~H"""
     <section>
-      <h2>workspaces</h2>
-
-      <form class="workspace-form" phx-submit="workspace_create">
-        <input type="hidden" name="repo" value={@workspace_repo} />
-        <label class="muted">workspace folder</label>
-        <div class="repo-picker">
-          <code class="repo-path"><%= @workspace_repo %></code>
-          <button type="button" phx-click="browse_dir">browse</button>
-        </div>
-        <label class="muted" for="ws-title">session title (optional)</label>
-        <input type="text" name="title" id="ws-title" placeholder="e.g. my task" />
-        <label class="wf-check ws-worktree-check" title="off: open the session in-place, not as a git worktree">
-          <input type="checkbox" name="worktree" value="true" checked />
-          git worktree
-        </label>
-        <button type="submit" class="new-session-btn">+ new session</button>
-      </form>
+      <div class="ws-header">
+        <h2>workspaces</h2>
+        <button
+          type="button"
+          class="ws-add"
+          id="ws-add"
+          phx-hook="WsAdd"
+          phx-click="browse_dir"
+          aria-label="add a workspace folder"
+          title="add a workspace folder"
+        >+</button>
+      </div>
 
       <%= if @workspace_result do %>
         <p class="workspace-feedback muted"><%= result_label(@workspace_result) %></p>
@@ -48,22 +43,30 @@ defmodule DshBeam.Ui.Panel.Workspace do
 
       <%= if @workspace_groups == [] do %>
         <p class="muted empty-hint">
-          no workspaces yet — add a folder above and press “+ new session”
+          no workspaces yet — press + to add a folder
         </p>
       <% end %>
 
-      <%= for g <- @workspace_groups do %>
+      <%= for {g, gidx} <- Enum.with_index(@workspace_groups) do %>
         <div class="ws-group">
           <div class="ws-group-head">
             <span class="ws-group-icon" aria-hidden="true">📁</span>
             <span class="ws-group-name" title={g.repo}><%= g.name %></span>
-            <form class="ws-group-new" phx-submit="workspace_create">
-              <input type="hidden" name="repo" value={g.repo} />
-              <button type="submit" class="ws-group-new-btn" title={"new session in " <> g.repo}>+ new session</button>
-            </form>
+            <span class="ws-group-repo" title={g.repo}><%= g.repo %></span>
+            <button
+              type="button"
+              id={"ws-group-new-" <> Integer.to_string(gidx)}
+              class="ws-group-new-btn"
+              phx-hook="WsGroupNew"
+              data-repo={g.repo}
+              title={"new session in " <> g.repo}
+            >+ new session</button>
           </div>
 
           <div class="workspace-list">
+            <%= if g.sessions == [] do %>
+              <p class="muted empty-hint">no sessions yet — + new session</p>
+            <% end %>
             <%= for {s, idx} <- Enum.with_index(g.sessions) do %>
               <div class={"workspace-row #{if s.current, do: "current"}"}>
                 <div
@@ -91,7 +94,7 @@ defmodule DshBeam.Ui.Panel.Workspace do
                     phx-value-session={s.session_key}
                   >folders<%= if s.folders != [], do: " · " <> Integer.to_string(length(s.folders)) %></button>
                   <div
-                    id={"ws-menu-" <> Integer.to_string(idx)}
+                    id={"ws-menu-" <> Integer.to_string(gidx) <> "-" <> Integer.to_string(idx)}
                     class="ws-menu-wrap"
                     phx-hook="WorkspaceMenu"
                     data-session={s.session_key}
@@ -166,6 +169,19 @@ defmodule DshBeam.Ui.Panel.Workspace do
       /* The whole card is the switch target (non-current rows); the only
          visible control is a vertical meatball revealed on hover. Closing is
          a two-step path — ⋮ → close session — so it can't be hit by accident. */
+      .ws-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+      .ws-header h2 { margin: 0; }
+      .ws-add {
+        flex: none; display: inline-flex; align-items: center; justify-content: center;
+        width: 22px; height: 22px; border-radius: 6px; padding: 0;
+        border: 1px solid var(--dsw-alias-border-l2, #2a3342); background: transparent;
+        color: var(--dsw-alias-label-secondary); font-size: 15px; line-height: 1; cursor: pointer;
+      }
+      .ws-add:hover {
+        background: var(--dsw-alias-interactive-bg-hover);
+        border-color: var(--dsw-static-deepseek-400, #679efe);
+        color: var(--dsw-alias-label-primary);
+      }
       .ws-group { margin-bottom: 12px; }
       .ws-group-head {
         display: flex; align-items: center; gap: 6px;
@@ -254,6 +270,70 @@ defmodule DshBeam.Ui.Panel.Workspace do
       .ws-worktree-check { display: flex; align-items: center; gap: 4px; margin: 2px 0; }
       .ws-worktree-check input { width: auto; }
     </style>
+
+    <script data-phx-runtime-hook="WsAdd">
+      window.phx_hook_WsAdd = () => ({
+        mounted() {
+          this.onClick = async (e) => {
+            // Native directory picker (Chrome/Edge): folders only, no files.
+            // Falls back to the server-side browse_dir picker when unavailable.
+            if (window.showDirectoryPicker) {
+              e.preventDefault();
+              e.stopPropagation();
+              try {
+                const handle = await window.showDirectoryPicker({ mode: 'read' });
+                const path = handle.name ? await this.resolvePath(handle) : '';
+                if (path) this.pushEvent('workspace_pick_dir', { path: path });
+              } catch (err) {
+                if (err && err.name === 'AbortError') return; // user cancelled
+                this.pushEvent('browse_dir', {});
+              }
+            }
+          };
+          // Resolve a directory handle to a path the server can use. The
+          // File System Access API hides the real path, so we walk the handle
+          // and, where available, read it via the relative path the server
+          // already knows — otherwise fall back to the server picker.
+          this.resolvePath = async (handle) => {
+            try {
+              // queryPermission/requestPermission only exist on directory
+              // handles in Chromium; if absent, we cannot recover the path.
+              if (!handle.queryPermission) return '';
+              const ok = await handle.queryPermission({ mode: 'read' });
+              if (ok !== 'granted') return '';
+              // Chromium does not expose the absolute path; a common workaround
+              // is to read the handle's name and let the server resolve it via
+              // the last known cwd. We pass the name and let picker fall back.
+              return handle.name || '';
+            } catch (_) {
+              return '';
+            }
+          };
+          this.el.addEventListener('click', this.onClick);
+        },
+        destroyed() {
+          this.el.removeEventListener('click', this.onClick);
+        }
+      });
+    </script>
+
+    <script data-phx-runtime-hook="WsGroupNew">
+      window.phx_hook_WsGroupNew = () => ({
+        mounted() {
+          this.onClick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const repo = this.el.dataset.repo || '';
+            const title = window.prompt('Session name (optional)', '');
+            this.pushEvent('workspace_create', { repo: repo, title: title || '' });
+          };
+          this.el.addEventListener('click', this.onClick);
+        },
+        destroyed() {
+          this.el.removeEventListener('click', this.onClick);
+        }
+      });
+    </script>
 
     <script data-phx-runtime-hook="WorkspaceMenu">
       window.phx_hook_WorkspaceMenu = () => ({

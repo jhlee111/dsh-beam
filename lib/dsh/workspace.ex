@@ -41,6 +41,12 @@ defmodule DshBeam.Workspace do
     doc: "The default directory new sessions are opened over"
   )
 
+  setting(:workspaces,
+    type: :string,
+    default: "",
+    doc: "Known workspace folders (one absolute path per line) — added via the sidebar + button"
+  )
+
   @impl DshBeam.Plugin
   def mount(_ctx, opts) do
     # Boot GC is OPT-IN (L4): only a mount that explicitly asks for it — with
@@ -64,7 +70,9 @@ defmodule DshBeam.Workspace do
 
     roster_path = Keyword.get(opts, :roster_path)
 
-    {:ok, [], %{workspace: self()}, restore_roster(roster_path)}
+    known = opts |> Keyword.get(:workspaces, "") |> parse_workspaces()
+
+    {:ok, [], %{workspace: self()}, restore_roster(roster_path) |> put_known(known)}
   end
 
   @impl DshBeam.Plugin
@@ -114,6 +122,30 @@ defmodule DshBeam.Workspace do
   @doc "Persist the roster manifest now (e.g. after a session rename)."
   def persist(workspace) when is_pid(workspace) do
     :gen_statem.call(workspace, :persist_roster)
+  end
+
+  @doc "The known workspace folders (each shown as a sidebar group)."
+  def known_workspaces(workspace) when is_pid(workspace) do
+    :gen_statem.call(workspace, :known_workspaces)
+  end
+
+  @doc "Add a workspace folder to the known set (persisted to settings)."
+  def add_known_workspace(workspace, path) when is_pid(workspace) and is_binary(path) do
+    :gen_statem.call(workspace, {:add_known_workspace, path, nil})
+  end
+
+  @doc """
+  Add a workspace folder, persisting to the given settings store.
+
+  The store is passed explicitly (never `DshBeam.Runtime.settings(self())`):
+  the workspace process lives inside the runtime, so calling the runtime's
+  settings from itself would deadlock (`{:calling_self, ...}` crash). The
+  console hands over `Runtime.settings(runtime)`; callers without a store
+  pass `nil` and the known set is kept in-memory only.
+  """
+  def add_known_workspace(workspace, path, store)
+      when is_pid(workspace) and is_binary(path) do
+    :gen_statem.call(workspace, {:add_known_workspace, path, store})
   end
 
   @doc "The session's own extra folders: a list of %{path, writable}."
@@ -220,6 +252,18 @@ defmodule DshBeam.Workspace do
     {:keep_state_and_data, [{:reply, from, :ok}]}
   end
 
+  def handle_event({:call, from}, :known_workspaces, _state, data) do
+    {:keep_state_and_data, [{:reply, from, {:ok, data.extra.known_workspaces}}]}
+  end
+
+  def handle_event({:call, from}, {:add_known_workspace, path, store}, _state, data) do
+    path = Path.expand(path)
+    known = [path | Enum.reject(data.extra.known_workspaces, &(&1 == path))]
+    data = %{data | extra: %{data.extra | known_workspaces: known}}
+    persist_settings(data.extra, store)
+    {:keep_state, data, [{:reply, from, :ok}]}
+  end
+
   def handle_event({:call, from}, {:get_session_folders, session}, _state, data) do
     folders = Map.get(data.extra.sessions, session, %{}) |> Map.get(:folders, [])
     {:keep_state_and_data, [{:reply, from, {:ok, folders}}]}
@@ -296,16 +340,12 @@ defmodule DshBeam.Workspace do
   # git repo — is part of the harness, so a non-repo (or a repo whose worktree
   # cannot be created, e.g. permissions) degrades to in-place rather than
   # refusing.
-  defp default_title(dir, opts) do
-    if Keyword.get(opts, :worktree, true) == false, do: nil, else: Path.basename(dir)
-  end
-
   defp open(dir, opts) do
     dir = Path.expand(dir)
-    # A worktree session defaults its title to the repo basename (the
-    # reference's "session over <repo>"); an in-place session (worktree:
-    # false) keeps nil so the sidebar shows "Session <pid>" until renamed.
-    title = Keyword.get(opts, :title) || default_title(dir, opts)
+    # No default title: an unnamed session shows as "Session <pid>" in the
+    # sidebar and can be renamed by the user (⋮ → rename session). The repo
+    # basename only labels the workspace GROUP, not the session.
+    title = Keyword.get(opts, :title)
 
     # The UI's "no worktree" option: force an in-place session even over a git
     # repository (the session stays rooted at the folder itself).
@@ -390,10 +430,32 @@ defmodule DshBeam.Workspace do
 
   # -- roster persistence (opt-in via :roster_path) --
 
-  defp restore_roster(nil), do: %{by_cwd: %{}, sessions: %{}, roster_path: nil}
+  defp parse_workspaces(str) when is_binary(str) do
+    str
+    |> String.split("\n")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(&Path.expand/1)
+    |> Enum.uniq()
+  end
+
+  defp parse_workspaces(_), do: []
+
+  defp put_known(extra, known), do: %{extra | known_workspaces: known}
+
+  defp persist_settings(%{known_workspaces: known}, store) do
+    if store do
+      DshBeam.Settings.put(store, __MODULE__, :workspaces, Enum.join(known, "\n"))
+    end
+
+    :ok
+  end
+
+  defp restore_roster(nil),
+    do: %{by_cwd: %{}, sessions: %{}, roster_path: nil, known_workspaces: []}
 
   defp restore_roster(roster_path) do
-    extra = %{by_cwd: %{}, sessions: %{}, roster_path: roster_path}
+    extra = %{by_cwd: %{}, sessions: %{}, roster_path: roster_path, known_workspaces: []}
 
     Enum.reduce(read_roster(roster_path), extra, fn entry, acc ->
       case entry do

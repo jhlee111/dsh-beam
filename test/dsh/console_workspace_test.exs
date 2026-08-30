@@ -41,8 +41,8 @@ defmodule DshBeam.ConsoleWorkspaceTest do
   } do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
 
-    # empty state before any session exists
-    assert render(view) =~ "no sessions"
+    # empty state before any workspace exists (grouped sidebar)
+    assert render(view) =~ "no workspaces"
 
     render_submit(view, "workspace_create", %{"repo" => repo, "title" => "task one"})
     html = render(view)

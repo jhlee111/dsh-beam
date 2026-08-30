@@ -359,13 +359,9 @@ defmodule DshBeamWeb.ConsoleLive do
             t -> t
           end
 
-        # "no worktree" option: open in-place even over a git repository.
-        use_worktree = params["worktree"] != "false"
-
-        opts =
-          []
-          |> maybe_put(:title, title)
-          |> maybe_put(:worktree, use_worktree)
+        # Worktree is decided at the session level automatically: over a git
+        # repo a worktree is checked out, otherwise the session opens in-place.
+        opts = maybe_put([], :title, title)
 
         DshBeam.Workspace.open_session(workspace, repo, opts)
       else
@@ -375,9 +371,6 @@ defmodule DshBeamWeb.ConsoleLive do
 
     {:noreply, socket |> assign(workspace_result: result) |> refresh()}
   end
-
-  defp maybe_put(opts, _key, nil), do: opts
-  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
 
   def handle_event("workspace_switch", %{"session" => session_key}, socket) do
     session = session_key |> Base.decode64!() |> :erlang.binary_to_term([:safe])
@@ -612,10 +605,36 @@ defmodule DshBeamWeb.ConsoleLive do
   end
 
   def handle_event("picker_select", _params, socket) do
+    path = socket.assigns.picker_path
+
+    store = DshBeam.Runtime.settings(socket.assigns.runtime)
+
+    case workspace_pid(socket.assigns.ctx) do
+      {:ok, ws} -> DshBeam.Workspace.add_known_workspace(ws, path, store)
+      _ -> :ok
+    end
+
     {:noreply,
      socket
-     |> assign(workspace_repo: socket.assigns.picker_path, picker_open: false)
+     |> assign(workspace_repo: path, picker_open: false)
      |> refresh()}
+  end
+
+  # Native folder picker result (showDirectoryPicker): register the chosen
+  # folder as a known workspace, exactly like picker_select.
+  def handle_event("workspace_pick_dir", %{"path" => path}, socket) do
+    path = String.trim(path || "")
+
+    if path != "" do
+      store = DshBeam.Runtime.settings(socket.assigns.runtime)
+
+      case workspace_pid(socket.assigns.ctx) do
+        {:ok, ws} -> DshBeam.Workspace.add_known_workspace(ws, path, store)
+        _ -> :ok
+      end
+    end
+
+    {:noreply, refresh(socket)}
   end
 
   def handle_event("picker_cancel", _params, socket) do
@@ -1199,6 +1218,9 @@ defmodule DshBeamWeb.ConsoleLive do
   end
 
   defp session_from_key(_), do: nil
+
+  defp maybe_put(opts, _key, nil), do: opts
+  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
 
   # A session's own extra folders (from the workspace capability).
   defp session_folders(ctx, session) do
@@ -1873,38 +1895,48 @@ defmodule DshBeamWeb.ConsoleLive do
           _ -> nil
         end
 
-      sessions
-      |> Enum.map(fn {session, meta} ->
-        %{
-          session: session,
-          session_key: encode_id(session),
-          title: display_title(session, meta),
-          cwd: meta.cwd,
-          repo: meta.repo || meta.cwd,
-          current: session == current,
-          folders: Map.get(meta, :folders, [])
-        }
-      end)
-      |> Enum.group_by(& &1.repo)
-      |> Enum.map(fn {repo, rows} ->
+      session_rows =
+        sessions
+        |> Enum.map(fn {session, meta} ->
+          %{
+            session: session,
+            session_key: encode_id(session),
+            title: display_title(session, meta),
+            cwd: meta.cwd,
+            repo: meta.repo || meta.cwd,
+            current: session == current,
+            folders: Map.get(meta, :folders, [])
+          }
+        end)
+        |> Enum.group_by(& &1.repo)
+
+      # Known workspaces (added via the + button) show as groups even before
+      # any session exists in them.
+      known =
+        case DshBeam.Workspace.known_workspaces(workspace) do
+          {:ok, paths} when is_list(paths) -> paths
+          _ -> []
+        end
+
+      known
+      |> Enum.reject(&Map.has_key?(session_rows, &1))
+      |> Enum.map(&%{repo: &1, name: Path.basename(&1), sessions: [], known: true})
+      |> Kernel.++(Enum.map(session_rows, fn {repo, rows} ->
         %{repo: repo, name: Path.basename(repo), sessions: Enum.sort_by(rows, & &1.title)}
-      end)
+      end))
       |> Enum.sort_by(& &1.name)
     else
       _ -> []
     end
   end
 
-  # An unnamed session reads as "Session <pid number>" (e.g. "Session 8578");
-  # a title the user set (or anything other than the repo basename / the
-  # "untitled session" placeholder) is shown as-is.
+  # A session shows its title when set (a worktree session defaults to the
+  # repo basename; the user can rename it); an unnamed/in-place session reads
+  # as "Session <pid number>" (e.g. "Session 8578").
   defp display_title(session, meta) do
     case meta[:title] do
-      t when is_binary(t) and t not in ["", "untitled session"] ->
-        if t != Path.basename(meta[:repo] || meta[:cwd] || t), do: t, else: "Session " <> pid_number(session)
-
-      _ ->
-        "Session " <> pid_number(session)
+      t when is_binary(t) and t not in ["", "untitled session"] -> t
+      _ -> "Session " <> pid_number(session)
     end
   end
 
