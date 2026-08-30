@@ -14,14 +14,13 @@ config :dsh_beam, DshBeamWeb.Endpoint,
   live_view: [signing_salt: "dsh_beam_lv"],
   check_origin: false,
   pubsub_server: DshBeam.PubSub,
-  # Code reloading is intentionally OFF for the console demo. Phoenix 1.8's
-  # CodeReloader recompiles changed modules on each request, but it cannot
-  # recover from a config change (it raises "restart your server") and, on a
-  # mid-edit compile error, it leaves the running VM serving a poisoned
-  # CompileError page that kills the LiveView socket. For a stable demo we
-  # prefer an explicit restart after an edit, so we also omit the
-  # Phoenix.CodeReloader plug and the Mix :listeners entry.
-  code_reloader: false
+  # Code reloading is ON so a source edit (layout/panel/handler) applies on
+  # the next browser request — the dev-server workflow the user asked for.
+  # A mid-edit compile error is handled by the watchdog (dsh-console.sh
+  # restarts the console within ~5s), and a config change still needs a full
+  # restart (Phoenix raises "restart your server" — the console script
+  # re-reads config at boot, so a restart covers it).
+  code_reloader: true
 
 config :phoenix, :json_library, Jason
 
