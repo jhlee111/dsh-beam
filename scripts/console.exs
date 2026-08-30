@@ -37,6 +37,7 @@ entries = [
   %{id: :shell, plugin: DshBeam.Shell.Plugin, config: [], disabled: false},
   %{id: :bash, plugin: DshBeam.Tool.Bash, config: [], disabled: false},
   %{id: :fs, plugin: DshBeam.Tool.Fs, config: [root: File.cwd!()], disabled: false},
+  %{id: :workspace_folders, plugin: DshBeam.WorkspaceFolders, config: [], disabled: false},
   %{id: :crash_audit, plugin: DshBeam.CrashAudit.Plugin, config: [], disabled: false},
   %{id: :todo, plugin: DshBeam.Tool.Todo, config: [], disabled: false},
   %{id: :goal, plugin: DshBeam.Tool.Goal, config: [], disabled: false},
@@ -52,6 +53,12 @@ entries = [
   %{id: :panel_events, plugin: DshBeam.Ui.Panel.EventFeed, config: [], disabled: false},
   %{id: :panel_plugins, plugin: DshBeam.Ui.Panel.Plugins, config: [], disabled: false},
   %{id: :panel_workspace, plugin: DshBeam.Ui.Panel.Workspace, config: [], disabled: false},
+  %{
+    id: :panel_workspace_folders,
+    plugin: DshBeam.Ui.Panel.WorkspaceFolders,
+    config: [],
+    disabled: false
+  },
   %{id: :panel_trajectory, plugin: DshBeam.Ui.Panel.Trajectory, config: [], disabled: false},
   %{id: :panel_element_select, plugin: DshBeam.Ui.Panel.ElementSelect, config: [], disabled: false}
 ]
