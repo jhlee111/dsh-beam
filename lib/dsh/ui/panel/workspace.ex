@@ -390,7 +390,7 @@ defmodule DshBeam.Ui.Panel.Workspace do
           const repo = this.el.dataset.repo || '';
           const overlay = document.createElement('div');
           overlay.className = 'dsh-ws-modal';
-          overlay.innerHTML = \`
+          overlay.innerHTML = `
             <div class="dsh-ws-modal-backdrop"></div>
             <div class="dsh-ws-modal-panel" role="dialog" aria-modal="true" aria-label="new session">
               <div class="dsh-ws-modal-head">
@@ -399,7 +399,7 @@ defmodule DshBeam.Ui.Panel.Workspace do
               </div>
               <div class="dsh-ws-modal-body">
                 <label class="muted">workspace</label>
-                <div class="dsh-ws-modal-repo" title="\${repo}">\${repo}</div>
+                <div class="dsh-ws-modal-repo" title="${repo}">${repo}</div>
                 <label class="muted" for="dsh-ws-name">session name (optional)</label>
                 <input type="text" id="dsh-ws-name" class="dsh-ws-name" placeholder="e.g. my task" />
                 <label class="wf-check dsh-ws-worktree" title="off: open the session in-place, not as a git worktree">
@@ -411,7 +411,7 @@ defmodule DshBeam.Ui.Panel.Workspace do
                 <button type="button" class="dsh-ws-modal-cancel">cancel</button>
                 <button type="button" class="dsh-ws-modal-create">create session</button>
               </div>
-            </div>\`;
+            </div>`;
           const panel = overlay.querySelector('.dsh-ws-modal-panel');
           const nameInput = overlay.querySelector('.dsh-ws-name');
           const worktreeInput = overlay.querySelector('#dsh-ws-worktree');
@@ -471,7 +471,7 @@ defmodule DshBeam.Ui.Panel.Workspace do
             const current = this.el.dataset.title || '';
             const overlay = document.createElement('div');
             overlay.className = 'dsh-ws-modal';
-            overlay.innerHTML = \`
+            overlay.innerHTML = `
               <div class="dsh-ws-modal-backdrop"></div>
               <div class="dsh-ws-modal-panel" role="dialog" aria-modal="true" aria-label="rename session">
                 <div class="dsh-ws-modal-head">
@@ -480,13 +480,13 @@ defmodule DshBeam.Ui.Panel.Workspace do
                 </div>
                 <div class="dsh-ws-modal-body">
                   <label class="muted" for="dsh-ws-rename">session name</label>
-                  <input type="text" id="dsh-ws-rename" class="dsh-ws-name" value="\${current}" placeholder="e.g. my task" />
+                  <input type="text" id="dsh-ws-rename" class="dsh-ws-name" value="${current}" placeholder="e.g. my task" />
                 </div>
                 <div class="dsh-ws-modal-foot">
                   <button type="button" class="dsh-ws-modal-cancel">cancel</button>
                   <button type="button" class="dsh-ws-modal-create">save</button>
                 </div>
-              </div>\`;
+              </div>`;
             const panel = overlay.querySelector('.dsh-ws-modal-panel');
             const input = overlay.querySelector('#dsh-ws-rename');
             const close = () => {

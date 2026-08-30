@@ -103,6 +103,14 @@ case "${1:-start}" in
       echo "console already running (pid $(cat "$PID_FILE"), port $PORT) — $LOG_FILE"
       exit 0
     fi
+    # pid 파일이 꼬여 있어도, 실제로 포트가 리슨 중이면 그 프로세스를
+    # console.pid로 갱신하고 중복 실행을 막는다.
+    listener=$(lsof -tiTCP:$PORT -sTCP:LISTEN 2>/dev/null | head -1 || true)
+    if [ -n "$listener" ]; then
+      echo "$listener" > "$PID_FILE"
+      echo "port $PORT already listening (pid $listener) — recorded as console pid, not starting another"
+      exit 0
+    fi
     start_console
     echo "pid $(cat "$PID_FILE") — follow with: $0 logs"
     ;;

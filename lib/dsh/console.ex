@@ -91,6 +91,11 @@ defmodule DshBeam.Console do
 
   # Start an unlinked subtree, waiting out a previous instance that is still
   # shutting down (its name is still registered while it dies).
+  #
+  # A listen error (`:eaddrinuse`) is NOT retried: another console already
+  # owns the port and will not die from a 500ms wait, so retrying would just
+  # spam the log. We surface it once with a clear message instead of raising
+  # the generic "web subtree start failed after retries".
   defp start_unlinked(start_fun, retries \\ 5)
 
   defp start_unlinked(_start_fun, 0) do
@@ -113,6 +118,15 @@ defmodule DshBeam.Console do
         end
 
         start_unlinked(start_fun, retries - 1)
+
+      {:error, {:listen_error, reason}} ->
+        raise """
+        failed to listen on 127.0.0.1:#{port()}: #{inspect(reason)}
+
+        Another console is already serving this port. Either stop it first
+        (./dsh-console.sh stop) or pick another port (DSH_BEAM_PORT=5000
+        ./dsh-console.sh).
+        """
     end
   end
 
