@@ -359,9 +359,15 @@ defmodule DshBeamWeb.ConsoleLive do
             t -> t
           end
 
-        # Worktree is decided at the session level automatically: over a git
-        # repo a worktree is checked out, otherwise the session opens in-place.
-        opts = maybe_put([], :title, title)
+        # Worktree is a per-session choice from the new-session modal: on
+        # (default) checks out a git worktree over a repo; off opens the
+        # session in-place even over a git repository.
+        use_worktree = params["worktree"] != "false"
+
+        opts =
+          []
+          |> maybe_put(:title, title)
+          |> maybe_put(:worktree, use_worktree)
 
         DshBeam.Workspace.open_session(workspace, repo, opts)
       else

@@ -210,6 +210,61 @@ defmodule DshBeam.Ui.Panel.Workspace do
         color: var(--dsw-alias-label-primary);
       }
       .ws-menu-rename { color: var(--dsw-alias-label-secondary); }
+      /* In-app new-session modal (no browser prompt). */
+      .dsh-ws-modal { position: fixed; inset: 0; z-index: 9999; }
+      .dsh-ws-modal-backdrop {
+        position: absolute; inset: 0;
+        background: rgba(0, 0, 0, .45); backdrop-filter: blur(2px);
+      }
+      .dsh-ws-modal-panel {
+        position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+        width: 320px; max-width: calc(100vw - 32px);
+        border-radius: 12px; padding: 14px;
+        border: 1px solid var(--dsw-alias-border-l1, #232a36);
+        background: var(--dsw-static-neutral-bluish-850, #161a21);
+        box-shadow: var(--dsw-shadow-lv2, 0 8px 24px rgba(0, 0, 0, .5));
+        display: flex; flex-direction: column; gap: 10px;
+      }
+      .dsh-ws-modal-head { display: flex; align-items: center; justify-content: space-between; }
+      .dsh-ws-modal-title { font-size: 14px; font-weight: 700; color: var(--dsw-alias-label-primary); }
+      .dsh-ws-modal-close {
+        border: none; background: transparent; color: var(--dsw-alias-label-caption);
+        font-size: 18px; line-height: 1; cursor: pointer; padding: 2px 4px; border-radius: 4px;
+      }
+      .dsh-ws-modal-close:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-hover); }
+      .dsh-ws-modal-body { display: flex; flex-direction: column; gap: 6px; }
+      .dsh-ws-modal-body label { color: var(--dsw-alias-label-secondary); font-size: 12px; }
+      .dsh-ws-modal-repo {
+        font-size: 12px; color: var(--dsw-alias-label-primary); word-break: break-all;
+        padding: 6px 8px; border-radius: 6px;
+        background: var(--dsw-static-neutral-bluish-875, #13161c);
+        border: 1px solid var(--dsw-alias-border-l2, #2a3342);
+      }
+      .dsh-ws-modal-body input.dsh-ws-name {
+        width: 100%; box-sizing: border-box; padding: 6px 8px;
+        border-radius: 6px; font-size: 13px;
+        border: 1px solid var(--dsw-alias-border-l2, #2a3342);
+        background: var(--dsw-static-neutral-bluish-875, #13161c);
+        color: var(--dsw-alias-label-primary);
+      }
+      .dsh-ws-modal-body input.dsh-ws-name:focus {
+        outline: none; border-color: var(--dsw-static-deepseek-400, #679efe);
+      }
+      .dsh-ws-modal-body .dsh-ws-worktree {
+        display: flex; align-items: center; gap: 6px; margin-top: 2px;
+      }
+      .dsh-ws-modal-body .dsh-ws-worktree input { width: auto; }
+      .dsh-ws-modal-foot { display: flex; justify-content: flex-end; gap: 8px; }
+      .dsh-ws-modal-foot button {
+        height: 28px; padding: 0 12px; border-radius: 6px; font-size: 12px; cursor: pointer;
+        border: 1px solid var(--dsw-alias-border-l2, #2a3342); background: transparent;
+        color: var(--dsw-alias-label-secondary);
+      }
+      .dsh-ws-modal-foot button:hover { background: var(--dsw-alias-interactive-bg-hover); }
+      .dsh-ws-modal-foot .dsh-ws-modal-create {
+        background: var(--dsw-static-deepseek-400, #679efe); color: #fff; border-color: transparent;
+      }
+      .dsh-ws-modal-foot .dsh-ws-modal-create:hover { background: var(--dsw-static-deepseek-500, #4f83e8); }
       .workspace-row { transition: background 120ms ease; }
       .workspace-row:not(.current):hover { background: var(--dsw-alias-interactive-bg-hover); }
       .workspace-row:not(.current) .ws-select { cursor: pointer; }
@@ -323,14 +378,68 @@ defmodule DshBeam.Ui.Panel.Workspace do
           this.onClick = (e) => {
             e.preventDefault();
             e.stopPropagation();
-            const repo = this.el.dataset.repo || '';
-            const title = window.prompt('Session name (optional)', '');
-            this.pushEvent('workspace_create', { repo: repo, title: title || '' });
+            this.openModal();
           };
           this.el.addEventListener('click', this.onClick);
         },
         destroyed() {
           this.el.removeEventListener('click', this.onClick);
+          this.closeModal();
+        },
+        openModal() {
+          const repo = this.el.dataset.repo || '';
+          const overlay = document.createElement('div');
+          overlay.className = 'dsh-ws-modal';
+          overlay.innerHTML = \`
+            <div class="dsh-ws-modal-backdrop"></div>
+            <div class="dsh-ws-modal-panel" role="dialog" aria-modal="true" aria-label="new session">
+              <div class="dsh-ws-modal-head">
+                <span class="dsh-ws-modal-title">new session</span>
+                <button type="button" class="dsh-ws-modal-close" aria-label="close">×</button>
+              </div>
+              <div class="dsh-ws-modal-body">
+                <label class="muted">workspace</label>
+                <div class="dsh-ws-modal-repo" title="\${repo}">\${repo}</div>
+                <label class="muted" for="dsh-ws-name">session name (optional)</label>
+                <input type="text" id="dsh-ws-name" class="dsh-ws-name" placeholder="e.g. my task" />
+                <label class="wf-check dsh-ws-worktree" title="off: open the session in-place, not as a git worktree">
+                  <input type="checkbox" id="dsh-ws-worktree" checked />
+                  git worktree
+                </label>
+              </div>
+              <div class="dsh-ws-modal-foot">
+                <button type="button" class="dsh-ws-modal-cancel">cancel</button>
+                <button type="button" class="dsh-ws-modal-create">create session</button>
+              </div>
+            </div>\`;
+          const panel = overlay.querySelector('.dsh-ws-modal-panel');
+          const nameInput = overlay.querySelector('.dsh-ws-name');
+          const worktreeInput = overlay.querySelector('#dsh-ws-worktree');
+          const close = () => {
+            overlay.remove();
+            document.removeEventListener('keydown', this.onKey);
+          };
+          this.onKey = (e) => {
+            if (e.key === 'Escape') close();
+            if (e.key === 'Enter' && e.target === nameInput) this.create();
+          };
+          this.create = () => {
+            const title = nameInput.value.trim();
+            const worktree = worktreeInput.checked ? 'true' : 'false';
+            this.pushEvent('workspace_create', { repo: repo, title: title, worktree: worktree });
+            close();
+          };
+          overlay.querySelector('.dsh-ws-modal-backdrop').addEventListener('click', close);
+          overlay.querySelector('.dsh-ws-modal-close').addEventListener('click', close);
+          overlay.querySelector('.dsh-ws-modal-cancel').addEventListener('click', close);
+          overlay.querySelector('.dsh-ws-modal-create').addEventListener('click', this.create);
+          document.addEventListener('keydown', this.onKey);
+          document.body.appendChild(overlay);
+          nameInput.focus();
+        },
+        closeModal() {
+          const overlay = document.querySelector('.dsh-ws-modal');
+          if (overlay) overlay.remove();
         }
       });
     </script>
