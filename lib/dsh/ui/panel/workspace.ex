@@ -463,12 +463,55 @@ defmodule DshBeam.Ui.Panel.Workspace do
             if (item && item.dataset.action === 'close') {
               this.pushEvent('workspace_close', { session: session });
             } else if (item && item.dataset.action === 'rename') {
-              const title = window.prompt('Session name', this.el.dataset.title || '');
-              if (title !== null && title.trim() !== '') {
-                this.pushEvent('workspace_rename', { session: session, title: title.trim() });
-              }
+              this.openRename(session);
             }
             this.close();
+          };
+          this.openRename = (session) => {
+            const current = this.el.dataset.title || '';
+            const overlay = document.createElement('div');
+            overlay.className = 'dsh-ws-modal';
+            overlay.innerHTML = \`
+              <div class="dsh-ws-modal-backdrop"></div>
+              <div class="dsh-ws-modal-panel" role="dialog" aria-modal="true" aria-label="rename session">
+                <div class="dsh-ws-modal-head">
+                  <span class="dsh-ws-modal-title">rename session</span>
+                  <button type="button" class="dsh-ws-modal-close" aria-label="close">×</button>
+                </div>
+                <div class="dsh-ws-modal-body">
+                  <label class="muted" for="dsh-ws-rename">session name</label>
+                  <input type="text" id="dsh-ws-rename" class="dsh-ws-name" value="\${current}" placeholder="e.g. my task" />
+                </div>
+                <div class="dsh-ws-modal-foot">
+                  <button type="button" class="dsh-ws-modal-cancel">cancel</button>
+                  <button type="button" class="dsh-ws-modal-create">save</button>
+                </div>
+              </div>\`;
+            const panel = overlay.querySelector('.dsh-ws-modal-panel');
+            const input = overlay.querySelector('#dsh-ws-rename');
+            const close = () => {
+              overlay.remove();
+              document.removeEventListener('keydown', this.onRenameKey);
+            };
+            this.onRenameKey = (e) => {
+              if (e.key === 'Escape') close();
+              if (e.key === 'Enter' && e.target === input) this.saveRename();
+            };
+            this.saveRename = () => {
+              const title = input.value.trim();
+              if (title !== '') {
+                this.pushEvent('workspace_rename', { session: session, title: title });
+              }
+              close();
+            };
+            overlay.querySelector('.dsh-ws-modal-backdrop').addEventListener('click', close);
+            overlay.querySelector('.dsh-ws-modal-close').addEventListener('click', close);
+            overlay.querySelector('.dsh-ws-modal-cancel').addEventListener('click', close);
+            overlay.querySelector('.dsh-ws-modal-create').addEventListener('click', this.saveRename);
+            document.addEventListener('keydown', this.onRenameKey);
+            document.body.appendChild(overlay);
+            input.focus();
+            input.select();
           };
           this.onDoc = (e) => { if (!this.el.contains(e.target)) this.close(); };
           this.onKey = (e) => { if (e.key === 'Escape') this.close(); };
