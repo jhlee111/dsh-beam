@@ -47,18 +47,17 @@ defmodule DshBeamWeb.ConsoleLive do
     %{id: :panel_creator, plugin: DshBeam.Ui.Panel.Creator, config: [], disabled: false},
     %{id: :panel_events, plugin: DshBeam.Ui.Panel.EventFeed, config: [], disabled: false},
     %{id: :panel_plugins, plugin: DshBeam.Ui.Panel.Plugins, config: [], disabled: false},
-    %{id: :workspace_folders, plugin: DshBeam.WorkspaceFolders, config: [], disabled: false},
     %{id: :panel_workspace, plugin: DshBeam.Ui.Panel.Workspace, config: [], disabled: false},
-    %{
-      id: :panel_workspace_folders,
-      plugin: DshBeam.Ui.Panel.WorkspaceFolders,
-      config: [],
-      disabled: false
-    },
     %{id: :panel_trajectory, plugin: DshBeam.Ui.Panel.Trajectory, config: [], disabled: false},
     %{id: :panel_access, plugin: DshBeam.Ui.Panel.Access, config: [], disabled: false},
     %{id: :panel_model_select, plugin: DshBeam.Ui.Panel.ModelSelect, config: [], disabled: false},
     %{id: :panel_command, plugin: DshBeam.Ui.Panel.Command, config: [], disabled: false},
+    %{
+      id: :panel_session_folders,
+      plugin: DshBeam.Ui.Panel.SessionFolders,
+      config: [],
+      disabled: false
+    },
     %{
       id: :panel_element_select,
       plugin: DshBeam.Ui.Panel.ElementSelect,
@@ -91,13 +90,12 @@ defmodule DshBeamWeb.ConsoleLive do
     :panel_creator,
     :panel_events,
     :panel_plugins,
-    :workspace_folders,
     :panel_workspace,
-    :panel_workspace_folders,
     :panel_trajectory,
     :panel_access,
     :panel_model_select,
     :panel_command,
+    :panel_session_folders,
     :panel_element_select
   ]
 
@@ -138,10 +136,6 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:workspace_repo, ".")
       |> assign(:workspace_result, nil)
       |> assign(:ws_folders_open, nil)
-      |> assign(:workspace_folders, [])
-      |> assign(:wf_draft, "")
-      |> assign(:wf_writable, true)
-      |> assign(:wf_result, nil)
       |> assign(:trajectory, [])
       |> assign(:settings_open, false)
       |> assign(:settings_section, :models)
@@ -155,6 +149,7 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:sidebar_width, 280)
       |> assign(:details_width, 280)
       |> assign(:picker_open, false)
+      |> assign(:picker_mode, :workspace)
       |> assign(:picker_path, nil)
       |> assign(:picker_entries, [])
       |> assign(:permission, %{current_value: "workspace-write", options: []})
@@ -173,11 +168,6 @@ defmodule DshBeamWeb.ConsoleLive do
     # on boot) are candidates; the mount-default session is left alone when
     # there is nothing to restore.
     restore_active_session(socket, params)
-
-    # the extra-folders capability is core: mount it with the console so the
-    # sidebar seat and the fs tool see it even before any "seed"
-    :ok =
-      DshBeam.Runtime.reconcile(runtime, current_specs(runtime) ++ [workspace_folders_entry()])
 
     {:ok, socket}
   end
@@ -317,13 +307,12 @@ defmodule DshBeamWeb.ConsoleLive do
             :panel_creator,
             :panel_events,
             :panel_plugins,
-            :workspace_folders,
             :panel_workspace,
-            :panel_workspace_folders,
             :panel_trajectory,
             :panel_access,
             :panel_model_select,
             :panel_command,
+            :panel_session_folders,
             :panel_element_select
           ])
       )
@@ -481,32 +470,6 @@ defmodule DshBeamWeb.ConsoleLive do
     end
 
     {:noreply, refresh(socket)}
-  end
-
-  def handle_event("workspace_folders_add", params, socket) do
-    path =
-      case params["path"] do
-        "" -> nil
-        nil -> nil
-        path -> String.trim(path)
-      end
-
-    if path do
-      writable = params["writable"] == "true"
-
-      save_extra_folder(socket, fn folders ->
-        [%{path: Path.expand(path), writable: writable} | folders]
-      end)
-
-      {:noreply, socket |> assign(wf_draft: "", wf_writable: true) |> refresh()}
-    else
-      {:noreply, socket |> assign(wf_result: "path must not be empty") |> refresh()}
-    end
-  end
-
-  def handle_event("workspace_folders_remove", %{"path" => path}, socket) do
-    save_extra_folder(socket, fn folders -> Enum.reject(folders, &(&1.path == path)) end)
-    {:noreply, socket |> assign(wf_result: "removed #{path}") |> refresh()}
   end
 
   # A session's OWN extra folders: add/remove on the workspace capability so
@@ -685,18 +648,41 @@ defmodule DshBeamWeb.ConsoleLive do
 
   def handle_event("picker_select", _params, socket) do
     path = socket.assigns.picker_path
+    mode = socket.assigns.picker_mode
 
-    store = DshBeam.Runtime.settings(socket.assigns.runtime)
+    socket =
+      case mode do
+        :session_folder ->
+          # add to the current session as a writable extra folder
+          case alive_session(socket.assigns.ctx) do
+            {:ok, session} ->
+              folders = session_folders(socket.assigns.ctx, session)
+              next = [%{path: path, writable: true} | Enum.reject(folders, &(&1.path == path))]
 
-    case workspace_pid(socket.assigns.ctx) do
-      {:ok, ws} -> DshBeam.Workspace.add_known_workspace(ws, path, store)
-      _ -> :ok
-    end
+              DshBeam.Workspace.set_session_folders(
+                workspace_pid!(socket.assigns.ctx),
+                session,
+                next
+              )
 
-    {:noreply,
-     socket
-     |> assign(workspace_repo: path, picker_open: false)
-     |> refresh()}
+              assign(socket, chat_error: "added #{path} to session folders (writable)")
+
+            _ ->
+              assign(socket, chat_error: "no active session — open a workspace session first")
+          end
+
+        _ ->
+          store = DshBeam.Runtime.settings(socket.assigns.runtime)
+
+          case workspace_pid(socket.assigns.ctx) do
+            {:ok, ws} -> DshBeam.Workspace.add_known_workspace(ws, path, store)
+            _ -> :ok
+          end
+
+          assign(socket, workspace_repo: path)
+      end
+
+    {:noreply, socket |> assign(picker_open: false) |> refresh()}
   end
 
   # Native folder picker result (showDirectoryPicker): register the chosen
@@ -714,6 +700,51 @@ defmodule DshBeamWeb.ConsoleLive do
     end
 
     {:noreply, refresh(socket)}
+  end
+
+  # Composer folder+ seat: add the chosen folder to the CURRENT session as a
+  # writable extra folder (same as /folders add -w <path>).
+  def handle_event("session_folder_add", %{"path" => path}, socket) do
+    path = String.trim(path || "")
+
+    case {path != "", alive_session(socket.assigns.ctx)} do
+      {true, {:ok, session}} ->
+        folders = session_folders(socket.assigns.ctx, session)
+
+        next = [
+          %{path: Path.expand(path), writable: true} | Enum.reject(folders, &(&1.path == path))
+        ]
+
+        DshBeam.Workspace.set_session_folders(workspace_pid!(socket.assigns.ctx), session, next)
+
+        {:noreply,
+         socket |> assign(chat_error: "added #{path} to session folders (writable)") |> refresh()}
+
+      {true, _} ->
+        {:noreply,
+         socket
+         |> assign(chat_error: "no active session — open a workspace session first")
+         |> refresh()}
+
+      _ ->
+        {:noreply, refresh(socket)}
+    end
+  end
+
+  # Fallback: browser without showDirectoryPicker — open the server-side dir
+  # browser in session-folder mode.
+  def handle_event("session_folder_browse", _params, socket) do
+    root = Path.expand(socket.assigns.workspace_repo || ".")
+
+    {:noreply,
+     socket
+     |> assign(
+       picker_open: true,
+       picker_mode: :session_folder,
+       picker_path: root,
+       picker_entries: list_dirs(root)
+     )
+     |> refresh()}
   end
 
   def handle_event("picker_cancel", _params, socket) do
@@ -1232,7 +1263,9 @@ defmodule DshBeamWeb.ConsoleLive do
         <div class="settings-backdrop" phx-click="picker_cancel"></div>
         <div class="settings-panel picker-panel">
           <div class="picker-head">
-            <span class="picker-title">choose a workspace folder</span>
+            <span class="picker-title">
+              <%= if @picker_mode == :session_folder, do: "choose a folder for this session", else: "choose a workspace folder" %>
+            </span>
             <button phx-click="picker_cancel">cancel</button>
           </div>
           <div class="picker-path"><code><%= @picker_path %></code></div>
@@ -1331,47 +1364,6 @@ defmodule DshBeamWeb.ConsoleLive do
     end
   end
 
-  # Add/remove an extra workspace folder: fold the change into the persisted
-  # :extra_folders setting of DshBeam.WorkspaceFolders, then re-arm the plugin
-  # (a settings save restarts the entry) so the new allowlist reaches the fs
-  # tool's resolution immediately.
-  defp save_extra_folder(socket, fun) do
-    store = DshBeam.Runtime.settings(socket.assigns.runtime)
-    current = folders_from_context(socket.assigns.ctx, socket.assigns.runtime)
-
-    next = current |> fun.() |> Enum.uniq_by(& &1.path)
-
-    DshBeam.Settings.put(
-      store,
-      DshBeam.WorkspaceFolders,
-      :extra_folders,
-      DshBeam.WorkspaceFolders.encode_folders(next)
-    )
-
-    case entry_id_for_plugin(socket.assigns.runtime, DshBeam.WorkspaceFolders) do
-      nil -> :ok
-      id -> DshBeam.Runtime.restart(socket.assigns.runtime, id)
-    end
-  end
-
-  # The currently allowed extra folders: from the live :workspace_folders
-  # binding when the plugin is active, else from the persisted setting (so the
-  # first add/remove round-trips correctly even before the plugin re-arms).
-  defp folders_from_context(ctx, runtime) do
-    case DshBeam.Context.get(ctx, :workspace_folders) do
-      {:ok, folders} when is_list(folders) ->
-        folders
-
-      _ ->
-        store = DshBeam.Runtime.settings(runtime)
-
-        case DshBeam.Settings.get(store, DshBeam.WorkspaceFolders, :extra_folders) do
-          {:ok, value} when is_binary(value) -> DshBeam.WorkspaceFolders.parse_folders(value)
-          _ -> []
-        end
-    end
-  end
-
   defp persist_llm(runtime, base_url, model, credential, receive_timeout) do
     store = DshBeam.Runtime.settings(runtime)
 
@@ -1453,8 +1445,6 @@ defmodule DshBeamWeb.ConsoleLive do
     workspace_sessions = workspace_sessions(socket.assigns.ctx)
     workspace_groups = workspace_groups(socket.assigns.ctx)
     workspace_active = Enum.any?(workspace_sessions, & &1.current)
-    workspace_folders = folders_from_context(socket.assigns.ctx, socket.assigns.runtime)
-
     chat = chat_entries(socket.assigns.ctx, socket.assigns.chat_busy, socket.assigns.open_rows)
 
     assign(socket,
@@ -1470,7 +1460,6 @@ defmodule DshBeamWeb.ConsoleLive do
       workspace_sessions: workspace_sessions,
       workspace_groups: workspace_groups,
       workspace_active: workspace_active,
-      workspace_folders: workspace_folders,
       inventory:
         build_inventory(
           runtime,
@@ -1757,7 +1746,9 @@ defmodule DshBeamWeb.ConsoleLive do
 
     append_command_event(session, %{"role" => "command_done", "name" => name, "content" => result})
 
-    {:noreply, socket |> assign(chat_text: "", chat_error: nil) |> refresh()}
+    # Surface command output in the pane (chat_error is the composer's
+    # feedback strip; a command's result is shown there too).
+    {:noreply, socket |> assign(chat_text: "", chat_error: result) |> refresh()}
   end
 
   defp append_command_event({:ok, session}, event), do: DshBeam.Session.append(session, event)
@@ -1791,6 +1782,58 @@ defmodule DshBeamWeb.ConsoleLive do
       end
 
     {socket, result}
+  end
+
+  defp dispatch_command(socket, "folders", args) do
+    session = alive_session(socket.assigns.ctx)
+
+    case {session, String.trim(args)} do
+      {{:ok, session}, ""} ->
+        folders = session_folders(socket.assigns.ctx, session)
+
+        body =
+          Enum.map_join(folders, "\n", fn f ->
+            "#{if f.writable, do: "w", else: "r"} #{f.path}"
+          end)
+
+        {socket, (body == "" && "no extra folders for this session") || body}
+
+      {{:ok, session}, "add " <> rest} ->
+        {writable, path} =
+          case rest do
+            "-w " <> p -> {true, p}
+            p -> {false, p}
+          end
+
+        path = String.trim(path)
+
+        if path == "" do
+          {socket, "usage: /folders add [-w] <path>"}
+        else
+          folders = session_folders(socket.assigns.ctx, session)
+
+          next = [
+            %{path: Path.expand(path), writable: writable}
+            | Enum.reject(folders, &(&1.path == Path.expand(path)))
+          ]
+
+          DshBeam.Workspace.set_session_folders(workspace_pid!(socket.assigns.ctx), session, next)
+          {socket, "added #{if writable, do: "writable ", else: ""}#{path} to session folders"}
+        end
+
+      {{:ok, session}, "remove " <> path} ->
+        path = String.trim(path)
+        folders = session_folders(socket.assigns.ctx, session)
+        next = Enum.reject(folders, &(&1.path == path))
+        DshBeam.Workspace.set_session_folders(workspace_pid!(socket.assigns.ctx), session, next)
+        {socket, "removed #{path}"}
+
+      {{:ok, _session}, other} ->
+        {socket, "usage: /folders [add [-w] <path>|remove <path>] (got: #{other})"}
+
+      _ ->
+        {socket, "no active session"}
+    end
   end
 
   defp dispatch_command(socket, "clear", _args) do
@@ -2028,13 +2071,6 @@ defmodule DshBeamWeb.ConsoleLive do
     end
   end
 
-  # The workspace-folder entry the console mounts alongside the console itself
-  # (mount/2 and mount/2's reconcile below), so the extra-folders capability —
-  # and the folder tool it feeds — is available in every session.
-  defp workspace_folders_entry do
-    %{id: :workspace_folders, plugin: DshBeam.WorkspaceFolders, config: [], disabled: false}
-  end
-
   defp safe_sessions(workspace) do
     if Process.alive?(workspace) do
       DshBeam.Workspace.all_sessions(workspace)
@@ -2216,7 +2252,6 @@ defmodule DshBeamWeb.ConsoleLive do
     DshBeam.Tool.Fs => "Tool: Files",
     DshBeam.Tool.Todo => "Tool: Todo",
     DshBeam.Workspace => "Workspace",
-    DshBeam.WorkspaceFolders => "Workspace Folders",
     DshBeam.Llm.Plugin => "LLM"
   }
 
@@ -2231,7 +2266,6 @@ defmodule DshBeamWeb.ConsoleLive do
     DshBeam.Agent.Loop => "Max model→tool round-trips",
     DshBeam.Tool.Todo => "The agent's plan/todo list",
     DshBeam.Workspace => "Default root for new session worktrees",
-    DshBeam.WorkspaceFolders => "Extra folders the agent may read/write",
     DshBeam.Llm.Plugin => "Provider, model, and credential"
   }
 

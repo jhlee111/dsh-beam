@@ -8,12 +8,12 @@ defmodule DshBeam.Tool.Fs do
   owns its checkout); otherwise it is the entry config `:root` (default the
   current directory). Paths that escape the root are refused.
 
-  When `DshBeam.WorkspaceFolders` is mounted, its `:workspace_folders`
-  binding extends the allowed roots with an explicit allowlist of extra
-  folders (each with its own writable flag): reads resolve against every
+  The current session's own extra folders (set via the composer folder+
+  button or the /folders command) extend the allowed roots with an explicit
+  allowlist (each with its own writable flag): reads resolve against every
   allowed root, writes are refused on a read-only extra folder, and anything
   outside the session root and the added folders is refused exactly as
-  before. Without the plugin the behaviour is unchanged.
+  before. Without any session folders the behaviour is unchanged.
   """
 
   use DshBeam.Plugin
@@ -109,29 +109,16 @@ defmodule DshBeam.Tool.Fs do
     end
   end
 
-  # The added folders: the global :workspace_folders binding when the
-  # WorkspaceFolders plugin is active, PLUS the current session's own extra
-  # folders (per-session allowlist owned by DshBeam.Workspace). Union by
-  # path; the session's own folders win on the writable flag. [] without any.
+  # The current session's own extra folders — the ONLY allowlist now: a
+  # session sees exactly its own folders (set via the composer folder+ button
+  # or the /folders command), not a global/workspace-wide set. [] without any.
   defp extra_folders(state) do
-    global =
-      case DshBeam.Context.get(state.ctx, :workspace_folders) do
-        {:ok, folders} when is_list(folders) -> folders
-        _ -> []
-      end
-
-    session = session_folders(state)
-
-    Enum.reduce(session ++ global, [], fn %{path: path, writable: writable} = f, acc ->
-      case Enum.find(acc, &(&1.path == path)) do
-        nil -> [f | acc]
-        %{writable: w} when w == writable -> acc
-        _ -> [f | Enum.reject(acc, &(&1.path == path))]
-      end
-    end)
+    case session_folders(state) do
+      {:ok, folders} when is_list(folders) -> folders
+      _ -> []
+    end
   end
 
-  # The current session's own extra folders (from the workspace capability).
   defp session_folders(state) do
     case session_cwd(state) do
       cwd when is_binary(cwd) ->
@@ -139,15 +126,15 @@ defmodule DshBeam.Tool.Fs do
           {:ok, workspace} when is_pid(workspace) ->
             case workspace_session(workspace, cwd) do
               {:ok, session} -> DshBeam.Workspace.get_session_folders(workspace, session)
-              _ -> []
+              _ -> {:ok, []}
             end
 
           _ ->
-            []
+            {:ok, []}
         end
 
       _ ->
-        []
+        {:ok, []}
     end
   end
 

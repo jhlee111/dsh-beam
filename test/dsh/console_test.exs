@@ -496,38 +496,34 @@ defmodule DshBeam.ConsoleTest do
              DshBeam.Settings.get(store, DshBeam.Ui.Panel.General, :workspace_default_root)
   end
 
-  test "the extra folders panel adds, lists, and removes workspace folders", %{
+  test "session extra folders: /folders command adds a folder the fs tool can write", %{
     session: session,
     ctx: ctx
   } do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
     render_submit(view, "seed", %{})
 
+    # an active workspace session is required for the conversation UI: open an
+    # in-place session over a unique temp dir and switch to it
+    dir = Path.join(System.tmp_dir!(), "dsh_folders_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    render_submit(view, "workspace_create", %{"repo" => dir, "title" => "folders-test"})
+    {:ok, workspace} = DshBeam.Context.get(ctx, :workspace)
+    [workspace_session] = Map.keys(DshBeam.Workspace.all_sessions(workspace))
+    render_click(view, "workspace_switch", %{"session" => encode(workspace_session)})
+
     extra = Path.join(System.tmp_dir!(), "dsh_wf_ui_#{System.unique_integer([:positive])}")
     File.mkdir_p!(extra)
     on_exit(fn -> File.rm_rf!(extra) end)
 
-    # empty state before any folder is added
-    html = render(view)
-    assert html =~ "none yet"
+    # /folders add -w <path> attaches a writable folder to the ACTIVE session
+    html = render_submit(view, "ask", %{"text" => "/folders add -w #{extra}"})
+    assert html =~ "added writable"
 
-    # add a writable folder: it appears in the panel and reaches the fs tool
-    html =
-      render_submit(view, "workspace_folders_add", %{
-        "path" => extra,
-        "writable" => "true"
-      })
-
-    assert html =~ extra
-    assert html =~ "writable"
-
-    # the plugin re-armed: the :workspace_folders binding now carries it
-    assert {:ok, folders} = DshBeam.Context.get(ctx, :workspace_folders)
-    assert Enum.any?(folders, &(&1.path == extra and &1.writable))
-
-    # the fs tool resolves writes against the added folder
+    # the folder landed on the session (the fs tool's allowlist for it)
     {:ok, write} = DshBeam.Context.get(ctx, :write_file)
-
     assert {:ok, _} =
              DshBeam.Tool.call(write, :write_file, %{
                "path" => Path.join(extra, "a.txt"),
@@ -536,10 +532,9 @@ defmodule DshBeam.ConsoleTest do
 
     assert File.exists?(Path.join(extra, "a.txt"))
 
-    # remove it again (the feedback echoes the path, so assert the row is gone)
-    html = render_click(view, "workspace_folders_remove", %{"path" => extra})
-    refute html =~ ~s(title="#{extra}")
-    assert {:ok, []} = DshBeam.Context.get(ctx, :workspace_folders)
+    # /folders remove detaches it again
+    html = render_submit(view, "ask", %{"text" => "/folders remove #{extra}"})
+    assert html =~ "removed"
   end
 
   test "the agent presets tab lists presets, sets a default, and applies one",
