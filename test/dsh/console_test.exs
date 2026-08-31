@@ -524,6 +524,7 @@ defmodule DshBeam.ConsoleTest do
 
     # the folder landed on the session (the fs tool's allowlist for it)
     {:ok, write} = DshBeam.Context.get(ctx, :write_file)
+
     assert {:ok, _} =
              DshBeam.Tool.call(write, :write_file, %{
                "path" => Path.join(extra, "a.txt"),
