@@ -119,15 +119,24 @@ defmodule DshBeam.Console do
 
         start_unlinked(start_fun, retries - 1)
 
-      {:error, {:listen_error, reason}} ->
+      {:error, reason} when port_in_use?(reason) ->
         raise """
-        failed to listen on 127.0.0.1:#{port()}: #{inspect(reason)}
+        failed to listen on 127.0.0.1:#{port()}: :eaddrinuse (address already in use)
 
         Another console is already serving this port. Either stop it first
         (./dsh-console.sh stop) or pick another port (DSH_BEAM_PORT=5000
-        ./dsh-console.sh).
+        ./dsh-console.sh). A watchdog-managed console is running under
+        .dsh/console.pid — use ./dsh-console.sh logs to follow it.
         """
     end
+  end
+
+  # Ranch wraps the listen error variously: {:listen_error, :eaddrinuse} or a
+  # {:shutdown, {:failed_to_start_child, ..., {:listen_error, ..., :eaddrinuse}}}
+  # nest. Treat any :eaddrinuse in the error as "port already in use" so the
+  # console reports it clearly instead of crashing with a CaseClauseError.
+  defp port_in_use?(reason) do
+    inspect(reason) =~ "eaddrinuse"
   end
 
   @impl true
