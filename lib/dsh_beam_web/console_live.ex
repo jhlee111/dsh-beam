@@ -433,19 +433,6 @@ defmodule DshBeamWeb.ConsoleLive do
     {:noreply, refresh(socket)}
   end
 
-  # Remember which session was active so a console restart can restore it.
-  # Persisted as the session's cwd (stable across restarts; the pid is not).
-  defp remember_active_session(socket, session) do
-    case DshBeam.Session.cwd(session) do
-      cwd when is_binary(cwd) ->
-        store = DshBeam.Runtime.settings(socket.assigns.runtime)
-        DshBeam.Settings.put(store, DshBeam.Workspace, :active_session, cwd)
-
-      _ ->
-        :ok
-    end
-  end
-
   def handle_event("workspace_close", %{"session" => session_key}, socket) do
     session = session_key |> Base.decode64!() |> :erlang.binary_to_term([:safe])
 
@@ -953,6 +940,19 @@ defmodule DshBeamWeb.ConsoleLive do
   def handle_event("settings_tab", %{"section" => section_key}, socket) do
     section = String.to_existing_atom(section_key)
     {:noreply, assign(socket, settings_section: section) |> refresh()}
+  end
+
+  # Remember which session was active so a console restart can restore it.
+  # Persisted as the session's cwd (stable across restarts; the pid is not).
+  defp remember_active_session(socket, session) do
+    case DshBeam.Session.cwd(session) do
+      cwd when is_binary(cwd) ->
+        store = DshBeam.Runtime.settings(socket.assigns.runtime)
+        DshBeam.Settings.put(store, DshBeam.Workspace, :active_session, cwd)
+
+      _ ->
+        :ok
+    end
   end
 
   defp entry_id_for_plugin(runtime, plugin) do
