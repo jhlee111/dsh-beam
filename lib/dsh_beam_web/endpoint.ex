@@ -19,9 +19,15 @@ defmodule DshBeamWeb.Endpoint do
     only: ~w(assets favicon.ico)
   )
 
-  # Code reloading is off (see config/config.exs): the Phoenix.CodeReloader
-  # recompiles on request and can poison the VM on a config change or a
-  # mid-edit compile error.
+  # Code reloading is on (see config/config.exs): the Phoenix.CodeReloader
+  # recompiles changed modules on each request so a source edit applies
+  # without restarting the console. Phoenix.CodeReloader is registered as a
+  # Mix listener (mix.exs), so `mix run scripts/console.exs` sees the
+  # recompiled code.
+  if code_reloading? do
+    plug(Phoenix.CodeReloader)
+  end
+
   plug(Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],

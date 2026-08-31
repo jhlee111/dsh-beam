@@ -2,7 +2,7 @@ defmodule DshBeam.CommandTest do
   use ExUnit.Case, async: true
 
   test "ships the command catalog in declaration order" do
-    assert DshBeam.Command.names() == ["permission", "model", "goal", "clear", "help"]
+    assert DshBeam.Command.names() == ["permission", "model", "goal", "clear", "help", "folders"]
 
     assert DshBeam.Command.find("permission").description =~ "permission preset"
     assert DshBeam.Command.find("model").hint == "<deepseek-chat|deepseek-reasoner>"

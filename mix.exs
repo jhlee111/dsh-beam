@@ -8,10 +8,13 @@ defmodule DshBeam.MixProject do
       elixir: "~> 1.20",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      aliases: aliases()
-      # Code reloading is off (see config/config.exs): Phoenix 1.8's
-      # CodeReloader hooks compilation through a Mix listener, but it cannot
-      # survive a config change or a mid-edit compile error, so we omit it.
+      aliases: aliases(),
+      # Compile the changed modules on each request so a source edit applies
+      # without a console restart (dev-server workflow). Phoenix 1.8 requires
+      # its reloader to be a Mix listener (not the alias name): the listener
+      # tracks compilation from the `mix run` VM, and the CodeReloader plug
+      # picks the recompiled modules up per request.
+      listeners: [Phoenix.CodeReloader]
     ]
   end
 

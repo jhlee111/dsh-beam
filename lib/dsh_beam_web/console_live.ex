@@ -51,7 +51,19 @@ defmodule DshBeamWeb.ConsoleLive do
     %{id: :panel_trajectory, plugin: DshBeam.Ui.Panel.Trajectory, config: [], disabled: false},
     %{id: :panel_access, plugin: DshBeam.Ui.Panel.Access, config: [], disabled: false},
     %{id: :panel_model_select, plugin: DshBeam.Ui.Panel.ModelSelect, config: [], disabled: false},
-    %{id: :panel_command, plugin: DshBeam.Ui.Panel.Command, config: [], disabled: false}
+    %{id: :panel_command, plugin: DshBeam.Ui.Panel.Command, config: [], disabled: false},
+    %{
+      id: :panel_session_folders,
+      plugin: DshBeam.Ui.Panel.SessionFolders,
+      config: [],
+      disabled: false
+    },
+    %{
+      id: :panel_element_select,
+      plugin: DshBeam.Ui.Panel.ElementSelect,
+      config: [],
+      disabled: false
+    }
   ]
 
   # The entries a seed/preset-apply swaps out of a composition: the agent core
@@ -82,11 +94,13 @@ defmodule DshBeamWeb.ConsoleLive do
     :panel_trajectory,
     :panel_access,
     :panel_model_select,
-    :panel_command
+    :panel_command,
+    :panel_session_folders,
+    :panel_element_select
   ]
 
   @impl true
-  def mount(_params, session, socket) do
+  def mount(params, session, socket) do
     %{runtime: runtime, ctx: ctx} = refs(session)
 
     :ok = DshBeam.Context.subscribe(ctx)
@@ -118,8 +132,10 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:credential_env, "DEEPSEEK_API_KEY")
       |> assign(:inventory, [])
       |> assign(:workspace_sessions, [])
+      |> assign(:workspace_groups, [])
       |> assign(:workspace_repo, ".")
       |> assign(:workspace_result, nil)
+      |> assign(:ws_folders_open, nil)
       |> assign(:trajectory, [])
       |> assign(:settings_open, false)
       |> assign(:settings_section, :models)
@@ -133,6 +149,7 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:sidebar_width, 280)
       |> assign(:details_width, 280)
       |> assign(:picker_open, false)
+      |> assign(:picker_mode, :workspace)
       |> assign(:picker_path, nil)
       |> assign(:picker_entries, [])
       |> assign(:permission, %{current_value: "workspace-write", options: []})
@@ -145,7 +162,66 @@ defmodule DshBeamWeb.ConsoleLive do
       |> assign(:trajectory_query, "")
       |> refresh()
 
+    # Restore the last active session after a restart: mount-time preference
+    # is (1) an explicit ?session=<key> URL param, else (2) the remembered
+    # active session cwd. Only workspace sessions (which the roster re-opened
+    # on boot) are candidates; the mount-default session is left alone when
+    # there is nothing to restore.
+    restore_active_session(socket, params)
+
     {:ok, socket}
+  end
+
+  # Resolve the session to restore at mount: an explicit ?session=<key> wins,
+  # else the remembered active session cwd (settings). No-op when neither
+  # matches a live workspace session.
+  defp restore_active_session(socket, params) do
+    runtime = socket.assigns.runtime
+    store = DshBeam.Runtime.settings(runtime)
+
+    target =
+      case params do
+        %{"session" => key} when is_binary(key) and key != "" ->
+          {:key, session_from_key(key)}
+
+        _ ->
+          {:cwd, remembered_active_cwd(store)}
+      end
+
+    session =
+      case target do
+        {:key, nil} -> nil
+        {:key, session} -> session
+        {:cwd, nil} -> nil
+        {:cwd, cwd} -> workspace_session_by_cwd(socket.assigns.ctx, cwd)
+      end
+
+    if is_pid(session) and Process.alive?(session) do
+      :ok = switch_session(runtime, session)
+    end
+
+    :ok
+  end
+
+  defp remembered_active_cwd(store) do
+    case DshBeam.Settings.get(store, DshBeam.Workspace, :active_session) do
+      {:ok, cwd} when is_binary(cwd) and cwd != "" -> cwd
+      _ -> nil
+    end
+  end
+
+  # Find the live workspace session whose cwd matches.
+  defp workspace_session_by_cwd(ctx, cwd) do
+    with {:ok, workspace} when is_pid(workspace) <- DshBeam.Context.get(ctx, :workspace) do
+      sessions = DshBeam.Workspace.all_sessions(workspace)
+
+      case Enum.find(sessions, fn {_s, meta} -> meta.cwd == cwd end) do
+        {session, _meta} -> session
+        nil -> nil
+      end
+    else
+      _ -> nil
+    end
   end
 
   @impl true
@@ -235,12 +311,29 @@ defmodule DshBeamWeb.ConsoleLive do
             :panel_trajectory,
             :panel_access,
             :panel_model_select,
-            :panel_command
+            :panel_command,
+            :panel_session_folders,
+            :panel_element_select
           ])
       )
 
     :ok = DshBeam.Runtime.reconcile(socket.assigns.runtime, specs ++ @demo_entries)
     {:noreply, refresh(socket)}
+  end
+
+  def handle_event("element_pick", params, socket) do
+    marker = DshBeam.Ui.Panel.ElementSelect.marker(params)
+
+    current = socket.assigns.chat_text
+
+    draft =
+      if current == "" do
+        marker
+      else
+        current <> "\n\n" <> marker
+      end
+
+    {:noreply, assign(socket, chat_text: draft) |> refresh()}
   end
 
   def handle_event("ask", %{"text" => text}, socket) do
@@ -314,7 +407,16 @@ defmodule DshBeamWeb.ConsoleLive do
             t -> t
           end
 
-        opts = if title, do: [title: title], else: []
+        # Worktree is a per-session choice from the new-session modal: on
+        # (default) checks out a git worktree over a repo; off opens the
+        # session in-place even over a git repository.
+        use_worktree = params["worktree"] != "false"
+
+        opts =
+          []
+          |> maybe_put(:title, title)
+          |> maybe_put(:worktree, use_worktree)
+
         DshBeam.Workspace.open_session(workspace, repo, opts)
       else
         :not_found -> {:error, :no_workspace_plugin}
@@ -327,6 +429,7 @@ defmodule DshBeamWeb.ConsoleLive do
   def handle_event("workspace_switch", %{"session" => session_key}, socket) do
     session = session_key |> Base.decode64!() |> :erlang.binary_to_term([:safe])
     :ok = switch_session(socket.assigns.runtime, session)
+    remember_active_session(socket, session)
     {:noreply, refresh(socket)}
   end
 
@@ -339,6 +442,70 @@ defmodule DshBeamWeb.ConsoleLive do
       end
 
     {:noreply, socket |> assign(workspace_result: result) |> refresh()}
+  end
+
+  def handle_event("workspace_rename", %{"session" => key, "title" => title}, socket) do
+    session = session_from_key(key)
+
+    if session && String.trim(title) != "" do
+      DshBeam.Session.set_header(session, %{title: String.trim(title)})
+
+      case workspace_pid(socket.assigns.ctx) do
+        {:ok, ws} -> DshBeam.Workspace.persist(ws)
+        _ -> :ok
+      end
+    end
+
+    {:noreply, refresh(socket)}
+  end
+
+  # A session's OWN extra folders: add/remove on the workspace capability so
+  # they persist with the roster and feed the fs tool's per-session allowlist.
+  def handle_event("workspace_session_folders_add", %{"session" => key} = params, socket) do
+    session = session_from_key(key)
+
+    path =
+      case params["path"] do
+        "" -> nil
+        nil -> nil
+        path -> String.trim(path)
+      end
+
+    if session && path do
+      writable = params["writable"] == "true"
+      folders = session_folders(socket.assigns.ctx, session)
+      next = [%{path: Path.expand(path), writable: writable} | folders]
+      DshBeam.Workspace.set_session_folders(workspace_pid!(socket.assigns.ctx), session, next)
+      {:noreply, refresh(socket)}
+    else
+      {:noreply, socket |> assign(workspace_result: "path must not be empty") |> refresh()}
+    end
+  end
+
+  def handle_event(
+        "workspace_session_folders_remove",
+        %{"session" => key, "path" => path},
+        socket
+      ) do
+    session = session_from_key(key)
+
+    if session do
+      folders = session_folders(socket.assigns.ctx, session)
+      next = Enum.reject(folders, &(&1.path == path))
+      DshBeam.Workspace.set_session_folders(workspace_pid!(socket.assigns.ctx), session, next)
+      {:noreply, refresh(socket)}
+    else
+      {:noreply, refresh(socket)}
+    end
+  end
+
+  def handle_event("workspace_folders_toggle", %{"session" => key}, socket) do
+    current = socket.assigns.ws_folders_open
+
+    {:noreply,
+     socket
+     |> assign(ws_folders_open: if(current == key, do: nil, else: key))
+     |> refresh()}
   end
 
   def handle_event("llm_apply", params, socket) do
@@ -467,9 +634,103 @@ defmodule DshBeamWeb.ConsoleLive do
   end
 
   def handle_event("picker_select", _params, socket) do
+    path = socket.assigns.picker_path
+    mode = socket.assigns.picker_mode
+
+    socket =
+      case mode do
+        :session_folder ->
+          # add to the current session as a writable extra folder
+          case alive_session(socket.assigns.ctx) do
+            {:ok, session} ->
+              folders = session_folders(socket.assigns.ctx, session)
+              next = [%{path: path, writable: true} | Enum.reject(folders, &(&1.path == path))]
+
+              DshBeam.Workspace.set_session_folders(
+                workspace_pid!(socket.assigns.ctx),
+                session,
+                next
+              )
+
+              assign(socket, chat_error: "added #{path} to session folders (writable)")
+
+            _ ->
+              assign(socket, chat_error: "no active session — open a workspace session first")
+          end
+
+        _ ->
+          store = DshBeam.Runtime.settings(socket.assigns.runtime)
+
+          case workspace_pid(socket.assigns.ctx) do
+            {:ok, ws} -> DshBeam.Workspace.add_known_workspace(ws, path, store)
+            _ -> :ok
+          end
+
+          assign(socket, workspace_repo: path)
+      end
+
+    {:noreply, socket |> assign(picker_open: false) |> refresh()}
+  end
+
+  # Native folder picker result (showDirectoryPicker): register the chosen
+  # folder as a known workspace, exactly like picker_select.
+  def handle_event("workspace_pick_dir", %{"path" => path}, socket) do
+    path = String.trim(path || "")
+
+    if path != "" do
+      store = DshBeam.Runtime.settings(socket.assigns.runtime)
+
+      case workspace_pid(socket.assigns.ctx) do
+        {:ok, ws} -> DshBeam.Workspace.add_known_workspace(ws, path, store)
+        _ -> :ok
+      end
+    end
+
+    {:noreply, refresh(socket)}
+  end
+
+  # Composer folder+ seat: add the chosen folder to the CURRENT session as a
+  # writable extra folder (same as /folders add -w <path>).
+  def handle_event("session_folder_add", %{"path" => path}, socket) do
+    path = String.trim(path || "")
+
+    case {path != "", alive_session(socket.assigns.ctx)} do
+      {true, {:ok, session}} ->
+        folders = session_folders(socket.assigns.ctx, session)
+
+        next = [
+          %{path: Path.expand(path), writable: true} | Enum.reject(folders, &(&1.path == path))
+        ]
+
+        DshBeam.Workspace.set_session_folders(workspace_pid!(socket.assigns.ctx), session, next)
+
+        {:noreply,
+         socket |> assign(chat_error: "added #{path} to session folders (writable)") |> refresh()}
+
+      {true, _} ->
+        {:noreply,
+         socket
+         |> assign(chat_error: "no active session — open a workspace session first")
+         |> refresh()}
+
+      _ ->
+        {:noreply, refresh(socket)}
+    end
+  end
+
+  # Fallback: browser without showDirectoryPicker — open the server-side dir
+  # browser in session-folder mode.
+  def handle_event("session_folder_browse", _params, socket) do
+    root = Path.expand(socket.assigns.workspace_repo || ".")
+
     {:noreply,
      socket
-     |> assign(workspace_repo: socket.assigns.picker_path, picker_open: false)
+     |> assign(
+       picker_open: true,
+       picker_mode: :session_folder,
+       picker_path: root,
+       picker_entries: list_dirs(root)
+     )
      |> refresh()}
   end
 
@@ -681,6 +942,19 @@ defmodule DshBeamWeb.ConsoleLive do
     {:noreply, assign(socket, settings_section: section) |> refresh()}
   end
 
+  # Remember which session was active so a console restart can restore it.
+  # Persisted as the session's cwd (stable across restarts; the pid is not).
+  defp remember_active_session(socket, session) do
+    case DshBeam.Session.cwd(session) do
+      cwd when is_binary(cwd) ->
+        store = DshBeam.Runtime.settings(socket.assigns.runtime)
+        DshBeam.Settings.put(store, DshBeam.Workspace, :active_session, cwd)
+
+      _ ->
+        :ok
+    end
+  end
+
   defp entry_id_for_plugin(runtime, plugin) do
     runtime
     |> DshBeam.Runtime.entries()
@@ -821,6 +1095,10 @@ defmodule DshBeamWeb.ConsoleLive do
     ~H"""
     <div
       class="frame"
+      data-dsh-region
+      data-dsh-slot="layout"
+      data-dsh-plugin="DshBeamWeb.ConsoleLive"
+      data-dsh-source="lib/dsh_beam_web/console_live.ex"
       style={"grid-template-columns: " <> (if @sidebar_collapsed, do: "56px", else: "#{@sidebar_width}px") <> " minmax(0, 1fr) #{@details_width}px"}
     >
       <div class="frame-sidebar">
@@ -944,7 +1222,13 @@ defmodule DshBeamWeb.ConsoleLive do
     </div>
 
     <%= if @settings_open do %>
-      <div class="settings-overlay">
+      <div
+        class="settings-overlay"
+        data-dsh-region
+        data-dsh-slot="layout"
+        data-dsh-plugin="DshBeamWeb.ConsoleLive"
+        data-dsh-source="lib/dsh_beam_web/console_live.ex"
+      >
         <div class="settings-backdrop" phx-click="close_settings"></div>
         <div class="settings-panel">
           <nav class="settings-nav">
@@ -969,11 +1253,19 @@ defmodule DshBeamWeb.ConsoleLive do
     <% end %>
 
     <%= if @picker_open do %>
-      <div class="settings-overlay">
+      <div
+        class="settings-overlay"
+        data-dsh-region
+        data-dsh-slot="layout"
+        data-dsh-plugin="DshBeamWeb.ConsoleLive"
+        data-dsh-source="lib/dsh_beam_web/console_live.ex"
+      >
         <div class="settings-backdrop" phx-click="picker_cancel"></div>
         <div class="settings-panel picker-panel">
           <div class="picker-head">
-            <span class="picker-title">choose a workspace folder</span>
+            <span class="picker-title">
+              <%= if @picker_mode == :session_folder, do: "choose a folder for this session", else: "choose a workspace folder" %>
+            </span>
             <button phx-click="picker_cancel">cancel</button>
           </div>
           <div class="picker-path"><code><%= @picker_path %></code></div>
@@ -1019,6 +1311,40 @@ defmodule DshBeamWeb.ConsoleLive do
     case DshBeam.Context.get(ctx, :workspace) do
       {:ok, workspace} when is_pid(workspace) -> {:ok, workspace}
       _ -> :not_found
+    end
+  end
+
+  defp workspace_pid!(ctx) do
+    case workspace_pid(ctx) do
+      {:ok, workspace} -> workspace
+      _ -> nil
+    end
+  end
+
+  defp session_from_key(key) when is_binary(key) do
+    try do
+      key |> Base.decode64!() |> :erlang.binary_to_term([:safe])
+    rescue
+      _ -> nil
+    end
+  end
+
+  defp session_from_key(_), do: nil
+
+  defp maybe_put(opts, _key, nil), do: opts
+  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
+
+  # A session's own extra folders (from the workspace capability).
+  defp session_folders(ctx, session) do
+    case workspace_pid(ctx) do
+      {:ok, workspace} ->
+        case DshBeam.Workspace.get_session_folders(workspace, session) do
+          {:ok, folders} when is_list(folders) -> folders
+          _ -> []
+        end
+
+      _ ->
+        []
     end
   end
 
@@ -1117,8 +1443,8 @@ defmodule DshBeamWeb.ConsoleLive do
     store = DshBeam.Runtime.settings(runtime)
     default_preset = resolve_default_preset(store)
     workspace_sessions = workspace_sessions(socket.assigns.ctx)
+    workspace_groups = workspace_groups(socket.assigns.ctx)
     workspace_active = Enum.any?(workspace_sessions, & &1.current)
-
     chat = chat_entries(socket.assigns.ctx, socket.assigns.chat_busy, socket.assigns.open_rows)
 
     assign(socket,
@@ -1132,6 +1458,7 @@ defmodule DshBeamWeb.ConsoleLive do
       trajectory: trajectory(socket.assigns.ctx, socket.assigns.trajectory_query),
       permission: permission(socket.assigns.ctx),
       workspace_sessions: workspace_sessions,
+      workspace_groups: workspace_groups,
       workspace_active: workspace_active,
       inventory:
         build_inventory(
@@ -1419,7 +1746,9 @@ defmodule DshBeamWeb.ConsoleLive do
 
     append_command_event(session, %{"role" => "command_done", "name" => name, "content" => result})
 
-    {:noreply, socket |> assign(chat_text: "", chat_error: nil) |> refresh()}
+    # Surface command output in the pane (chat_error is the composer's
+    # feedback strip; a command's result is shown there too).
+    {:noreply, socket |> assign(chat_text: "", chat_error: result) |> refresh()}
   end
 
   defp append_command_event({:ok, session}, event), do: DshBeam.Session.append(session, event)
@@ -1453,6 +1782,58 @@ defmodule DshBeamWeb.ConsoleLive do
       end
 
     {socket, result}
+  end
+
+  defp dispatch_command(socket, "folders", args) do
+    session = alive_session(socket.assigns.ctx)
+
+    case {session, String.trim(args)} do
+      {{:ok, session}, ""} ->
+        folders = session_folders(socket.assigns.ctx, session)
+
+        body =
+          Enum.map_join(folders, "\n", fn f ->
+            "#{if f.writable, do: "w", else: "r"} #{f.path}"
+          end)
+
+        {socket, (body == "" && "no extra folders for this session") || body}
+
+      {{:ok, session}, "add " <> rest} ->
+        {writable, path} =
+          case rest do
+            "-w " <> p -> {true, p}
+            p -> {false, p}
+          end
+
+        path = String.trim(path)
+
+        if path == "" do
+          {socket, "usage: /folders add [-w] <path>"}
+        else
+          folders = session_folders(socket.assigns.ctx, session)
+
+          next = [
+            %{path: Path.expand(path), writable: writable}
+            | Enum.reject(folders, &(&1.path == Path.expand(path)))
+          ]
+
+          DshBeam.Workspace.set_session_folders(workspace_pid!(socket.assigns.ctx), session, next)
+          {socket, "added #{if writable, do: "writable ", else: ""}#{path} to session folders"}
+        end
+
+      {{:ok, session}, "remove " <> path} ->
+        path = String.trim(path)
+        folders = session_folders(socket.assigns.ctx, session)
+        next = Enum.reject(folders, &(&1.path == path))
+        DshBeam.Workspace.set_session_folders(workspace_pid!(socket.assigns.ctx), session, next)
+        {socket, "removed #{path}"}
+
+      {{:ok, _session}, other} ->
+        {socket, "usage: /folders [add [-w] <path>|remove <path>] (got: #{other})"}
+
+      _ ->
+        {socket, "no active session"}
+    end
   end
 
   defp dispatch_command(socket, "clear", _args) do
@@ -1611,14 +1992,82 @@ defmodule DshBeamWeb.ConsoleLive do
         %{
           session: session,
           session_key: encode_id(session),
-          title: meta.title || inspect(session),
+          title: display_title(session, meta),
           cwd: meta.cwd,
-          current: session == current
+          repo: meta.repo,
+          current: session == current,
+          folders: Map.get(meta, :folders, [])
         }
       end)
       |> Enum.sort_by(& &1.title)
     else
       _ -> []
+    end
+  end
+
+  # Sessions grouped by their workspace folder (the repo root; an in-place
+  # session groups by its own cwd). Each group = one workspace row in the
+  # sidebar, with its own "+ new session".
+  defp workspace_groups(ctx) do
+    with {:ok, workspace} when is_pid(workspace) <- DshBeam.Context.get(ctx, :workspace),
+         sessions when is_map(sessions) <- safe_sessions(workspace) do
+      current =
+        case DshBeam.Context.get(ctx, :session) do
+          {:ok, session} when is_pid(session) -> session
+          _ -> nil
+        end
+
+      session_rows =
+        sessions
+        |> Enum.map(fn {session, meta} ->
+          %{
+            session: session,
+            session_key: encode_id(session),
+            title: display_title(session, meta),
+            cwd: meta.cwd,
+            repo: meta.repo || meta.cwd,
+            current: session == current,
+            folders: Map.get(meta, :folders, [])
+          }
+        end)
+        |> Enum.group_by(& &1.repo)
+
+      # Known workspaces (added via the + button) show as groups even before
+      # any session exists in them.
+      known =
+        case DshBeam.Workspace.known_workspaces(workspace) do
+          {:ok, paths} when is_list(paths) -> paths
+          _ -> []
+        end
+
+      known
+      |> Enum.reject(&Map.has_key?(session_rows, &1))
+      |> Enum.map(&%{repo: &1, name: Path.basename(&1), sessions: [], known: true})
+      |> Kernel.++(
+        Enum.map(session_rows, fn {repo, rows} ->
+          %{repo: repo, name: Path.basename(repo), sessions: Enum.sort_by(rows, & &1.title)}
+        end)
+      )
+      |> Enum.sort_by(& &1.name)
+    else
+      _ -> []
+    end
+  end
+
+  # A session shows its title when set (a worktree session defaults to the
+  # repo basename; the user can rename it); an unnamed/in-place session reads
+  # as "Session <pid number>" (e.g. "Session 8578").
+  defp display_title(session, meta) do
+    case meta[:title] do
+      t when is_binary(t) and t not in ["", "untitled session"] -> t
+      _ -> "Session " <> pid_number(session)
+    end
+  end
+
+  defp pid_number(session) do
+    case Regex.run(~r/#PID<0\.(\d+)\.0>/, inspect(session)) do
+      [_, num] -> num
+      _ -> "?"
     end
   end
 

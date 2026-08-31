@@ -92,12 +92,13 @@ defmodule DshBeam.WorkspaceTest do
     assert {:ok, session} = DshBeam.Workspace.open_session(workspace, repo)
 
     # the session owns its checkout: header.cwd is the worktree, which exists
-    # on disk with the repository's content checked out
+    # on disk with the repository's content checked out (title stays unset:
+    # the sidebar shows "Session <pid>" until the user renames it)
     %{cwd: cwd, title: title} = DshBeam.Session.header(session)
     assert is_binary(cwd)
     assert File.exists?(Path.join(cwd, "README.md"))
-    # the default title is the workspace folder name, not the internal branch
-    assert title =~ "dsh_ws_repo"
+    # no default title: the sidebar renders "Session <pid>" for it
+    assert is_nil(title)
 
     # a worktree-backed session pins itself with a live marker (boot-GC fence)
     assert File.exists?(Path.join([cwd, ".dsh", "live"]))

@@ -7,6 +7,13 @@ defmodule DshBeam.Tool.Fs do
   The root is the current session's worktree when one is present (each session
   owns its checkout); otherwise it is the entry config `:root` (default the
   current directory). Paths that escape the root are refused.
+
+  The current session's own extra folders (set via the composer folder+
+  button or the /folders command) extend the allowed roots with an explicit
+  allowlist (each with its own writable flag): reads resolve against every
+  allowed root, writes are refused on a read-only extra folder, and anything
+  outside the session root and the added folders is refused exactly as
+  before. Without any session folders the behaviour is unchanged.
   """
 
   use DshBeam.Plugin
@@ -14,7 +21,7 @@ defmodule DshBeam.Tool.Fs do
   need(:session)
 
   tool(:read_file,
-    description: "Read a file within the workspace",
+    description: "Read a file within the workspace (or an added workspace folder)",
     parameters: %{
       "type" => "object",
       "properties" => %{"path" => %{"type" => "string"}},
@@ -23,7 +30,7 @@ defmodule DshBeam.Tool.Fs do
   )
 
   tool(:write_file,
-    description: "Write a file within the workspace",
+    description: "Write a file within the workspace (or an added writable workspace folder)",
     parameters: %{
       "type" => "object",
       "properties" => %{
@@ -36,7 +43,7 @@ defmodule DshBeam.Tool.Fs do
 
   @impl DshBeam.Plugin
   def handle_dsh_tool_call(:read_file, %{"path" => path}, state) do
-    with {:ok, full} <- within_root(state, path) do
+    with {:ok, full} <- resolve_path(state, path, :read) do
       case File.read(full) do
         {:ok, content} -> {:ok, content}
         {:error, reason} -> {:error, inspect(reason)}
@@ -45,7 +52,7 @@ defmodule DshBeam.Tool.Fs do
   end
 
   def handle_dsh_tool_call(:write_file, %{"path" => path, "content" => content}, state) do
-    with {:ok, full} <- within_root(state, path) do
+    with {:ok, full} <- resolve_path(state, path, :write) do
       case File.write(full, content) do
         :ok -> {:ok, "wrote #{path}"}
         {:error, reason} -> {:error, inspect(reason)}
@@ -53,16 +60,45 @@ defmodule DshBeam.Tool.Fs do
     end
   end
 
-  defp within_root(state, path) do
+  # Resolve a tool path against the session root, then against every added
+  # workspace folder. Reads may target any allowed root; writes only roots
+  # flagged writable (a read-only extra folder refuses writes, the session
+  # root stays writable as before).
+  defp resolve_path(state, path, mode) do
     root = workspace_root(state)
-    full = Path.expand(path, root)
 
-    if full == root or String.starts_with?(full, root <> "/") do
-      {:ok, full}
-    else
-      {:error, :escapes_workspace}
+    cond do
+      within?(full = Path.expand(path, root), root) ->
+        {:ok, full}
+
+      true ->
+        case extra_folders(state) do
+          [] ->
+            {:error, :escapes_workspace}
+
+          folders ->
+            case allowed_extra(folders, Path.expand(path), mode) do
+              {:ok, full} -> {:ok, full}
+              {:error, reason} -> {:error, reason}
+              :error -> {:error, :escapes_workspace}
+            end
+        end
     end
   end
+
+  defp allowed_extra(folders, full, mode) do
+    Enum.find_value(folders, :error, fn %{path: base, writable: writable} ->
+      if within?(full, base) do
+        if mode == :write and not writable do
+          {:error, :readonly_folder}
+        else
+          {:ok, full}
+        end
+      end
+    end)
+  end
+
+  defp within?(full, base), do: full == base or String.starts_with?(full, base <> "/")
 
   # The session's worktree is the workspace root; fall back to the entry config
   # :root when no session (or no session cwd) is present.
@@ -70,6 +106,46 @@ defmodule DshBeam.Tool.Fs do
     case session_cwd(state) do
       cwd when is_binary(cwd) -> cwd
       _ -> state.config |> Keyword.get(:root, ".") |> Path.expand()
+    end
+  end
+
+  # The current session's own extra folders — the ONLY allowlist now: a
+  # session sees exactly its own folders (set via the composer folder+ button
+  # or the /folders command), not a global/workspace-wide set. [] without any.
+  defp extra_folders(state) do
+    case session_folders(state) do
+      {:ok, folders} when is_list(folders) -> folders
+      _ -> []
+    end
+  end
+
+  defp session_folders(state) do
+    case session_cwd(state) do
+      cwd when is_binary(cwd) ->
+        case DshBeam.Context.get(state.ctx, :workspace) do
+          {:ok, workspace} when is_pid(workspace) ->
+            case workspace_session(workspace, cwd) do
+              {:ok, session} -> DshBeam.Workspace.get_session_folders(workspace, session)
+              _ -> {:ok, []}
+            end
+
+          _ ->
+            {:ok, []}
+        end
+
+      _ ->
+        {:ok, []}
+    end
+  end
+
+  # Find the live session whose cwd matches (the fs tool's root is the
+  # session cwd, so the owning session is the one rooted there).
+  defp workspace_session(workspace, cwd) do
+    sessions = DshBeam.Workspace.all_sessions(workspace)
+
+    case Enum.find(sessions, fn {_s, meta} -> meta.cwd == cwd end) do
+      {session, _meta} -> {:ok, session}
+      nil -> :error
     end
   end
 

@@ -544,7 +544,10 @@ defmodule DshBeamWeb.Layouts do
           .ws-title { font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary); }
           .ws-cwd {
             font-size: 11px; color: var(--dsw-alias-label-secondary);
-            word-break: break-all; line-height: 15px;
+            /* one line: long worktree paths truncate with … and the full path
+               is available on hover via title — never wraps down the sidebar */
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            line-height: 15px; max-width: 100%;
           }
           .workspace-actions { display: flex; flex-direction: column; gap: 4px; }
 
@@ -838,6 +841,18 @@ defmodule DshBeamWeb.Layouts do
 
           // Auto-grows the composer textarea to fit its content (capped by CSS
           // max-height, after which it scrolls).
+          // Auto-grows the composer textarea to fit its content (capped by CSS
+          // max-height, after which it scrolls), and owns the Enter-to-send
+          // gesture: plain Enter submits the composer form (same as the send
+          // button — the form's phx-submit serializes the textarea's live
+          // value), Shift+Enter inserts a newline, and an Enter that confirms
+          // an IME composition (Korean/Japanese/etc.) never sends.
+          //
+          // IME handling mirrors the reference InputBar: composition is
+          // tracked with compositionstart/compositionend AND the native
+          // isComposing/keyCode-229 signals, because Safari delivers the
+          // closing keydown AFTER compositionend — a deferred clear (one
+          // macrotask) keeps that trailing Enter from leaking into a submit.
           let AutoGrow = {
             mounted() {
               this.grow = () => {
@@ -845,10 +860,48 @@ defmodule DshBeamWeb.Layouts do
                 this.el.style.height = this.el.scrollHeight + 'px';
               };
               this.el.addEventListener('input', this.grow);
+              this.composing = false;
+              this.onCompositionStart = () => { this.composing = true; };
+              this.onCompositionEnd = () => {
+                // Defer clearing: Safari's composition-closing keydown arrives
+                // after compositionend; holding the flag one tick keeps the
+                // confirming Enter from submitting.
+                setTimeout(() => { this.composing = false; }, 0);
+              };
+              this.el.addEventListener('compositionstart', this.onCompositionStart);
+              this.el.addEventListener('compositionend', this.onCompositionEnd);
+              this.onKeydown = (e) => {
+                // Shift+Enter is the native newline unconditionally — decided
+                // before the IME guard so a composition-closing Shift+Enter
+                // still breaks the line (reference InputBar order).
+                if (e.key === 'Enter' && e.shiftKey) return;
+                if (e.key !== 'Enter') return;
+                // keyCode 229 is the legacy IME-composition signal engines
+                // emit without isComposing.
+                if (this.composing || e.isComposing || e.keyCode === 229) return;
+                if (e.repeat) return; // held-down Enter must not machine-gun
+                if (this.el.disabled) return;
+                e.preventDefault();
+                const form = this.el.form;
+                if (form && typeof form.requestSubmit === 'function') {
+                  form.requestSubmit();
+                } else if (form) {
+                  // Older browsers: LiveView submits on the form's submit
+                  // event, which requestSubmit emits but submit() does not,
+                  // so fall back to the phx-submit target directly.
+                  form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+                }
+              };
+              this.el.addEventListener('keydown', this.onKeydown);
               this.grow();
             },
             updated() { this.grow(); },
-            destroyed() { this.el.removeEventListener('input', this.grow); }
+            destroyed() {
+              this.el.removeEventListener('input', this.grow);
+              this.el.removeEventListener('compositionstart', this.onCompositionStart);
+              this.el.removeEventListener('compositionend', this.onCompositionEnd);
+              this.el.removeEventListener('keydown', this.onKeydown);
+            }
           };
 
           // "Deep diving" elapsed-time clock: ticks client-side without a

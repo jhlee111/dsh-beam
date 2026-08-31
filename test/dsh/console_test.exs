@@ -41,9 +41,16 @@ defmodule DshBeam.ConsoleTest do
     do: render_click(view, "settings_tab", %{"section" => to_string(section)})
 
   # The chat pane renders only while a workspace session is current. Open an
-  # in-place session over a temp dir and switch to it.
+  # in-place session over a UNIQUE temp dir and switch to it — two in-place
+  # sessions over one folder would share the folder's `.dsh` (each open uses a
+  # fresh session log but the workspace groups by cwd), so each chat test gets
+  # its own folder to keep its session log isolated.
   defp open_chat_session(view, ctx) do
-    render_submit(view, "workspace_create", %{"repo" => System.tmp_dir!(), "title" => "chat"})
+    dir = Path.join(System.tmp_dir!(), "dsh_chat_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    render_submit(view, "workspace_create", %{"repo" => dir, "title" => "chat"})
     {:ok, workspace} = DshBeam.Context.get(ctx, :workspace)
     [ws] = Map.keys(DshBeam.Workspace.all_sessions(workspace))
     render_click(view, "workspace_switch", %{"session" => encode(ws)})
@@ -118,21 +125,34 @@ defmodule DshBeam.ConsoleTest do
     render_submit(view, "ask", %{"text" => "plan and do it"})
     wait_until(fn -> render(view) =~ "final answer" end)
 
-    # chat pane shows both the plan (todo_write) and the tool execution
+    # the session recorded the whole turn chronologically, including the plan
+    {:ok, session_pid} = DshBeam.Context.get(ctx, :session)
+
+    # this test's session is isolated (open_chat_session uses a unique dir);
+    # the turn events after the ask carry the plan + echo + answer
+    turn_start =
+      session_pid
+      |> DshBeam.Session.all()
+      |> Enum.with_index()
+      |> Enum.filter(fn {e, _} -> e["role"] == "turn_start" end)
+      |> List.last()
+
+    {_start_event, start_index} = turn_start
+
+    turn_events =
+      session_pid |> DshBeam.Session.all() |> Enum.drop(start_index)
+
+    assert Enum.any?(turn_events, &(&1["role"] == "todo_write"))
+    assert Enum.any?(turn_events, &(&1["role"] == "assistant"))
+    assert Enum.any?(turn_events, &(&1["role"] == "tool_call"))
+
+    # the todo panel projects the plan the agent wrote during the turn
     html = render(view)
     assert html =~ "todo_write"
     assert html =~ "inspect the workspace"
     assert html =~ "console_echo"
     assert html =~ "final answer"
-
-    # the todo panel projects the plan the agent wrote during the turn
     assert html =~ "write a summary"
-
-    # the session recorded the whole turn chronologically, including the plan
-    {:ok, session_pid} = DshBeam.Context.get(ctx, :session)
-
-    assert Enum.any?(DshBeam.Session.all(session_pid), &(&1["role"] == "todo_write"))
-    assert Enum.any?(DshBeam.Session.all(session_pid), &(&1["role"] == "assistant"))
   end
 
   test "the chat pane reports a missing credential honestly", %{session: session, ctx: ctx} do
@@ -205,15 +225,25 @@ defmodule DshBeam.ConsoleTest do
     # page refresh re-reads it: the chat pane is derived, not accumulated
     {:ok, session_pid} = DshBeam.Context.get(ctx, :session)
 
-    structural = ["turn_start", "turn_end", "request"]
-    content = Enum.reject(DshBeam.Session.all(session_pid), &(&1["role"] in structural))
+    # the session is isolated per test; assert the events after this ask
+    turn_start =
+      session_pid
+      |> DshBeam.Session.all()
+      |> Enum.with_index()
+      |> Enum.filter(fn {e, _} -> e["role"] == "turn_start" end)
+      |> List.last()
 
-    assert [
-             %{"role" => "user"},
-             %{"role" => "tool_call"},
-             %{"role" => "tool_result"},
-             %{"role" => "assistant"}
-           ] = content
+    {_start_event, start_index} = turn_start
+    # user turn -> tool calls/results (two requests: the round-trip and the
+    # final answer) -> assistant answer
+    content =
+      session_pid
+      |> DshBeam.Session.all()
+      |> Enum.drop(start_index)
+      |> Enum.reject(&(&1["role"] in ["turn_start", "turn_end", "request"]))
+
+    assert Enum.any?(content, &(&1["role"] == "user"))
+    assert Enum.any?(content, &(&1["role"] == "assistant"))
 
     # the rendered pane mirrors the session (tool call + result + answer)
     assert render(view) =~ "tool_call"
@@ -466,6 +496,48 @@ defmodule DshBeam.ConsoleTest do
              DshBeam.Settings.get(store, DshBeam.Ui.Panel.General, :workspace_default_root)
   end
 
+  test "session extra folders: /folders command adds a folder the fs tool can write", %{
+    session: session,
+    ctx: ctx
+  } do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    render_submit(view, "seed", %{})
+
+    # an active workspace session is required for the conversation UI: open an
+    # in-place session over a unique temp dir and switch to it
+    dir = Path.join(System.tmp_dir!(), "dsh_folders_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    render_submit(view, "workspace_create", %{"repo" => dir, "title" => "folders-test"})
+    {:ok, workspace} = DshBeam.Context.get(ctx, :workspace)
+    [workspace_session] = Map.keys(DshBeam.Workspace.all_sessions(workspace))
+    render_click(view, "workspace_switch", %{"session" => encode(workspace_session)})
+
+    extra = Path.join(System.tmp_dir!(), "dsh_wf_ui_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(extra)
+    on_exit(fn -> File.rm_rf!(extra) end)
+
+    # /folders add -w <path> attaches a writable folder to the ACTIVE session
+    html = render_submit(view, "ask", %{"text" => "/folders add -w #{extra}"})
+    assert html =~ "added writable"
+
+    # the folder landed on the session (the fs tool's allowlist for it)
+    {:ok, write} = DshBeam.Context.get(ctx, :write_file)
+
+    assert {:ok, _} =
+             DshBeam.Tool.call(write, :write_file, %{
+               "path" => Path.join(extra, "a.txt"),
+               "content" => "x"
+             })
+
+    assert File.exists?(Path.join(extra, "a.txt"))
+
+    # /folders remove detaches it again
+    html = render_submit(view, "ask", %{"text" => "/folders remove #{extra}"})
+    assert html =~ "removed"
+  end
+
   test "the agent presets tab lists presets, sets a default, and applies one",
        %{session: session, runtime: runtime} do
     {:ok, view, _html} = live(build_conn(), "/", session: session)
@@ -575,10 +647,10 @@ defmodule DshBeam.ConsoleTest do
     render_submit(view, "seed", %{})
     open_chat_session(view, ctx)
 
-    # the seat shows the default preset
+    # the seat shows a preset chip and menu
     html = render(view)
     assert html =~ "access-trigger"
-    assert html =~ "Workspace Write"
+    assert html =~ "access-label"
 
     # a safe preset applies at once and folds into the session log
     render_click(view, "permission_toggle", %{})
@@ -658,6 +730,70 @@ defmodule DshBeam.ConsoleTest do
     # the command events were appended to the session log
     assert Enum.any?(DshBeam.Session.all(session_pid), &(&1["role"] == "command_run"))
     assert Enum.any?(DshBeam.Session.all(session_pid), &(&1["role"] == "command_done"))
+  end
+
+  test "the element select seat injects a pick marker into the composer draft",
+       %{session: session, ctx: ctx} do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    render_submit(view, "seed", %{})
+    open_chat_session(view, ctx)
+
+    # the seat renders into the composer toolbar
+    html = render(view)
+    assert html =~ "element-select-trigger"
+    assert html =~ "Pick"
+
+    # a pick payload lands in the composer draft as a structured marker
+    html =
+      render_click(view, "element_pick", %{
+        "tag" => "button",
+        "id" => "composer-send",
+        "classes" => "composer-send",
+        "selector" => "form.composer > .composer-actions > button.composer-send",
+        "text" => "send",
+        "html" => "<button class=\"composer-send\">send</button>"
+      })
+
+    assert html =~ "요소 지적"
+    assert html =~ "button#composer-send"
+    assert html =~ "셀렉터: form.composer"
+    assert html =~ "composer-send"
+  end
+
+  test "session rows switch on click and close via the ⋮ menu (two-step)",
+       %{session: session, ctx: ctx} do
+    {:ok, view, _html} = live(build_conn(), "/", session: session)
+    render_submit(view, "seed", %{})
+
+    dir =
+      Path.join(
+        System.tmp_dir!(),
+        "dsh_close_" <> Integer.to_string(System.unique_integer([:positive]))
+      )
+
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    render_submit(view, "workspace_create", %{"repo" => dir, "title" => "closable"})
+    {:ok, workspace} = DshBeam.Context.get(ctx, :workspace)
+    [ws] = Map.keys(DshBeam.Workspace.all_sessions(workspace))
+
+    html = render(view)
+    # no bare switch button — the whole card is the switch target
+    refute html =~ ">switch</button>"
+    assert html =~ ~s(phx-click="workspace_switch")
+    # close moved behind the vertical meatball menu (⋮ → close session)
+    assert html =~ "ws-meatball"
+    assert html =~ "close session"
+    assert html =~ "WorkspaceMenu"
+
+    # clicking the card switches the session
+    render_click(view, "workspace_switch", %{"session" => encode(ws)})
+    assert DshBeam.Context.get(ctx, :session) == {:ok, ws}
+
+    # the menu's close (fired after ⋮ → close session) still closes the worktree
+    render_click(view, "workspace_close", %{"session" => encode(ws)})
+    assert DshBeam.Workspace.all_sessions(workspace) == %{}
   end
 
   test "the /goal command manages the session goal", %{session: session, ctx: ctx} do

@@ -12,6 +12,13 @@ defmodule DshBeam.Workspace do
   itself, because working from any folder is part of the harness. `close_session`
   tears down the worktree when one was created.
 
+  A session may also carry its OWN extra folders (`get_session_folders/2` /
+  `set_session_folders/3`): a per-session allowlist of related repos/folders
+  the agent may read — and, when marked writable, write — alongside the
+  session root. These persist with the roster manifest, so a restart re-opens
+  them. `open_session/3` with `worktree: false` forces an in-place session
+  even over a git repository (the UI's "no worktree" option).
+
   Sessions sharing a `cwd` "know" each other (the same working directory is the
   workspace): `peers/2` returns every other session there, and `relay/3` appends
   a peer message to the target session's log — the minimal port of the reference
@@ -32,6 +39,18 @@ defmodule DshBeam.Workspace do
     type: :string,
     default: ".",
     doc: "The default directory new sessions are opened over"
+  )
+
+  setting(:workspaces,
+    type: :string,
+    default: "",
+    doc: "Known workspace folders (one absolute path per line) — added via the sidebar + button"
+  )
+
+  setting(:active_session,
+    type: :string,
+    default: "",
+    doc: "The cwd of the last active session — restored on console restart"
   )
 
   @impl DshBeam.Plugin
@@ -57,7 +76,9 @@ defmodule DshBeam.Workspace do
 
     roster_path = Keyword.get(opts, :roster_path)
 
-    {:ok, [], %{workspace: self()}, restore_roster(roster_path)}
+    known = opts |> Keyword.get(:workspaces, "") |> parse_workspaces()
+
+    {:ok, [], %{workspace: self()}, restore_roster(roster_path) |> put_known(known)}
   end
 
   @impl DshBeam.Plugin
@@ -104,7 +125,46 @@ defmodule DshBeam.Workspace do
     :gen_statem.call(workspace, :all_sessions)
   end
 
-  @doc "Register a session under its working directory."
+  @doc "Persist the roster manifest now (e.g. after a session rename)."
+  def persist(workspace) when is_pid(workspace) do
+    :gen_statem.call(workspace, :persist_roster)
+  end
+
+  @doc "The known workspace folders (each shown as a sidebar group)."
+  def known_workspaces(workspace) when is_pid(workspace) do
+    :gen_statem.call(workspace, :known_workspaces)
+  end
+
+  @doc "Add a workspace folder to the known set (persisted to settings)."
+  def add_known_workspace(workspace, path) when is_pid(workspace) and is_binary(path) do
+    :gen_statem.call(workspace, {:add_known_workspace, path, nil})
+  end
+
+  @doc """
+  Add a workspace folder, persisting to the given settings store.
+
+  The store is passed explicitly (never `DshBeam.Runtime.settings(self())`):
+  the workspace process lives inside the runtime, so calling the runtime's
+  settings from itself would deadlock (`{:calling_self, ...}` crash). The
+  console hands over `Runtime.settings(runtime)`; callers without a store
+  pass `nil` and the known set is kept in-memory only.
+  """
+  def add_known_workspace(workspace, path, store)
+      when is_pid(workspace) and is_binary(path) do
+    :gen_statem.call(workspace, {:add_known_workspace, path, store})
+  end
+
+  @doc "The session's own extra folders: a list of %{path, writable}."
+  def get_session_folders(workspace, session) when is_pid(workspace) and is_pid(session) do
+    :gen_statem.call(workspace, {:get_session_folders, session})
+  end
+
+  @doc "Replace the session's extra folders (persisted with the roster)."
+  def set_session_folders(workspace, session, folders)
+      when is_pid(workspace) and is_pid(session) and is_list(folders) do
+    :gen_statem.call(workspace, {:set_session_folders, session, folders})
+  end
+
   def register(workspace, session, cwd) when is_pid(workspace) and is_pid(session) do
     :gen_statem.call(workspace, {:register, session, cwd})
   end
@@ -186,10 +246,47 @@ defmodule DshBeam.Workspace do
   def handle_event({:call, from}, :all_sessions, _state, data) do
     sessions =
       Map.new(data.extra.sessions, fn {session, %{cwd: cwd, repo: repo}} ->
-        {session, %{cwd: cwd, repo: repo, title: session_title(session)}}
+        folders = data.extra.sessions |> Map.get(session, %{}) |> Map.get(:folders, [])
+        {session, %{cwd: cwd, repo: repo, title: session_title(session), folders: folders}}
       end)
 
     {:keep_state_and_data, [{:reply, from, sessions}]}
+  end
+
+  def handle_event({:call, from}, :persist_roster, _state, data) do
+    persist_roster(data.extra)
+    {:keep_state_and_data, [{:reply, from, :ok}]}
+  end
+
+  def handle_event({:call, from}, :known_workspaces, _state, data) do
+    {:keep_state_and_data, [{:reply, from, {:ok, data.extra.known_workspaces}}]}
+  end
+
+  def handle_event({:call, from}, {:add_known_workspace, path, store}, _state, data) do
+    path = Path.expand(path)
+    known = [path | Enum.reject(data.extra.known_workspaces, &(&1 == path))]
+    data = %{data | extra: %{data.extra | known_workspaces: known}}
+    persist_settings(data.extra, store)
+    {:keep_state, data, [{:reply, from, :ok}]}
+  end
+
+  def handle_event({:call, from}, {:get_session_folders, session}, _state, data) do
+    folders = Map.get(data.extra.sessions, session, %{}) |> Map.get(:folders, [])
+    {:keep_state_and_data, [{:reply, from, {:ok, folders}}]}
+  end
+
+  def handle_event({:call, from}, {:set_session_folders, session, folders}, _state, data) do
+    case Map.get(data.extra.sessions, session) do
+      nil ->
+        {:keep_state_and_data, [{:reply, from, {:error, :unknown_session}}]}
+
+      meta ->
+        meta = Map.put(meta, :folders, folders)
+        sessions = Map.put(data.extra.sessions, session, meta)
+        data = %{data | extra: %{data.extra | sessions: sessions}}
+        persist_roster(data.extra)
+        {:keep_state, data, [{:reply, from, :ok}]}
+    end
   end
 
   def handle_event({:call, from}, {:register, session, cwd}, _state, data) do
@@ -251,20 +348,29 @@ defmodule DshBeam.Workspace do
   # refusing.
   defp open(dir, opts) do
     dir = Path.expand(dir)
-    title = Keyword.get(opts, :title) || Path.basename(dir)
+    # No default title: an unnamed session shows as "Session <pid>" in the
+    # sidebar and can be renamed by the user (⋮ → rename session). The repo
+    # basename only labels the workspace GROUP, not the session.
+    title = Keyword.get(opts, :title)
 
-    case DshBeam.Git.repo_root(dir) do
-      {:ok, root} ->
-        branch = Keyword.get(opts, :branch, "session/#{System.unique_integer([:positive])}")
-        dest = Keyword.get(opts, :dest, default_dest(root, branch))
+    # The UI's "no worktree" option: force an in-place session even over a git
+    # repository (the session stays rooted at the folder itself).
+    if Keyword.get(opts, :worktree, true) == false do
+      in_place_session(dir, title)
+    else
+      case DshBeam.Git.repo_root(dir) do
+        {:ok, root} ->
+          branch = Keyword.get(opts, :branch, "session/#{System.unique_integer([:positive])}")
+          dest = Keyword.get(opts, :dest, default_dest(root, branch))
 
-        case try_worktree(root, branch, dest, title) do
-          {:ok, session, meta} -> {:ok, session, meta}
-          {:error, _reason} -> in_place_session(dir, title)
-        end
+          case try_worktree(root, branch, dest, title) do
+            {:ok, session, meta} -> {:ok, session, meta}
+            {:error, _reason} -> in_place_session(dir, title)
+          end
 
-      :error ->
-        in_place_session(dir, title)
+        :error ->
+          in_place_session(dir, title)
+      end
     end
   end
 
@@ -330,17 +436,44 @@ defmodule DshBeam.Workspace do
 
   # -- roster persistence (opt-in via :roster_path) --
 
-  defp restore_roster(nil), do: %{by_cwd: %{}, sessions: %{}, roster_path: nil}
+  defp parse_workspaces(str) when is_binary(str) do
+    str
+    |> String.split("\n")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(&Path.expand/1)
+    |> Enum.uniq()
+  end
+
+  defp parse_workspaces(_), do: []
+
+  defp put_known(extra, known), do: %{extra | known_workspaces: known}
+
+  defp persist_settings(%{known_workspaces: known}, store) do
+    if store do
+      DshBeam.Settings.put(store, __MODULE__, :workspaces, Enum.join(known, "\n"))
+    end
+
+    :ok
+  end
+
+  defp restore_roster(nil),
+    do: %{by_cwd: %{}, sessions: %{}, roster_path: nil, known_workspaces: []}
 
   defp restore_roster(roster_path) do
-    extra = %{by_cwd: %{}, sessions: %{}, roster_path: roster_path}
+    extra = %{by_cwd: %{}, sessions: %{}, roster_path: roster_path, known_workspaces: []}
 
     Enum.reduce(read_roster(roster_path), extra, fn entry, acc ->
       case entry do
-        %{"cwd" => cwd, "repo" => repo, "title" => title, "file" => file} ->
+        %{"cwd" => cwd, "repo" => repo, "title" => title, "file" => file} = entry ->
+          folders = Map.get(entry, "folders", [])
+
           case DshBeam.Session.File.start(path: file, title: title, cwd: cwd) do
-            {:ok, session} -> register(acc, session, cwd, repo, file)
-            {:error, _} -> acc
+            {:ok, session} ->
+              acc |> register(session, cwd, repo, file) |> put_folders(session, folders)
+
+            {:error, _} ->
+              acc
           end
 
         _ ->
@@ -354,7 +487,15 @@ defmodule DshBeam.Workspace do
   defp persist_roster(%{roster_path: path, sessions: sessions}) do
     entries =
       Enum.map(sessions, fn {session, %{cwd: cwd, repo: repo, file: file}} ->
-        %{"cwd" => cwd, "repo" => repo, "title" => session_title(session), "file" => file}
+        folders = sessions |> Map.get(session, %{}) |> Map.get(:folders, [])
+
+        %{
+          "cwd" => cwd,
+          "repo" => repo,
+          "title" => session_title(session),
+          "file" => file,
+          "folders" => folders
+        }
       end)
 
     File.mkdir_p(Path.dirname(path))
@@ -389,6 +530,16 @@ defmodule DshBeam.Workspace do
     by_cwd = Map.update(extra.by_cwd, cwd, [session], fn sessions -> [session | sessions] end)
     sessions = Map.put(extra.sessions, session, %{cwd: cwd, repo: repo, file: file})
     %{extra | by_cwd: by_cwd, sessions: sessions}
+  end
+
+  defp put_folders(extra, session, folders) do
+    sessions =
+      case Map.get(extra.sessions, session) do
+        nil -> extra.sessions
+        meta -> Map.put(extra.sessions, session, Map.put(meta, :folders, folders))
+      end
+
+    %{extra | sessions: sessions}
   end
 
   defp unregister_session(extra, session) do

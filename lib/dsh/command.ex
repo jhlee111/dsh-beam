@@ -26,7 +26,11 @@ defmodule DshBeam.Command do
       hint: "<objective|edit <objective>|pause|resume|clear>"
     },
     "clear" => %{description: "Clear the conversation", hint: ""},
-    "help" => %{description: "List available commands", hint: ""}
+    "help" => %{description: "List available commands", hint: ""},
+    "folders" => %{
+      description: "Manage this session's extra folders",
+      hint: "[add [-w] <path>|remove <path>]"
+    }
   }
 
   @typedoc "One command descriptor (name-keyed)."
@@ -40,7 +44,7 @@ defmodule DshBeam.Command do
   def catalog, do: @catalog
 
   # Declaration order is the menu order (like the permission preset order).
-  @names ["permission", "model", "goal", "clear", "help"]
+  @names ["permission", "model", "goal", "clear", "help", "folders"]
 
   @doc "The command names, in declaration (menu) order."
   @spec names() :: [String.t()]

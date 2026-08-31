@@ -91,6 +91,11 @@ defmodule DshBeam.Console do
 
   # Start an unlinked subtree, waiting out a previous instance that is still
   # shutting down (its name is still registered while it dies).
+  #
+  # A listen error (`:eaddrinuse`) is NOT retried: another console already
+  # owns the port and will not die from a 500ms wait, so retrying would just
+  # spam the log. We surface it once with a clear message instead of raising
+  # the generic "web subtree start failed after retries".
   defp start_unlinked(start_fun, retries \\ 5)
 
   defp start_unlinked(_start_fun, 0) do
@@ -113,7 +118,29 @@ defmodule DshBeam.Console do
         end
 
         start_unlinked(start_fun, retries - 1)
+
+      {:error, reason} ->
+        if port_in_use?(reason) do
+          raise """
+          failed to listen on 127.0.0.1:#{port()}: :eaddrinuse (address already in use)
+
+          Another console is already serving this port. Either stop it first
+          (./dsh-console.sh stop) or pick another port (DSH_BEAM_PORT=5000
+          ./dsh-console.sh). A watchdog-managed console is running under
+          .dsh/console.pid — use ./dsh-console.sh logs to follow it.
+          """
+        else
+          raise "web subtree start failed: #{inspect(reason)}"
+        end
     end
+  end
+
+  # Ranch wraps the listen error variously: {:listen_error, :eaddrinuse} or a
+  # {:shutdown, {:failed_to_start_child, ..., {:listen_error, ..., :eaddrinuse}}}
+  # nest. Treat any :eaddrinuse in the error as "port already in use" so the
+  # console reports it clearly instead of crashing with a CaseClauseError.
+  defp port_in_use?(reason) do
+    inspect(reason) =~ "eaddrinuse"
   end
 
   @impl true

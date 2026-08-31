@@ -2,6 +2,58 @@
 
 ## Unreleased
 
+### ElementSelect — creator-plugin feedback (Pick seat)
+
+- The composer toolbar now has a **Pick** seat (`DshBeam.Ui.Panel.ElementSelect`,
+  order 15): click it, then click any element of the console. The pick collects
+  the element's CSS selector, visible text, HTML snippet **and owning-region
+  context** (slot, plugin module, source file — from a `data-dsh-region` marker
+  `DshBeam.Ui.render_slot/3` now wraps every contribution in) and injects a
+  structured `[요소 지적]` marker into the composer draft, so a follow-up edit
+  request reaches the agent with its own source pointer.
+- All interactive JS ships as `data-phx-runtime-hook` runtime hooks inside the
+  plugin's own markup — no edits to the shell's static hooks map.
+- The plugin's `prompt_section` teaches the agent how to resolve a marker to
+  source and apply edits live with `define_plugin` / `redefine_plugin`.
+- A reusable saved-plugin form ships as `plugins/dsh_ui_element_select.exs`.
+
+### Workspace session UX (row switch + ⋮ close)
+
+- The workspace sidebar's session rows are now themselves the switch control:
+  clicking a non-current card switches to that session (no separate button).
+- Closing a session is a deliberate two-step path behind a vertical meatball
+  (⋮), revealed on hover: **⋮ → close session** fires the unchanged
+  `workspace_close` event. The menu closes on outside click / Escape / any
+  re-render.
+
+
+### Tools are a first-class capability namespace
+
+- Tool providers are no longer coeffect `bindings`: a plugin's `tool` names are
+  registered by the fiber's `init` into a dedicated tool-provider map, so
+  overriding `mount/2` can never drop or shadow a tool, and a tool name can
+  coexist with a same-named data binding. The agent loop resolves providers via
+  the new `DshBeam.Context.tool/2` instead of `Context.get/2`, which stays
+  strictly for data. `DshBeam.WorkspaceFolders` now binds its folder list as
+  `:extra_folders` (data) while keeping the `workspace_folders` tool name —
+  fixing a `FunctionClauseError` where the tool provider was shadowed by the
+  folder list.
+
+### Extra workspace folders
+
+- The workspace sidebar now has an **extra folders** seat: add a few related
+  folders (not the whole disk) the agent may reach alongside the session
+  worktree. Each folder is an explicit absolute path with its own writable
+  flag (read-only refuses writes), and the list is persisted as a typed
+  setting on the new `DshBeam.WorkspaceFolders` plugin, so it survives a
+  restart.
+- `DshBeam.Tool.Fs` resolves `read_file`/`write_file` against the session
+  root plus every added folder: reads work on any allowed root, writes are
+  refused on a read-only extra folder, and anything outside the roots is
+  refused exactly as before (no plugin configured means unchanged behaviour).
+- `DshBeam.WorkspaceFolders` also exposes a `workspace_folders` tool so the
+  agent loop can list the folders it is allowed to touch.
+
 ### Chat watchdog
 
 - The chat pane now runs a turn-scoped watchdog: if the agent loop fiber hangs
