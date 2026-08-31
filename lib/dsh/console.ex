@@ -119,15 +119,19 @@ defmodule DshBeam.Console do
 
         start_unlinked(start_fun, retries - 1)
 
-      {:error, reason} when port_in_use?(reason) ->
-        raise """
-        failed to listen on 127.0.0.1:#{port()}: :eaddrinuse (address already in use)
+      {:error, reason} ->
+        if port_in_use?(reason) do
+          raise """
+          failed to listen on 127.0.0.1:#{port()}: :eaddrinuse (address already in use)
 
-        Another console is already serving this port. Either stop it first
-        (./dsh-console.sh stop) or pick another port (DSH_BEAM_PORT=5000
-        ./dsh-console.sh). A watchdog-managed console is running under
-        .dsh/console.pid — use ./dsh-console.sh logs to follow it.
-        """
+          Another console is already serving this port. Either stop it first
+          (./dsh-console.sh stop) or pick another port (DSH_BEAM_PORT=5000
+          ./dsh-console.sh). A watchdog-managed console is running under
+          .dsh/console.pid — use ./dsh-console.sh logs to follow it.
+          """
+        else
+          raise "web subtree start failed: #{inspect(reason)}"
+        end
     end
   end
 
