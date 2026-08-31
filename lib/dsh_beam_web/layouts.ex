@@ -544,7 +544,10 @@ defmodule DshBeamWeb.Layouts do
           .ws-title { font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary); }
           .ws-cwd {
             font-size: 11px; color: var(--dsw-alias-label-secondary);
-            word-break: break-all; line-height: 15px;
+            /* one line: long worktree paths truncate with … and the full path
+               is available on hover via title — never wraps down the sidebar */
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            line-height: 15px; max-width: 100%;
           }
           .workspace-actions { display: flex; flex-direction: column; gap: 4px; }
 
